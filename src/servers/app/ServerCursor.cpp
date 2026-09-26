@@ -47,7 +47,8 @@ ServerCursor::ServerCursor(BRect r, color_space format, int32 flags,
 	fHotSpot(hotspot),
 	fOwningTeam(-1),
 	fCursorData(NULL),
-	fManager(NULL)
+	fManager(NULL),
+	fPixelScale(1)
 {
 	fHotSpot.ConstrainTo(Bounds());
 	AllocateBuffer();
@@ -64,7 +65,8 @@ ServerCursor::ServerCursor(const uint8* data)
 	fHotSpot(0, 0),
 	fOwningTeam(-1),
 	fCursorData(NULL),
-	fManager(NULL)
+	fManager(NULL),
+	fPixelScale(1)
 {
 	// 68-byte array used in BeOS for holding cursors.
 	// This API has serious problems and should be deprecated (but supported)
@@ -131,7 +133,8 @@ ServerCursor::ServerCursor(const uint8* alreadyPaddedData, uint32 width,
 	fHotSpot(0, 0),
 	fOwningTeam(-1),
 	fCursorData(NULL),
-	fManager(NULL)
+	fManager(NULL),
+	fPixelScale(1)
 {
 	AllocateBuffer();
 	if (Bits())
@@ -148,7 +151,8 @@ ServerCursor::ServerCursor(const ServerCursor* cursor)
 	fHotSpot(0, 0),
 	fOwningTeam(-1),
 	fCursorData(NULL),
-	fManager(NULL)
+	fManager(NULL),
+	fPixelScale(1)
 {
 	// TODO: Hm. I don't move this into the if clause,
 	// because it might break code elsewhere.

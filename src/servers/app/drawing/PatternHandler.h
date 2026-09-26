@@ -12,6 +12,8 @@
 #include <stdio.h>
 #include <string.h>
 
+#include <math.h>
+
 #include <GraphicsDefs.h>
 
 class BPoint;
@@ -130,6 +132,8 @@ class PatternHandler {
 									{ return fPattern; }
 
 			void				SetOffsets(int32 x, int32 y);
+			void				SetScale(float scale)
+									{ fScale = scale < 1 ? 1 : scale; }
 
  private:
 			Pattern				fPattern;
@@ -138,6 +142,8 @@ class PatternHandler {
 
 			uint16				fXOffset;
 			uint16				fYOffset;
+			float				fScale;
+									// buffer pixels per pattern pixel
 };
 
 /*!
@@ -161,6 +167,11 @@ PatternHandler::ColorAt(int x, int y) const
 inline bool
 PatternHandler::IsHighColor(int x, int y) const
 {
+	// x and y are buffer pixels; the pattern is in logical ones
+	if (fScale != 1) {
+		x = (int)floorf(x / fScale);
+		y = (int)floorf(y / fScale);
+	}
 	x -= fXOffset;
 	y -= fYOffset;
 	const int8* ptr = fPattern.GetInt8();

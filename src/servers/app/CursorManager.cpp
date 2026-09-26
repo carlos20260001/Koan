@@ -34,6 +34,7 @@ CursorManager::CursorManager()
 	:
 	BLocker("CursorManager")
 {
+	fPixelScale = 1.0f;
 }
 
 
@@ -44,10 +45,15 @@ CursorManager::~CursorManager()
 
 
 void
-CursorManager::InitializeCursors(float scale)
+CursorManager::InitializeCursors(float scale, float pixelScale)
 {
 	if (scale < 1.0)
 		scale = 1.0;
+	if (pixelScale < 1.0f)
+		pixelScale = 1.0f;
+	fPixelScale = pixelScale;
+	// the cursors are vectors: rendering them larger keeps them sharp
+	scale *= pixelScale;
 
 	const BPoint kHandHotspot(1, 1);
 	const BPoint kResizeHotspot(8, 8);
@@ -487,6 +493,7 @@ CursorManager::_InitCursor(ServerCursor*& cursorMember, BCursorID id,
 	}
 
 	cursorMember->SetHotSpot(scaledHotspot);
+	cursorMember->SetPixelScale(fPixelScale);
 	AddCursor(cursorMember, id);
 }
 

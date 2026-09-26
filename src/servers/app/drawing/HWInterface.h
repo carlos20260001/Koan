@@ -121,14 +121,29 @@ public:
 	// has one output covering the whole frame buffer.
 	virtual	bool				HasDisplayLayout() const { return false; }
 
-	// Software scaling, for hardware that cannot scale its output: drawing
-	// happens at the logical size, and the copy to the front buffer
-	// enlarges it. 100 is off.
+	// Two sizes: the logical one windows and the cursor are measured in,
+	// and the buffers', which is the logical one times the render scale
+	// (in percent; 200 for a HiDPI screen, 150 for one at 150 percent).
+	// Drawing happens at that density straight into the back buffer, which
+	// has the front buffer's size. The software scale is a leftover for
+	// hardware that cannot scale and draws smaller than its frame buffer:
+	// then the back buffer is the logical size times the render scale and
+	// the copy to the front enlarges it.
 			uint16				SoftwareScale() const
 									{ return fSoftwareScale; }
 	virtual	status_t			SetSoftwareScale(uint16 percent);
+			uint16				RenderScale() const
+									{ return fRenderScale; }
+			float				RenderScaleFactor() const
+									{ return fRenderScale / 100.0f; }
+	virtual	status_t			SetRenderScale(uint16 percent);
+			void				SetLogicalSize(int32 width, int32 height);
+									// what the layout says; 0 derives it
+									// from the front buffer
 			int32				LogicalWidth() const;
 			int32				LogicalHeight() const;
+			int32				BackBufferWidth() const;
+			int32				BackBufferHeight() const;
 	virtual	status_t			GetDisplayOutputs(display_output** _outputs,
 									uint32* _count);
 									// the array is malloc()ed
@@ -257,6 +272,7 @@ protected:
 									int32 y, int32 right, int32 bottom) const;
 
 			IntRect				_CursorFrame() const;
+			ServerCursor*		_CursorAtRenderScale(ServerCursor* cursor);
 			void				_RestoreCursorArea() const;
 			void				_AdoptDragBitmap();
 
@@ -304,7 +320,11 @@ protected:
 	mutable	BLocker				fFloatingOverlaysLock;
 
 			ServerCursorReference
+								fSourceCursor;
+									// as set, at whatever density
+			ServerCursorReference
 								fCursor;
+									// at the buffer's density
 			BReference<ServerBitmap>
 								fDragBitmap;
 			BPoint				fDragBitmapOffset;
@@ -312,6 +332,9 @@ protected:
 								fCursorAndDragBitmap;
 			bool				fCursorVisible;
 			uint16				fSoftwareScale;
+			uint16				fRenderScale;
+			int32				fLogicalWidth;
+			int32				fLogicalHeight;
 			bool				fCursorObscured;
 			bool				fHardwareCursorEnabled;
 			BPoint				fCursorLocation;

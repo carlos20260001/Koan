@@ -521,6 +521,7 @@ Desktop::Desktop(uid_t userID, const char* targetScreen)
 	fScreenChangeWakeup(-1),
 	fScreenChangeStoreDeferred(false)
 {
+	fCursorRenderScale = 100;
 	memset(fLastWorkspaceFocus, 0, sizeof(fLastWorkspaceFocus));
 	memset(&fScreenChangeSnapshot, 0, sizeof(fScreenChangeSnapshot));
 	input_grab_init(&fInputGrabs);
@@ -672,11 +673,12 @@ Desktop::Init()
 		_UpdateDisplays();
 		_RememberScreenMode(fVirtualScreen.ScreenAt(0));
 
-		// Hardware that cannot arrange monitors can still be scaled, by
-		// drawing smaller and enlarging the result.
+		// Hardware that cannot arrange monitors can still be scaled: the
+		// frame buffer stays the monitor's, and everything is drawn into
+		// it at the scale.
 		if (!HWInterface()->HasDisplayLayout()) {
 			uint16 scale = fDisplays.SavedScale(*fSettings->DisplaysMessage());
-			if (scale != 100 && HWInterface()->SetSoftwareScale(scale) == B_OK) {
+			if (scale != 100 && HWInterface()->SetRenderScale(scale) == B_OK) {
 				fVirtualScreen.UpdateFrame();
 				_UpdateDisplays();
 			}
@@ -760,7 +762,8 @@ Desktop::Init()
 	}
 #endif
 
-	fCursorManager.InitializeCursors(fSettings->DefaultBoldFont().Size() / 12.0f);
+	fCursorManager.InitializeCursors(fSettings->DefaultBoldFont().Size() / 12.0f,
+		HWInterface() != NULL ? HWInterface()->RenderScaleFactor() : 1.0f);
 
 	fVirtualScreen.HWInterface()->MoveCursorTo(
 		fVirtualScreen.Frame().Width() / 2,
@@ -2396,7 +2399,8 @@ Desktop::FontsChanged(Window* window)
 
 	RebuildAndRedrawAfterWindowChange(window, dirty);
 
-	fCursorManager.InitializeCursors(fSettings->DefaultBoldFont().Size() / 12.0f);
+	fCursorManager.InitializeCursors(fSettings->DefaultBoldFont().Size() / 12.0f,
+		HWInterface() != NULL ? HWInterface()->RenderScaleFactor() : 1.0f);
 }
 
 
@@ -4508,8 +4512,30 @@ Desktop::ScreenChanged(Screen* screen)
 
 	_MoveWindowsWithDisplays(before, after);
 	_ScreenChanged(screen);
+	_UpdateCursorDensity();
 
 	_ResumeDirectFrameBufferAccess();
+}
+
+
+/*!	The system cursors are rendered for the screen's pixel density; when it
+	changes they are rendered again. The window lock must be held.
+*/
+void
+Desktop::_UpdateCursorDensity()
+{
+	if (HWInterface() == NULL)
+		return;
+	int32 renderScale = HWInterface()->RenderScale();
+	if (renderScale == fCursorRenderScale)
+		return;
+	fCursorRenderScale = renderScale;
+	fCursorManager.InitializeCursors(
+		fSettings->DefaultBoldFont().Size() / 12.0f,
+		HWInterface()->RenderScaleFactor());
+	ServerCursor* cursor = fCursorManager.GetCursor(B_CURSOR_ID_SYSTEM_DEFAULT);
+	if (cursor != NULL)
+		HWInterface()->SetCursor(cursor);
 }
 
 
@@ -4703,8 +4729,8 @@ Desktop::_UpdateDisplays()
 	// classic mode that drives one monitor with the whole frame buffer.
 	monitor_info info;
 	bool hasInfo = screen->GetMonitorInfo(info) == B_OK;
-	fDisplays.SetSingle(screen->Frame(), interface->SoftwareScale(),
-		hasInfo ? &info : NULL);
+	fDisplays.SetSingle(screen->Frame(), interface->HasDisplayLayout()
+			? 100 : interface->RenderScale(), hasInfo ? &info : NULL);
 }
 
 
@@ -4900,7 +4926,7 @@ Desktop::SetDisplayLayout(const BMessage& request)
 			// change.
 			const DisplayInfo* display = layout.DisplayAt(0);
 			status = display != NULL
-				? HWInterface()->SetSoftwareScale(display->scale)
+				? HWInterface()->SetRenderScale(display->scale)
 				: B_BAD_VALUE;
 			if (status == B_OK) {
 				fVirtualScreen.UpdateFrame();
@@ -4926,6 +4952,7 @@ Desktop::SetDisplayLayout(const BMessage& request)
 	if (status == B_OK) {
 		_MoveWindowsWithDisplays(before, after);
 		_ScreenChanged(screen);
+		_UpdateCursorDensity();
 	}
 
 	_ResumeDirectFrameBufferAccess();

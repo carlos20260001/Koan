@@ -52,6 +52,12 @@ public:
 			const uint8*		CursorData() const
 									{ return fCursorData; }
 
+			// pixels per logical pixel this cursor was made for
+			void				SetPixelScale(float scale)
+									{ fPixelScale = scale; }
+			float				PixelScale() const
+									{ return fPixelScale; }
+
 private:
 	friend class CursorManager;
 
@@ -59,6 +65,7 @@ private:
 			team_id				fOwningTeam;
 			uint8*				fCursorData;
 			CursorManager*		fManager;
+			float				fPixelScale;
 };
 
 

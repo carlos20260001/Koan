@@ -30,7 +30,8 @@ PatternHandler::PatternHandler(void)
 	  fHighColor(kBlack),
 	  fLowColor(kWhite),
 	  fXOffset(0),
-	  fYOffset(0)
+	  fYOffset(0),
+	  fScale(1)
 {
 }
 
@@ -46,7 +47,8 @@ PatternHandler::PatternHandler(const int8* pat)
 	  fHighColor(kBlack),
 	  fLowColor(kWhite),
 	  fXOffset(0),
-	  fYOffset(0)
+	  fYOffset(0),
+	  fScale(1)
 {
 }
 
@@ -62,7 +64,8 @@ PatternHandler::PatternHandler(const uint64& pat)
 	  fHighColor(kBlack),
 	  fLowColor(kWhite),
 	  fXOffset(0),
-	  fYOffset(0)
+	  fYOffset(0),
+	  fScale(1)
 {
 }
 
@@ -78,7 +81,8 @@ PatternHandler::PatternHandler(const Pattern& pat)
 	  fHighColor(kBlack),
 	  fLowColor(kWhite),
 	  fXOffset(0),
-	  fYOffset(0)
+	  fYOffset(0),
+	  fScale(1)
 {
 }
 
@@ -93,7 +97,8 @@ PatternHandler::PatternHandler(const PatternHandler& other)
 	  fHighColor(other.fHighColor),
 	  fLowColor(other.fLowColor),
 	  fXOffset(other.fXOffset),
-	  fYOffset(other.fYOffset)
+	  fYOffset(other.fYOffset),
+	  fScale(other.fScale)
 {
 }
 

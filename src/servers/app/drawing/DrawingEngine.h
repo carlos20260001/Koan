@@ -48,6 +48,8 @@ public:
 	virtual	void			SetCopyToFrontEnabled(bool enable);
 			bool			CopyToFrontEnabled() const
 								{ return fCopyToFront; }
+			float			RenderScale() const;
+								// buffer pixels per logical pixel
 	virtual	void			CopyToFront(/*const*/ BRegion& region);
 
 	// locking
@@ -211,6 +213,9 @@ private:
 							fPainter;
 			HWInterface*	fGraphicsCard;
 			bool			fCopyToFront;
+
+			void			_ScaleRegion(const BRegion& region,
+								BRegion& scaled) const;
 };
 
 #endif // DRAWING_ENGINE_H_

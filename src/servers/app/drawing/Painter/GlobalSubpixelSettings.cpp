@@ -10,5 +10,6 @@
 // NOTE: all these are initialized in DesktopSettings.cpp
 bool gSubpixelAntialiasing;
 uint8 gDefaultHintingMode;
+float gRenderScale = 1.0f;
 uint8 gSubpixelAverageWeight;
 bool gSubpixelOrderingRGB;

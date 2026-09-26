@@ -232,12 +232,14 @@ Screen::SetFrame(const BRect& rect)
 BRect
 Screen::Frame() const
 {
-	display_mode mode;
-	fHWInterface->GetMode(&mode);
-
-	uint16 scale = fHWInterface->SoftwareScale();
-	int32 width = (mode.virtual_width * 100 + scale / 2) / scale;
-	int32 height = (mode.virtual_height * 100 + scale / 2) / scale;
+	int32 width = fHWInterface->LogicalWidth();
+	int32 height = fHWInterface->LogicalHeight();
+	if (width <= 0 || height <= 0) {
+		display_mode mode;
+		fHWInterface->GetMode(&mode);
+		width = mode.virtual_width;
+		height = mode.virtual_height;
+	}
 	return BRect(0, 0, width - 1, height - 1);
 }
 

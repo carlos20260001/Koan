@@ -33,7 +33,8 @@ public:
 								CursorManager();
 								~CursorManager();
 
-			void				InitializeCursors(float scale);
+			void				InitializeCursors(float scale,
+									float pixelScale = 1.0f);
 			void				ReleaseCursors();
 
 			ServerCursor*		CreateCursor(team_id clientTeam,
@@ -100,6 +101,7 @@ private:
 			ServerCursor*		fCursorResizeWest;
 			ServerCursor*		fCursorZoomIn;
 			ServerCursor*		fCursorZoomOut;
+			float				fPixelScale;
 };
 
 #endif	// CURSOR_MANAGER_H

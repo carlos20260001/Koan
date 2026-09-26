@@ -99,6 +99,7 @@ class AutoFloatingOverlaysHider {
 
 class DrawTransaction {
 public:
+	// bounds and regions given here are in buffer pixels
 	DrawTransaction(DrawingEngine *engine, const BRect &bounds)
 		:
 		fEngine(engine),
@@ -253,6 +254,7 @@ DrawingEngine::FrameBufferChanged()
 	// NOTE: locking is probably bogus, since we are called
 	// in the thread that changed the frame buffer...
 	if (LockExclusiveAccess()) {
+		fPainter->SetDeviceScale(fGraphicsCard->RenderScaleFactor());
 		fPainter->AttachToBuffer(fGraphicsCard->DrawingBuffer());
 		UnlockExclusiveAccess();
 	}
@@ -287,7 +289,39 @@ DrawingEngine::SetCopyToFrontEnabled(bool enable)
 void
 DrawingEngine::CopyToFront(/*const*/ BRegion& region)
 {
+	if (fPainter->DeviceScale() != 1) {
+		BRegion scaled;
+		_ScaleRegion(region, scaled);
+		fGraphicsCard->InvalidateRegion(scaled);
+		return;
+	}
 	fGraphicsCard->InvalidateRegion(region);
+}
+
+
+float
+DrawingEngine::RenderScale() const
+{
+	return fPainter->DeviceScale();
+}
+
+
+/*!	A logical region in buffer pixels, with the Painter's rounding.
+*/
+void
+DrawingEngine::_ScaleRegion(const BRegion& region, BRegion& scaled) const
+{
+	float scale = fPainter->DeviceScale();
+	scaled.MakeEmpty();
+	int32 count = region.CountRects();
+	for (int32 i = 0; i < count; i++) {
+		clipping_rect r = region.RectAtInt(i);
+		r.left = (int32)floorf(r.left * scale);
+		r.top = (int32)floorf(r.top * scale);
+		r.right = (int32)floorf((r.right + 1) * scale) - 1;
+		r.bottom = (int32)floorf((r.bottom + 1) * scale) - 1;
+		scaled.Include(r);
+	}
 }
 
 
@@ -526,6 +560,17 @@ DrawingEngine::CopyRegion(/*const*/ BRegion* region, int32 xOffset,
 	// NOTE: region is already clipped
 	ASSERT_PARALLEL_LOCKED();
 
+	// pixels move in the buffer, which is finer than the region
+	BRegion scaledRegion;
+	if (fPainter->DeviceScale() != 1) {
+		// At a fractional scale a logical offset is not a whole number of
+		// buffer pixels; the nearest one has to do until the next redraw.
+		_ScaleRegion(*region, scaledRegion);
+		region = &scaledRegion;
+		xOffset = (int32)roundf(xOffset * fPainter->DeviceScale());
+		yOffset = (int32)roundf(yOffset * fPainter->DeviceScale());
+	}
+
 	BRect frame = region->Frame();
 	frame = frame | frame.OffsetByCopy(xOffset, yOffset);
 
@@ -621,7 +666,7 @@ DrawingEngine::InvertRect(BRect r)
 
 	make_rect_valid(r);
 	// NOTE: Currently ignores view transformation, so no TransformAndClipRect()
-	DrawTransaction transaction(this, fPainter->ClipRect(r));
+	DrawTransaction transaction(this, fPainter->ClipLogicalRect(r));
 	if (!transaction.IsDirty())
 		return;
 
@@ -822,7 +867,7 @@ DrawingEngine::StrokeLine(const BPoint& start, const BPoint& end,
 
 	BRect touched(start, end);
 	make_rect_valid(touched);
-	touched = fPainter->ClipRect(touched);
+	touched = fPainter->ClipLogicalRect(touched);
 	DrawTransaction transaction(this, touched);
 
 	if (!fPainter->StraightLine(start, end, color)) {
@@ -846,7 +891,7 @@ DrawingEngine::StrokeRect(BRect r, const rgb_color& color)
 	ASSERT_PARALLEL_LOCKED();
 
 	make_rect_valid(r);
-	DrawTransaction transaction(this, fPainter->ClipRect(r));
+	DrawTransaction transaction(this, fPainter->ClipLogicalRect(r));
 	if (!transaction.IsDirty())
 		return;
 
@@ -860,8 +905,7 @@ DrawingEngine::FillRect(BRect r, const rgb_color& color)
 	ASSERT_PARALLEL_LOCKED();
 
 	make_rect_valid(r);
-	r = fPainter->ClipRect(r);
-	DrawTransaction transaction(this, r);
+	DrawTransaction transaction(this, fPainter->ClipLogicalRect(r));
 	if (!transaction.IsDirty())
 		return;
 
@@ -891,7 +935,11 @@ DrawingEngine::FillRegion(BRegion& r, const rgb_color& color)
 		return;
 	}
 
-	DrawTransaction transaction(this, r);
+	BRegion scaled;
+	if (fPainter->DeviceScale() != 1)
+		_ScaleRegion(r, scaled);
+	DrawTransaction transaction(this,
+		fPainter->DeviceScale() != 1 ? scaled : r);
 
 	int32 count = r.CountRects();
 	for (int32 i = 0; i < count; i++)
@@ -1248,9 +1296,12 @@ DrawingEngine::DrawString(const char* string, int32 length,
 		&& fPainter->IsIdentityTransform()) {
 		float fontSize = fPainter->Font().Size();
 		BRect clippingFrame = fPainter->ClippingRegion()->Frame();
-		if (pt.x - fontSize > clippingFrame.right
-			|| pt.y + fontSize < clippingFrame.top
-			|| pt.y - fontSize > clippingFrame.bottom) {
+		// the clipping and the font size are in buffer pixels
+		BPoint devicePt(pt.x * fPainter->DeviceScale(),
+			pt.y * fPainter->DeviceScale());
+		if (devicePt.x - fontSize > clippingFrame.right
+			|| devicePt.y + fontSize < clippingFrame.top
+			|| devicePt.y - fontSize > clippingFrame.bottom) {
 			penLocation.x += StringWidth(string, length, delta);
 			return penLocation;
 		}
@@ -1379,6 +1430,114 @@ DrawingEngine::ReadBitmap(ServerBitmap* bitmap, bool drawCursor, BRect bounds)
 	RenderingBuffer* buffer = fGraphicsCard->FrontBuffer();
 	if (buffer == NULL)
 		return B_ERROR;
+
+	float scale = fPainter->DeviceScale();
+	if (scale != 1) {
+		// The screen has more pixels than the caller's bitmap: average each
+		// block of them into one, which is what a screenshot of a HiDPI
+		// screen at its logical size should look like.
+		BRect logicalClip(0, 0, roundf(buffer->Width() / scale) - 1,
+			roundf(buffer->Height() / scale) - 1);
+		bounds = bounds & logicalClip;
+		BRect deviceBounds(floorf(bounds.left * scale),
+			floorf(bounds.top * scale),
+			floorf((bounds.right + 1) * scale) - 1,
+			floorf((bounds.bottom + 1) * scale) - 1);
+		deviceBounds = deviceBounds
+			& BRect(0, 0, buffer->Width() - 1, buffer->Height() - 1);
+		AutoFloatingOverlaysHider _(fGraphicsCard, deviceBounds);
+
+		int32 width = bounds.IntegerWidth() + 1;
+		int32 height = bounds.IntegerHeight() + 1;
+		int32 deviceWidth = deviceBounds.IntegerWidth() + 1;
+		int32 deviceHeight = deviceBounds.IntegerHeight() + 1;
+		BBitmap device(BRect(0, 0, deviceWidth - 1, deviceHeight - 1),
+			B_BITMAP_NO_SERVER_LINK, B_RGB32);
+		if (device.InitCheck() != B_OK)
+			return device.InitCheck();
+		status_t result = device.ImportBits(buffer->Bits(),
+			buffer->BitsLength(), buffer->BytesPerRow(), buffer->ColorSpace(),
+			deviceBounds.LeftTop(), BPoint(0, 0),
+			BSize(deviceWidth - 1, deviceHeight - 1));
+		if (result != B_OK)
+			return result;
+
+		if (drawCursor) {
+			ServerCursorReference cursorRef = fGraphicsCard->Cursor();
+			ServerCursor* cursor = cursorRef.Get();
+			if (cursor != NULL) {
+				BPoint position = fGraphicsCard->CursorPosition();
+				position.x = floorf(position.x * scale) - deviceBounds.left
+					- cursor->GetHotSpot().x;
+				position.y = floorf(position.y * scale) - deviceBounds.top
+					- cursor->GetHotSpot().y;
+				uint8* bits = (uint8*)device.Bits();
+				uint32 bpr = device.BytesPerRow();
+				const uint8* cursorBits = (const uint8*)cursor->Bits();
+				for (int32 y = 0; y < cursor->Height(); y++) {
+					int32 dy = (int32)position.y + y;
+					for (int32 x = 0; x < cursor->Width(); x++, cursorBits += 4) {
+						int32 dx = (int32)position.x + x;
+						if (dx < 0 || dy < 0 || dx >= deviceWidth
+							|| dy >= deviceHeight)
+							continue;
+						uint8* d = bits + dy * bpr + dx * 4;
+						uint8 alpha = 255 - cursorBits[3];
+						d[0] = ((d[0] * alpha) >> 8) + cursorBits[0];
+						d[1] = ((d[1] * alpha) >> 8) + cursorBits[1];
+						d[2] = ((d[2] * alpha) >> 8) + cursorBits[2];
+					}
+				}
+			}
+		}
+
+		BBitmap logical(BRect(0, 0, width - 1, height - 1),
+			B_BITMAP_NO_SERVER_LINK, B_RGB32);
+		if (logical.InitCheck() != B_OK)
+			return logical.InitCheck();
+		const uint8* src = (const uint8*)device.Bits();
+		uint32 srcBPR = device.BytesPerRow();
+		uint8* dst = (uint8*)logical.Bits();
+		uint32 dstBPR = logical.BytesPerRow();
+		for (int32 y = 0; y < height; y++) {
+			// the buffer rows this logical row covers, as the Painter maps them
+			int32 y0 = (int32)floorf((bounds.top + y) * scale)
+				- (int32)deviceBounds.top;
+			int32 y1 = (int32)floorf((bounds.top + y + 1) * scale) - 1
+				- (int32)deviceBounds.top;
+			y0 = max_c(0, y0);
+			y1 = min_c(deviceHeight - 1, max_c(y0, y1));
+			uint8* d = dst + y * dstBPR;
+			for (int32 x = 0; x < width; x++, d += 4) {
+				int32 x0 = (int32)floorf((bounds.left + x) * scale)
+					- (int32)deviceBounds.left;
+				int32 x1 = (int32)floorf((bounds.left + x + 1) * scale) - 1
+					- (int32)deviceBounds.left;
+				x0 = max_c(0, x0);
+				x1 = min_c(deviceWidth - 1, max_c(x0, x1));
+				uint32 sum[3] = {0, 0, 0};
+				uint32 samples = 0;
+				for (int32 sy = y0; sy <= y1; sy++) {
+					const uint8* s = src + sy * srcBPR + x0 * 4;
+					for (int32 sx = x0; sx <= x1; sx++, s += 4) {
+						sum[0] += s[0];
+						sum[1] += s[1];
+						sum[2] += s[2];
+						samples++;
+					}
+				}
+				if (samples == 0)
+					samples = 1;
+				d[0] = sum[0] / samples;
+				d[1] = sum[1] / samples;
+				d[2] = sum[2] / samples;
+				d[3] = 255;
+			}
+		}
+		return bitmap->ImportBits(logical.Bits(), logical.BitsLength(),
+			logical.BytesPerRow(), logical.ColorSpace(), BPoint(0, 0),
+			BPoint(0, 0), width, height);
+	}
 
 	BRect clip(0, 0, buffer->Width() - 1, buffer->Height() - 1);
 	bounds = bounds & clip;

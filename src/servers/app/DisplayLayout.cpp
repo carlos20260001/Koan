@@ -78,6 +78,8 @@ DisplayInfo::DPI() const
 
 
 DisplayLayout::DisplayLayout()
+	:
+	fRenderScaleOverride(0)
 {
 }
 
@@ -110,9 +112,22 @@ DisplayLayout::ReadOutputs(HWInterface* interface)
 		display.id = output.id;
 		display.name = output.name;
 		display.flags = output.flags;
-		display.frame = BRect(output.x, output.y, output.x + output.width - 1,
-			output.y + output.height - 1);
+		display.renderScale = output.render_scale == 0
+			? 100 : output.render_scale;
 		display.scale = output.scale;
+		// the region is in frame buffer pixels; frames are logical, and the
+		// logical size follows from the timing and the scale exactly as the
+		// accelerant computes it
+		int32 logicalWidth = (output.timing.h_display * 100
+			+ display.scale / 2) / display.scale;
+		int32 logicalHeight = (output.timing.v_display * 100
+			+ display.scale / 2) / display.scale;
+		int32 left = (output.x * 100 + display.renderScale / 2)
+			/ display.renderScale;
+		int32 top = (output.y * 100 + display.renderScale / 2)
+			/ display.renderScale;
+		display.frame = BRect(left, top, left + logicalWidth - 1,
+			top + logicalHeight - 1);
 		display.native = output.native_timing;
 		display.timing = output.timing;
 		display.productID = 0;
@@ -197,6 +212,7 @@ DisplayLayout::SetSingle(BRect frame, uint16 scale, const monitor_info* info)
 	display.flags = B_DISPLAY_OUTPUT_CONNECTED | B_DISPLAY_OUTPUT_ENABLED;
 	display.frame = frame;
 	display.scale = scale;
+	display.renderScale = scale;
 	display.primary = true;
 	display.productID = 0;
 	display.week = 0;
@@ -452,6 +468,7 @@ void
 DisplayLayout::GetConfigs(std::vector<display_output_config>& configs) const
 {
 	configs.clear();
+	uint16 renderScale = RenderScale();
 	for (size_t i = 0; i < fDisplays.size(); i++) {
 		const DisplayInfo& display = fDisplays[i];
 		if (!display.IsConnected())
@@ -463,6 +480,7 @@ DisplayLayout::GetConfigs(std::vector<display_output_config>& configs) const
 		config.x = (int32)display.frame.left;
 		config.y = (int32)display.frame.top;
 		config.scale = display.scale;
+		config.render_scale = renderScale;
 		config.timing = display.timing;
 		configs.push_back(config);
 	}
@@ -548,6 +566,7 @@ DisplayLayout::Archive(BMessage& into, HWInterface* interface) const
 		entry.AddBool("primary", display.primary);
 		entry.AddRect("frame", display.frame);
 		entry.AddInt32("scale", display.scale);
+		entry.AddInt32("render scale", display.renderScale);
 		add_timing(entry, "native", display.native);
 		add_timing(entry, "mode", display.timing);
 
@@ -687,6 +706,35 @@ DisplayLayout::Region() const
 			region.Include(fDisplays[i].frame);
 	}
 	return region;
+}
+
+
+/*!	Everything is drawn at the density of the least scaled display: that
+	display then maps one to one, which keeps its text and edges crisp, and
+	the others are enlarged by the hardware. Displays that share a scale are
+	all crisp. (Drawing at more than a display needs would mean shrinking,
+	which the display engine refuses.)
+*/
+uint16
+DisplayLayout::RenderScale() const
+{
+	if (fRenderScaleOverride != 0)
+		return fRenderScaleOverride;
+	uint16 smallest = 0;
+	for (size_t i = 0; i < fDisplays.size(); i++) {
+		if (!fDisplays[i].IsEnabled())
+			continue;
+		if (smallest == 0 || fDisplays[i].scale < smallest)
+			smallest = fDisplays[i].scale;
+	}
+	return smallest == 0 ? 100 : smallest;
+}
+
+
+void
+DisplayLayout::SetRenderScale(uint16 renderScale)
+{
+	fRenderScaleOverride = renderScale;
 }
 
 

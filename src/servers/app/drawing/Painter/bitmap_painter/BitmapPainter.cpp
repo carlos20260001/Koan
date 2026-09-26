@@ -250,7 +250,8 @@ Painter::BitmapPainter::_HasScale()
 bool
 Painter::BitmapPainter::_HasAffineTransform()
 {
-	return !fPainter->fIdentityTransform;
+	// the device scale is already in the destination rectangle
+	return !fPainter->fIdentityViewTransform;
 }
 
 

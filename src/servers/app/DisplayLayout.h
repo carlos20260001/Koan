@@ -40,6 +40,8 @@ struct DisplayInfo {
 	bool			primary;
 	BRect			frame;
 	uint16			scale;			// percent
+	uint16			renderScale;	// frame buffer pixels per logical pixel,
+									// in percent
 	display_timing	native;
 	display_timing	timing;
 	bool			hasEDID;
@@ -98,6 +100,11 @@ public:
 			BRegion				Region() const;
 			bool				IsEmpty() const { return fDisplays.empty(); }
 			bool				HasScaledDisplay() const;
+			uint16				RenderScale() const;
+									// the density everything is drawn at, in
+									// percent: the smallest display scale,
+									// so that no display is ever shrunk
+			void				SetRenderScale(uint16 renderScale);
 
 	static	uint16				DefaultScale(const DisplayInfo& display);
 			uint16				SavedScale(const BMessage& saved) const;
@@ -115,6 +122,7 @@ private:
 									BMessage& found) const;
 
 			std::vector<DisplayInfo> fDisplays;
+			uint16				fRenderScaleOverride;
 };
 
 

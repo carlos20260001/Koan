@@ -44,7 +44,7 @@ struct DrawBitmapGeneric {
 		// NOTE: R5 seems to ignore this offset when drawing bitmaps
 		//	srcMatrix *= agg::trans_affine_translation(-actualBitmapRect.left,
 		//		-actualBitmapRect.top);
-		srcMatrix *= painter->Transform();
+		srcMatrix *= painter->BitmapTransform();
 
 		agg::trans_affine imgMatrix;
 		imgMatrix *= agg::trans_affine_translation(
@@ -52,7 +52,7 @@ struct DrawBitmapGeneric {
 		imgMatrix *= agg::trans_affine_scaling(scaleX, scaleY);
 		imgMatrix *= agg::trans_affine_translation(destinationRect.left,
 			destinationRect.top);
-		imgMatrix *= painter->Transform();
+		imgMatrix *= painter->BitmapTransform();
 		imgMatrix.invert();
 
 		// image interpolator

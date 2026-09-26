@@ -429,7 +429,7 @@ FontCacheEntry::_RenderTypeFor(const ServerFont& font, bool forceVector)
 	if (forceVector || font.Rotation() != 0.0 || font.Shear() != 90.0
 		|| font.FalseBoldWidth() != 0.0
 		|| (font.Flags() & B_DISABLE_ANTIALIASING) != 0
-		|| font.Size() > 30
+		|| font.Size() > 30.0f * gRenderScale
 		|| !font.Hinting()) {
 		renderingType = glyph_ren_outline;
 	}

@@ -21,6 +21,10 @@ enum {
 
 extern bool gSubpixelAntialiasing;
 extern uint8 gDefaultHintingMode;
+// Buffer pixels per logical pixel on screen. Above 1, fonts are rendered
+// that many times larger and without hinting, so that what a program
+// measures at the logical size is exactly what it gets drawn.
+extern float gRenderScale;
 
 // The weight with which the average of the subpixels is applied to counter
 // color fringes (0 = full sharpness ... 255 = grayscale anti-aliasing)

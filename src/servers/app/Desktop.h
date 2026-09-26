@@ -404,6 +404,7 @@ private:
 			void				_StoreDisplayLayout();
 			void				_RememberScreenMode(Screen* screen);
 			void				_KeepWindowsOnDisplays();
+			void				_UpdateCursorDensity();
 			void				_MoveWindowsWithDisplays(
 									const DisplayLayout& before,
 									const DisplayLayout& after);
@@ -433,6 +434,7 @@ private:
 			char*				fTargetScreen;
 			::VirtualScreen		fVirtualScreen;
 			DisplayLayout		fDisplays;
+			int32				fCursorRenderScale;
 			ObjectDeleter<DesktopSettingsPrivate>
 								fSettings;
 			port_id				fMessagePort;

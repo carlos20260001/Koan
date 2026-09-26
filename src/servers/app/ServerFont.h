@@ -205,6 +205,11 @@ protected:
 
 inline bool ServerFont::Hinting() const
 {
+	// Hinting bends glyphs to the pixel grid, which at the logical size and
+	// at the rendered size would bend them differently; at high density
+	// it is not needed anyway.
+	if (gRenderScale > 1)
+		return false;
 	switch (gDefaultHintingMode) {
 		case HINTING_MODE_OFF:
 			return false;

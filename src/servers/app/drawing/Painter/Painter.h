@@ -25,6 +25,7 @@
 
 #include <AffineTransform.h>
 #include <Font.h>
+#include <Region.h>
 #include <Rect.h>
 
 
@@ -58,6 +59,13 @@ public:
 			void				DetachFromBuffer();
 			BRect				Bounds() const;
 
+			// HiDPI: every coordinate this class takes is logical; the
+			// buffer holds fDeviceScale pixels per logical pixel in each
+			// direction. Returned rectangles are in buffer pixels.
+			void				SetDeviceScale(float scale);
+	inline	float				DeviceScale() const
+									{ return fDeviceScale; }
+
 			void				SetDrawState(const DrawState* data,
 									int32 xOffset = 0,
 									int32 yOffset = 0);
@@ -71,9 +79,14 @@ public:
 									int32 xOffset, int32 yOffset);
 
 	inline	bool				IsIdentityTransform() const
-									{ return fIdentityTransform; }
+									{ return fIdentityViewTransform; }
 			const Transformable& Transform() const
 									{ return fTransform; }
+			// For drawing into a rectangle that is already in buffer pixels:
+			// nothing while only the device scale is at work, since the
+			// rectangle has it already; the whole transform otherwise.
+			const Transformable& BitmapTransform() const
+									{ return fTextTransform; }
 
 			void				SetHighColor(const rgb_color& color);
 	inline	rgb_color			HighColor() const
@@ -255,6 +268,11 @@ public:
 
 	inline	BRect				TransformAndClipRect(BRect rect) const;
 	inline	BRect				ClipRect(BRect rect) const;
+									// rect is in buffer pixels already
+			BRect				ClipLogicalRect(BRect rect) const;
+									// rect is logical, ignores the view
+									// transform (for InvertRect and the
+									// decorator's one pixel drawing)
 	inline	BRect				TransformAlignAndClipRect(BRect rect) const;
 	inline	BRect				AlignAndClipRect(BRect rect) const;
 	inline	BRect				AlignRect(BRect rect) const;
@@ -272,6 +290,12 @@ private:
 			BPoint				_Align(const BPoint& point,
 									bool centerOffset = true) const;
 			BRect				_Clipped(const BRect& rect) const;
+			BRect				_DeviceRect(const BRect& rect) const;
+									// a logical pixel rectangle in buffer
+									// pixels
+			void				_FillRectDevice(const BRect& rect,
+									const rgb_color& c) const;
+			void				_UpdateTextTransform();
 
 			void				_UpdateFont() const;
 			void				_UpdateLineWidth();
@@ -353,10 +377,22 @@ private:
 			bool				fValidClipping : 1;
 			bool				fAttached : 1;
 			bool				fIdentityTransform : 1;
+									// no view transform and no device scale
+			bool				fIdentityViewTransform : 1;
+									// no view transform (device scale aside)
 
 			Transformable		fTransform;
+									// view transform, then the device scale
+			Transformable		fTextTransform;
+									// what the text renderer applies: nothing
+									// when only the device scale is at work,
+									// since glyphs are then simply rendered
+									// larger
+			float				fDeviceScale;
 			float				fPenSize;
 			const BRegion*		fClippingRegion;
+			BRegion				fScaledClippingRegion;
+			ServerFont			fLogicalFont;
 			drawing_mode		fDrawingMode;
 			source_alpha		fAlphaSrcMode;
 			alpha_function		fAlphaFncMode;
@@ -383,8 +419,10 @@ Painter::TransformAndClipRect(BRect rect) const
 	rect.right = ceilf(rect.right);
 	rect.bottom = ceilf(rect.bottom);
 
-	if (!fIdentityTransform)
+	if (!fIdentityViewTransform)
 		rect = fTransform.TransformBounds(rect);
+	else if (fDeviceScale != 1)
+		rect = _DeviceRect(rect);
 
 	return _Clipped(rect);
 }
@@ -412,8 +450,10 @@ inline BRect
 Painter::TransformAlignAndClipRect(BRect rect) const
 {
 	rect = AlignRect(rect);
-	if (!fIdentityTransform)
+	if (!fIdentityViewTransform)
 		rect = fTransform.TransformBounds(rect);
+	else if (fDeviceScale != 1)
+		rect = _DeviceRect(rect);
 	return _Clipped(rect);
 }
 

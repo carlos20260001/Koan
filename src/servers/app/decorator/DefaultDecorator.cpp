@@ -635,7 +635,11 @@ DefaultDecorator::_DrawClose(Decorator::Tab* _tab, bool direct, BRect rect)
 	ServerBitmap* bitmap = tab->closeBitmaps[index];
 	if (bitmap == NULL) {
 		bitmap = _GetBitmapForButton(tab, COMPONENT_CLOSE_BUTTON,
-			tab->closePressed, rect.IntegerWidth(), rect.IntegerHeight());
+			tab->closePressed,
+			(int32)roundf((rect.IntegerWidth() + 1)
+				* fDrawingEngine->RenderScale()) - 1,
+			(int32)roundf((rect.IntegerHeight() + 1)
+				* fDrawingEngine->RenderScale()) - 1);
 		tab->closeBitmaps[index] = bitmap;
 	}
 
@@ -666,7 +670,11 @@ DefaultDecorator::_DrawZoom(Decorator::Tab* _tab, bool direct, BRect rect)
 	ServerBitmap* bitmap = tab->zoomBitmaps[index];
 	if (bitmap == NULL) {
 		bitmap = _GetBitmapForButton(tab, COMPONENT_ZOOM_BUTTON,
-			tab->zoomPressed, rect.IntegerWidth(), rect.IntegerHeight());
+			tab->zoomPressed,
+			(int32)roundf((rect.IntegerWidth() + 1)
+				* fDrawingEngine->RenderScale()) - 1,
+			(int32)roundf((rect.IntegerHeight() + 1)
+				* fDrawingEngine->RenderScale()) - 1);
 		tab->zoomBitmaps[index] = bitmap;
 	}
 
@@ -695,7 +703,7 @@ DefaultDecorator::_DrawButtonBitmap(ServerBitmap* bitmap, bool direct,
 	fDrawingEngine->SetCopyToFrontEnabled(direct);
 	drawing_mode oldMode;
 	fDrawingEngine->SetDrawingMode(B_OP_OVER, oldMode);
-	fDrawingEngine->DrawBitmap(bitmap, rect.OffsetToCopy(0, 0), rect);
+	fDrawingEngine->DrawBitmap(bitmap, bitmap->Bounds(), rect);
 	fDrawingEngine->SetDrawingMode(oldMode);
 	fDrawingEngine->SetCopyToFrontEnabled(copyToFrontEnabled);
 }

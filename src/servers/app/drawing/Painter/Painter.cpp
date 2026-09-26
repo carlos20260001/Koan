@@ -22,6 +22,7 @@
 #include <Bitmap.h>
 #include <GraphicsDefs.h>
 #include <Region.h>
+#include <StackOrHeapArray.h>
 #include <String.h>
 #include <GradientLinear.h>
 #include <GradientRadial.h>
@@ -30,6 +31,7 @@
 #include <GradientConic.h>
 
 #include <ShapePrivate.h>
+#include <utf8_functions.h>
 
 #include <agg_bezier_arc.h>
 #include <agg_bounding_rect.h>
@@ -207,7 +209,10 @@ Painter::Painter()
 	fSubpixelPrecise(false),
 	fValidClipping(false),
 	fAttached(false),
+	fIdentityTransform(true),
+	fIdentityViewTransform(true),
 
+	fDeviceScale(1),
 	fPenSize(1.0),
 	fClippingRegion(NULL),
 	fDrawingMode(B_OP_COPY),
@@ -221,7 +226,7 @@ Painter::Painter()
 	fInternal(fPatternHandler),
 	fTextRenderer(fSubpixRenderer, fRenderer, fRendererBin, fUnpackedScanline,
 		fSubpixUnpackedScanline, fSubpixRasterizer, fMaskedUnpackedScanline,
-		fTransform)
+		fTextTransform)
 {
 	fPixelFormat.SetDrawingMode(fDrawingMode, fAlphaSrcMode, fAlphaFncMode);
 
@@ -282,7 +287,24 @@ Painter::DetachFromBuffer()
 BRect
 Painter::Bounds() const
 {
-	return BRect(0, 0, fBuffer.width() - 1, fBuffer.height() - 1);
+	return BRect(0, 0, roundf(fBuffer.width() / fDeviceScale) - 1,
+		roundf(fBuffer.height() / fDeviceScale) - 1);
+}
+
+
+void
+Painter::SetDeviceScale(float scale)
+{
+	if (scale < 1.0f)
+		scale = 1.0f;
+	if (scale == fDeviceScale)
+		return;
+	fDeviceScale = scale;
+	fPatternHandler.SetScale(scale);
+	// the transform, the text transform and the font all depend on it
+	SetTransform(BAffineTransform(), 0, 0);
+	if (fClippingRegion != NULL && fClippingRegion != &fScaledClippingRegion)
+		ConstrainClipping(fClippingRegion);
 }
 
 
@@ -356,6 +378,23 @@ Painter::SetDrawState(const DrawState* state, int32 xOffset, int32 yOffset)
 void
 Painter::ConstrainClipping(const BRegion* region)
 {
+	if (fDeviceScale != 1) {
+		// the clipping happens in buffer pixels
+		fScaledClippingRegion.MakeEmpty();
+		int32 count = region->CountRects();
+		// Edges are rounded down; a rectangle's right edge and its
+		// neighbour's left one land on the same buffer pixel, so adjacent
+		// rectangles stay adjacent at any scale.
+		for (int32 i = 0; i < count; i++) {
+			clipping_rect r = region->RectAtInt(i);
+			r.left = (int32)floorf(r.left * fDeviceScale);
+			r.top = (int32)floorf(r.top * fDeviceScale);
+			r.right = (int32)floorf((r.right + 1) * fDeviceScale) - 1;
+			r.bottom = (int32)floorf((r.bottom + 1) * fDeviceScale) - 1;
+			fScaledClippingRegion.Include(r);
+		}
+		region = &fScaledClippingRegion;
+	}
 	fClippingRegion = region;
 	fBaseRenderer.set_clipping_region(const_cast<BRegion*>(region));
 	fValidClipping = region->Frame().IsValid() && fAttached;
@@ -371,8 +410,8 @@ Painter::ConstrainClipping(const BRegion* region)
 void
 Painter::SetTransform(BAffineTransform transform, int32 xOffset, int32 yOffset)
 {
-	fIdentityTransform = transform.IsIdentity();
-	if (!fIdentityTransform) {
+	fIdentityViewTransform = transform.IsIdentity();
+	if (!fIdentityViewTransform) {
 		fTransform = agg::trans_affine_translation(-xOffset, -yOffset);
 		fTransform *= agg::trans_affine(transform.sx, transform.shy,
 			transform.shx, transform.sy, transform.tx, transform.ty);
@@ -380,6 +419,33 @@ Painter::SetTransform(BAffineTransform transform, int32 xOffset, int32 yOffset)
 	} else {
 		fTransform.reset();
 	}
+	// The device scale comes last: logical coordinates, aligned and offset
+	// to pixel centers as before, land on the buffer's finer grid.
+	if (fDeviceScale != 1)
+		fTransform *= agg::trans_affine_scaling(fDeviceScale);
+	fIdentityTransform = fIdentityViewTransform && fDeviceScale == 1;
+	_UpdateTextTransform();
+}
+
+
+/*!	Text is rendered from cached glyph bitmaps as long as it is only
+	translated. With nothing but the device scale at work, the renderer is
+	given a font that many times larger and no transform at all, so the
+	cache keeps serving; a real view transform goes to it together with the
+	device scale, and it renders outlines.
+*/
+void
+Painter::_UpdateTextTransform()
+{
+	if (fIdentityViewTransform)
+		fTextTransform.reset();
+	else
+		fTextTransform = fTransform;
+
+	ServerFont font = fLogicalFont;
+	if (fIdentityViewTransform && fDeviceScale != 1)
+		font.SetSize(font.Size() * fDeviceScale);
+	fTextRenderer.SetFont(font);
 }
 
 
@@ -482,7 +548,8 @@ Painter::SetPattern(const pattern& p)
 void
 Painter::SetFont(const ServerFont& font)
 {
-	fTextRenderer.SetFont(font);
+	fLogicalFont = font;
+	_UpdateTextTransform();
 	fTextRenderer.SetAntialiasing(!(font.Flags() & B_DISABLE_ANTIALIASING));
 }
 
@@ -491,7 +558,8 @@ Painter::SetFont(const ServerFont& font)
 void
 Painter::SetFont(const DrawState* state)
 {
-	fTextRenderer.SetFont(state->Font());
+	fLogicalFont = state->Font();
+	_UpdateTextTransform();
 	fTextRenderer.SetAntialiasing(!state->ForceFontAliasing()
 		&& (state->Font().Flags() & B_DISABLE_ANTIALIASING) == 0);
 }
@@ -512,7 +580,7 @@ Painter::StrokeLine(BPoint a, BPoint b)
 	_Align(&b, false);
 
 	// first, try an optimized version
-	if (fPenSize == 1.0 && fIdentityTransform
+	if (fPenSize == 1.0 && fIdentityViewTransform
 		&& (fDrawingMode == B_OP_COPY || fDrawingMode == B_OP_OVER)
 		&& fMaskedUnpackedScanline == NULL) {
 		pattern pat = *fPatternHandler.GetR5Pattern();
@@ -614,6 +682,20 @@ Painter::StraightLine(BPoint a, BPoint b, const rgb_color& c) const
 {
 	if (!fValidClipping)
 		return false;
+
+	if (fDeviceScale != 1) {
+		// A one pixel line is a fDeviceScale pixel wide bar in the buffer.
+		if (a.x != b.x && a.y != b.y)
+			return false;
+		BRect rect(min_c(a.x, b.x), min_c(a.y, b.y), max_c(a.x, b.x),
+			max_c(a.y, b.y));
+		rect.left = floorf(rect.left);
+		rect.top = floorf(rect.top);
+		rect.right = floorf(rect.right);
+		rect.bottom = floorf(rect.bottom);
+		_FillRectDevice(_DeviceRect(rect), c);
+		return true;
+	}
 
 	if (a.x == b.x) {
 		// vertical
@@ -741,7 +823,7 @@ Painter::DrawPolygon(BPoint* p, int32 numPts, bool filled, bool closed) const
 	if (numPts == 0)
 		return BRect(0.0, 0.0, -1.0, -1.0);
 
-	bool centerOffset = !filled && fIdentityTransform
+	bool centerOffset = !filled && fIdentityViewTransform
 		&& fmodf(fPenSize, 2.0) != 0.0;
 
 	fPath.remove_all();
@@ -774,7 +856,7 @@ Painter::DrawPolygon(BPoint* p, int32 numPts, bool filled, bool closed, const BG
 	if (numPts == 0)
 		return BRect(0.0, 0.0, -1.0, -1.0);
 
-	bool centerOffset = !filled && fIdentityTransform
+	bool centerOffset = !filled && fIdentityViewTransform
 		&& fmodf(fPenSize, 2.0) != 0.0;
 
 	fPath.remove_all();
@@ -896,22 +978,22 @@ Painter::StrokeRect(const BRect& r) const
 	_Align(&b, false);
 
 	// first, try an optimized version
-	if (fPenSize == 1.0 && fIdentityTransform
+	if (fPenSize == 1.0 && fIdentityViewTransform
 			&& (fDrawingMode == B_OP_COPY || fDrawingMode == B_OP_OVER)
 			&& fMaskedUnpackedScanline == NULL) {
 		pattern p = *fPatternHandler.GetR5Pattern();
 		if (p == B_SOLID_HIGH) {
 			BRect rect(a, b);
 			StrokeRect(rect, fPatternHandler.HighColor());
-			return _Clipped(rect);
+			return _Clipped(_DeviceRect(rect));
 		} else if (p == B_SOLID_LOW) {
 			BRect rect(a, b);
 			StrokeRect(rect, fPatternHandler.LowColor());
-			return _Clipped(rect);
+			return _Clipped(_DeviceRect(rect));
 		}
 	}
 
-	if (fIdentityTransform && fmodf(fPenSize, 2.0) != 0.0) {
+	if (fIdentityViewTransform && fmodf(fPenSize, 2.0) != 0.0) {
 		// shift coords to center of pixels
 		a.x += 0.5;
 		a.y += 0.5;
@@ -946,7 +1028,7 @@ Painter::StrokeRect(const BRect& r, const BGradient& gradient)
 	_Align(&a, false);
 	_Align(&b, false);
 
-	if (fIdentityTransform && fmodf(fPenSize, 2.0) != 0.0) {
+	if (fIdentityViewTransform && fmodf(fPenSize, 2.0) != 0.0) {
 		// shift coords to center of pixels
 		a.x += 0.5;
 		a.y += 0.5;
@@ -974,6 +1056,11 @@ Painter::StrokeRect(const BRect& r, const BGradient& gradient)
 void
 Painter::StrokeRect(const BRect& r, const rgb_color& c) const
 {
+	if (r.Width() < 1 || r.Height() < 1) {
+		// too thin to have an inside
+		FillRect(r, c);
+		return;
+	}
 	StraightLine(BPoint(r.left, r.top), BPoint(r.right - 1, r.top), c);
 	StraightLine(BPoint(r.right, r.top), BPoint(r.right, r.bottom - 1), c);
 	StraightLine(BPoint(r.right, r.bottom), BPoint(r.left + 1, r.bottom), c);
@@ -995,30 +1082,31 @@ Painter::FillRect(const BRect& r) const
 
 	// first, try an optimized version
 	if ((fDrawingMode == B_OP_COPY || fDrawingMode == B_OP_OVER)
-		&& fMaskedUnpackedScanline == NULL && fIdentityTransform) {
+		&& fMaskedUnpackedScanline == NULL && fIdentityViewTransform) {
 		pattern p = *fPatternHandler.GetR5Pattern();
 		if (p == B_SOLID_HIGH) {
 			BRect rect(a, b);
 			FillRect(rect, fPatternHandler.HighColor());
-			return _Clipped(rect);
+			return _Clipped(_DeviceRect(rect));
 		} else if (p == B_SOLID_LOW) {
 			BRect rect(a, b);
 			FillRect(rect, fPatternHandler.LowColor());
-			return _Clipped(rect);
+			return _Clipped(_DeviceRect(rect));
 		}
 	}
+
 	if (fDrawingMode == B_OP_ALPHA && fAlphaFncMode == B_ALPHA_OVERLAY
-		&& fMaskedUnpackedScanline == NULL && fIdentityTransform) {
+		&& fMaskedUnpackedScanline == NULL && fIdentityViewTransform) {
 		pattern p = *fPatternHandler.GetR5Pattern();
 		if (p == B_SOLID_HIGH) {
-			BRect rect(a, b);
+			BRect rect(_DeviceRect(BRect(a, b)));
 			_BlendRect32(rect, fPatternHandler.HighColor());
 			return _Clipped(rect);
 		} else if (p == B_SOLID_LOW) {
 			rgb_color c = fPatternHandler.LowColor();
 			if (fAlphaSrcMode == B_CONSTANT_ALPHA)
 				c.alpha = fPatternHandler.HighColor().alpha;
-			BRect rect(a, b);
+			BRect rect(_DeviceRect(BRect(a, b)));
 			_BlendRect32(rect, c);
 			return _Clipped(rect);
 		}
@@ -1090,6 +1178,14 @@ Painter::FillRect(const BRect& r, const BGradient& gradient)
 // FillRect
 void
 Painter::FillRect(const BRect& r, const rgb_color& c) const
+{
+	_FillRectDevice(_DeviceRect(r), c);
+}
+
+
+// _FillRectDevice
+void
+Painter::_FillRectDevice(const BRect& r, const rgb_color& c) const
 {
 	if (!fValidClipping)
 		return;
@@ -1182,8 +1278,15 @@ Painter::FillRectVerticalGradient(BRect r,
 
 // FillRectNoClipping
 void
-Painter::FillRectNoClipping(const clipping_rect& r, const rgb_color& c) const
+Painter::FillRectNoClipping(const clipping_rect& logical, const rgb_color& c) const
 {
+	clipping_rect r = logical;
+	if (fDeviceScale != 1) {
+		r.left = (int32)floorf(r.left * fDeviceScale);
+		r.top = (int32)floorf(r.top * fDeviceScale);
+		r.right = (int32)floorf((r.right + 1) * fDeviceScale) - 1;
+		r.bottom = (int32)floorf((r.bottom + 1) * fDeviceScale) - 1;
+	}
 	int32 y = (int32)r.top;
 
 	uint8* dst = fBuffer.row_ptr(y) + r.left * 4;
@@ -1502,6 +1605,11 @@ Painter::DrawString(const char* utf8String, uint32 length, BPoint baseLine,
 		baseLine.x = roundf(baseLine.x);
 		baseLine.y = roundf(baseLine.y);
 	}
+	if (fIdentityViewTransform && fDeviceScale != 1) {
+		// the glyphs are rendered at device size, see _UpdateTextTransform()
+		baseLine.x *= fDeviceScale;
+		baseLine.y *= fDeviceScale;
+	}
 
 	BRect bounds;
 
@@ -1528,6 +1636,21 @@ Painter::DrawString(const char* utf8String, uint32 length,
 
 	SolidPatternGuard _(this);
 
+	if (fIdentityViewTransform && fDeviceScale != 1) {
+		int32 count = UTF8CountChars(utf8String, length);
+		BStackOrHeapArray<BPoint, 64> scaled(count);
+		if (!scaled.IsValid())
+			return BRect(0, 0, -1, -1);
+		for (int32 i = 0; i < count; i++) {
+			scaled[i].x = offsets[i].x * fDeviceScale;
+			scaled[i].y = offsets[i].y * fDeviceScale;
+		}
+		bounds = fTextRenderer.RenderString(utf8String, length,
+			scaled, fClippingRegion->Frame(), false, NULL,
+			cacheReference);
+		return _Clipped(bounds);
+	}
+
 	bounds = fTextRenderer.RenderString(utf8String, length,
 		offsets, fClippingRegion->Frame(), false, NULL,
 		cacheReference);
@@ -1546,10 +1669,21 @@ Painter::BoundingBox(const char* utf8String, uint32 length, BPoint baseLine,
 		baseLine.x = roundf(baseLine.x);
 		baseLine.y = roundf(baseLine.y);
 	}
+	bool scaled = fIdentityViewTransform && fDeviceScale != 1;
+	if (scaled) {
+		baseLine.x *= fDeviceScale;
+		baseLine.y *= fDeviceScale;
+	}
 
 	static BRect dummy;
-	return fTextRenderer.RenderString(utf8String, length,
+	BRect bounds = fTextRenderer.RenderString(utf8String, length,
 		baseLine, dummy, true, penLocation, delta, cacheReference);
+	if (scaled && penLocation != NULL) {
+		// the pen is the caller's, in logical coordinates
+		penLocation->x /= fDeviceScale;
+		penLocation->y /= fDeviceScale;
+	}
+	return bounds;
 }
 
 
@@ -1562,6 +1696,23 @@ Painter::BoundingBox(const char* utf8String, uint32 length,
 	// TODO: Round offsets to device pixel grid if !fSubpixelPrecise?
 
 	static BRect dummy;
+	if (fIdentityViewTransform && fDeviceScale != 1) {
+		int32 count = UTF8CountChars(utf8String, length);
+		BStackOrHeapArray<BPoint, 64> scaled(count);
+		if (!scaled.IsValid())
+			return BRect(0, 0, -1, -1);
+		for (int32 i = 0; i < count; i++) {
+			scaled[i].x = offsets[i].x * fDeviceScale;
+			scaled[i].y = offsets[i].y * fDeviceScale;
+		}
+		BRect bounds = fTextRenderer.RenderString(utf8String, length,
+			scaled, dummy, true, penLocation, cacheReference);
+		if (penLocation != NULL) {
+			penLocation->x /= fDeviceScale;
+			penLocation->y /= fDeviceScale;
+		}
+		return bounds;
+	}
 	return fTextRenderer.RenderString(utf8String, length,
 		offsets, dummy, true, penLocation, cacheReference);
 }
@@ -1572,7 +1723,7 @@ float
 Painter::StringWidth(const char* utf8String, uint32 length,
 	const escapement_delta* delta)
 {
-	return Font().StringWidth(utf8String, length, delta);
+	return fLogicalFont.StringWidth(utf8String, length, delta);
 }
 
 
@@ -1590,7 +1741,15 @@ Painter::DrawBitmap(ServerBitmap* bitmap, BRect bitmapRect,
 
 	if (touched.IsValid()) {
 		BitmapPainter bitmapPainter(this, bitmap, options);
-		bitmapPainter.Draw(bitmapRect, viewRect);
+		if (fIdentityViewTransform && fDeviceScale != 1) {
+			// the bitmap painter scales into the buffer itself; with a view
+			// transform it applies fTransform, which has the device scale
+			BRect deviceRect = viewRect;
+			if (!fSubpixelPrecise)
+				deviceRect = AlignRect(deviceRect);
+			bitmapPainter.Draw(bitmapRect, _DeviceRect(deviceRect));
+		} else
+			bitmapPainter.Draw(bitmapRect, viewRect);
 	}
 
 	return touched;
@@ -1638,7 +1797,8 @@ Painter::InvertRect(const BRect& r) const
 {
 	CHECK_CLIPPING
 
-	BRegion region(r);
+	BRect deviceRect = _DeviceRect(r);
+	BRegion region(deviceRect);
 	region.IntersectWith(fClippingRegion);
 
 	// implementation only for B_RGB32 at the moment
@@ -1646,7 +1806,7 @@ Painter::InvertRect(const BRect& r) const
 	for (int32 i = 0; i < count; i++)
 		_InvertRect32(region.RectAt(i));
 
-	return _Clipped(r);
+	return _Clipped(deviceRect);
 }
 
 
@@ -1709,6 +1869,31 @@ Painter::_Clipped(const BRect& rect) const
 		return BRect(rect & fClippingRegion->Frame());
 
 	return BRect(rect);
+}
+
+
+/*!	A rectangle of logical pixels, edges included, as buffer pixels.
+*/
+BRect
+Painter::_DeviceRect(const BRect& rect) const
+{
+	if (fDeviceScale == 1)
+		return rect;
+	return BRect(floorf(rect.left * fDeviceScale),
+		floorf(rect.top * fDeviceScale),
+		floorf((rect.right + 1) * fDeviceScale) - 1,
+		floorf((rect.bottom + 1) * fDeviceScale) - 1);
+}
+
+
+BRect
+Painter::ClipLogicalRect(BRect rect) const
+{
+	rect.left = floorf(rect.left);
+	rect.top = floorf(rect.top);
+	rect.right = ceilf(rect.right);
+	rect.bottom = ceilf(rect.bottom);
+	return _Clipped(_DeviceRect(rect));
 }
 
 

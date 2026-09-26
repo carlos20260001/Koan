@@ -21,6 +21,7 @@
 #include "drawing_support.h"
 
 #include "DrawingEngine.h"
+#include "GlobalSubpixelSettings.h"
 #include "RenderingBuffer.h"
 #include "SystemPalette.h"
 
@@ -51,6 +52,9 @@ HWInterface::HWInterface()
 	fCursorAndDragBitmap(NULL),
 	fCursorVisible(false),
 	fSoftwareScale(100),
+	fRenderScale(100),
+	fLogicalWidth(0),
+	fLogicalHeight(0),
 	fCursorObscured(false),
 	fHardwareCursorEnabled(false),
 	fCursorLocation(0, 0),
@@ -135,10 +139,15 @@ HWInterface::SetCursor(ServerCursor* cursor)
 	if (!fFloatingOverlaysLock.Lock())
 		return;
 
-	if (fCursor.Get() != cursor) {
+	if (fSourceCursor.Get() != cursor || fCursor.Get() == NULL
+		|| (fCursor->PixelScale() != RenderScaleFactor() && cursor != NULL)) {
 		BRect oldFrame = _CursorFrame();
 
-		fCursor.SetTo(cursor);
+		fSourceCursor.SetTo(cursor);
+		if (cursor != NULL && cursor->PixelScale() != RenderScaleFactor())
+			fCursor.SetTo(_CursorAtRenderScale(cursor), true);
+		else
+			fCursor.SetTo(cursor);
 
 		Invalidate(oldFrame);
 
@@ -305,23 +314,90 @@ HWInterface::SetSoftwareScale(uint16 percent)
 }
 
 
+status_t
+HWInterface::SetRenderScale(uint16 percent)
+{
+	if (percent < 100 || percent > 400)
+		return B_BAD_VALUE;
+	if (percent == fRenderScale)
+		return B_OK;
+	fRenderScale = percent;
+	gRenderScale = percent / 100.0f;
+
+	// the cursor bitmap is kept at the buffer's density
+	if (fFloatingOverlaysLock.Lock()) {
+		if (fSourceCursor.Get() != NULL) {
+			if (fSourceCursor->PixelScale() != RenderScaleFactor())
+				fCursor.SetTo(_CursorAtRenderScale(fSourceCursor.Get()), true);
+			else
+				fCursor = fSourceCursor;
+		}
+		_AdoptDragBitmap();
+		fFloatingOverlaysLock.Unlock();
+	}
+	return B_OK;
+}
+
+
+void
+HWInterface::SetLogicalSize(int32 width, int32 height)
+{
+	fLogicalWidth = width;
+	fLogicalHeight = height;
+}
+
+
+/*!	The logical size is what the layout says when there is one; otherwise
+	the front buffer is the logical size times the software scale or the
+	render scale.
+*/
 int32
 HWInterface::LogicalWidth() const
 {
+	if (fLogicalWidth > 0)
+		return fLogicalWidth;
 	RenderingBuffer* front = FrontBuffer();
 	if (front == NULL)
 		return 0;
-	return (front->Width() * 100 + fSoftwareScale / 2) / fSoftwareScale;
+	uint16 scale = fSoftwareScale != 100 ? fSoftwareScale : fRenderScale;
+	return (front->Width() * 100 + scale / 2) / scale;
 }
 
 
 int32
 HWInterface::LogicalHeight() const
 {
+	if (fLogicalHeight > 0)
+		return fLogicalHeight;
 	RenderingBuffer* front = FrontBuffer();
 	if (front == NULL)
 		return 0;
-	return (front->Height() * 100 + fSoftwareScale / 2) / fSoftwareScale;
+	uint16 scale = fSoftwareScale != 100 ? fSoftwareScale : fRenderScale;
+	return (front->Height() * 100 + scale / 2) / scale;
+}
+
+
+int32
+HWInterface::BackBufferWidth() const
+{
+	RenderingBuffer* front = FrontBuffer();
+	if (front == NULL)
+		return 0;
+	if (fSoftwareScale == 100)
+		return front->Width();
+	return (LogicalWidth() * fRenderScale + 50) / 100;
+}
+
+
+int32
+HWInterface::BackBufferHeight() const
+{
+	RenderingBuffer* front = FrontBuffer();
+	if (front == NULL)
+		return 0;
+	if (fSoftwareScale == 100)
+		return front->Height();
+	return (LogicalHeight() * fRenderScale + 50) / 100;
 }
 
 
@@ -712,8 +788,10 @@ HWInterface::_CopyToFrontScaled(uint8* src, uint32 srcBPR, int32 x, int32 y,
 	int32 right, int32 bottom) const
 {
 	RenderingBuffer* frontBuffer = FrontBuffer();
-	const float scale = fSoftwareScale / 100.0f;
-	const bool whole = fSoftwareScale % 100 == 0;
+	RenderingBuffer* backBuffer = BackBuffer();
+	// from back buffer pixels to front buffer pixels
+	const float scale = (float)frontBuffer->Width() / backBuffer->Width();
+	const bool whole = fabsf(scale - roundf(scale)) < 0.001f;
 
 	int32 left = (int32)floorf(x * scale);
 	int32 top = (int32)floorf(y * scale);
@@ -898,12 +976,15 @@ void
 HWInterface::_CopyToFront(uint8* src, uint32 srcBPR, int32 x, int32 y,
 	int32 right, int32 bottom) const
 {
-	if (fSoftwareScale != 100) {
+	RenderingBuffer* frontBuffer = FrontBuffer();
+	RenderingBuffer* backBuffer = BackBuffer();
+	if (backBuffer != NULL && (backBuffer->Width() != frontBuffer->Width()
+			|| backBuffer->Height() != frontBuffer->Height())) {
 		_CopyToFrontScaled(src, srcBPR, x, y, right, bottom);
 		return;
 	}
 
-	_CopyToBuffer(FrontBuffer(), src, srcBPR, x, y, right, bottom);
+	_CopyToBuffer(frontBuffer, src, srcBPR, x, y, right, bottom);
 }
 
 
@@ -1121,9 +1202,60 @@ HWInterface::_CursorFrame() const
 	IntRect frame(0, 0, -1, -1);
 	if (fCursorAndDragBitmap && fCursorVisible && !fHardwareCursorEnabled) {
 		frame = fCursorAndDragBitmap->Bounds();
-		frame.OffsetTo(fCursorLocation - fCursorAndDragBitmap->GetHotSpot());
+		// the cursor location is logical, the bitmap is in buffer pixels
+		float factor = RenderScaleFactor();
+		BPoint location(floorf(fCursorLocation.x * factor),
+			floorf(fCursorLocation.y * factor));
+		frame.OffsetTo(location - fCursorAndDragBitmap->GetHotSpot());
 	}
 	return frame;
+}
+
+
+/*!	A copy of \a cursor with fRenderScale pixels per pixel of the density it
+	was made for, by duplicating (or dropping) pixels. System cursors are
+	rendered at the right density to begin with; this is for the cursors
+	programs bring along.
+*/
+ServerCursor*
+HWInterface::_CursorAtRenderScale(ServerCursor* cursor)
+{
+	float from = cursor->PixelScale() < 1 ? 1 : cursor->PixelScale();
+	float to = RenderScaleFactor();
+	int32 width = (int32)roundf(cursor->Width() * to / from);
+	int32 height = (int32)roundf(cursor->Height() * to / from);
+	if (width < 1 || height < 1 || cursor->ColorSpace() != B_RGBA32) {
+		ServerCursor* copy = new(std::nothrow) ServerCursor(cursor);
+		if (copy != NULL)
+			copy->SetPixelScale(to);
+		return copy;
+	}
+
+	BPoint hotSpot = cursor->GetHotSpot();
+	hotSpot.x = floorf(hotSpot.x * to / from);
+	hotSpot.y = floorf(hotSpot.y * to / from);
+	ServerCursor* scaled = new(std::nothrow) ServerCursor(
+		BRect(0, 0, width - 1, height - 1), B_RGBA32, 0, hotSpot);
+	if (scaled == NULL || scaled->Bits() == NULL) {
+		delete scaled;
+		return new(std::nothrow) ServerCursor(cursor);
+	}
+	scaled->SetPixelScale(to);
+
+	const uint8* src = (const uint8*)cursor->Bits();
+	uint32 srcBPR = cursor->BytesPerRow();
+	uint8* dst = (uint8*)scaled->Bits();
+	uint32 dstBPR = scaled->BytesPerRow();
+	int32 srcWidth = cursor->Width();
+	int32 srcHeight = cursor->Height();
+	for (int32 y = 0; y < height; y++) {
+		int32 sy = min_c((int32)(y * from / to), srcHeight - 1);
+		const uint32* srcRow = (const uint32*)(src + sy * srcBPR);
+		uint32* dstRow = (uint32*)(dst + y * dstBPR);
+		for (int32 x = 0; x < width; x++)
+			dstRow[x] = srcRow[min_c((int32)(x * from / to), srcWidth - 1)];
+	}
+	return scaled;
 }
 
 
@@ -1155,11 +1287,18 @@ HWInterface::_AdoptDragBitmap()
 	BRect oldCursorFrame = _CursorFrame();
 
 	if (fDragBitmap != NULL && fDragBitmap->Bounds().Width() > 0 && fDragBitmap->Bounds().Height() > 0) {
+		// the drag bitmap and its offset are logical; everything here is in
+		// buffer pixels
+		float factor = RenderScaleFactor();
 		BRect bitmapFrame = fDragBitmap->Bounds();
+		bitmapFrame.right = roundf((bitmapFrame.right + 1) * factor) - 1;
+		bitmapFrame.bottom = roundf((bitmapFrame.bottom + 1) * factor) - 1;
+		BPoint dragOffset(floorf(fDragBitmapOffset.x * factor),
+			floorf(fDragBitmapOffset.y * factor));
 		if (fCursor) {
 			// put bitmap frame and cursor frame into the same
 			// coordinate space (the cursor location is the origin)
-			bitmapFrame.OffsetTo(BPoint(-fDragBitmapOffset.x, -fDragBitmapOffset.y));
+			bitmapFrame.OffsetTo(BPoint(-dragOffset.x, -dragOffset.y));
 
 			BRect cursorFrame(fCursor->Bounds());
 			BPoint hotspot(fCursor->GetHotSpot());
@@ -1190,7 +1329,8 @@ HWInterface::_AdoptDragBitmap()
 
 				memset(dst, 0, fCursorAndDragBitmap->BitsLength());
 
-				// put drag bitmap into combined buffer
+				// put drag bitmap into combined buffer, enlarged to the
+				// buffer's density
 				uint8* src = (uint8*)fDragBitmap->Bits();
 				uint32 srcBPR = fDragBitmap->BytesPerRow();
 
@@ -1200,10 +1340,15 @@ HWInterface::_AdoptDragBitmap()
 				uint32 width = bitmapFrame.IntegerWidth() + 1;
 				uint32 height = bitmapFrame.IntegerHeight() + 1;
 
+				uint32 srcWidth = fDragBitmap->Width();
+				uint32 srcHeight = fDragBitmap->Height();
 				for (uint32 y = 0; y < height; y++) {
-					memcpy(dst, src, srcBPR);
+					uint32 sy = min_c((uint32)(y / factor), srcHeight - 1);
+					const uint32* s = (const uint32*)(src + sy * srcBPR);
+					uint32* d = (uint32*)dst;
+					for (uint32 x = 0; x < width; x++)
+						d[x] = s[min_c((uint32)(x / factor), srcWidth - 1)];
 					dst += dstBPR;
-					src += srcBPR;
 				}
 
 				// compose cursor into combined buffer
@@ -1275,10 +1420,17 @@ HWInterface::_AdoptDragBitmap()
 				}
 			}
 		} else {
-			fCursorAndDragBitmap.SetTo(new ServerCursor(fDragBitmap->Bits(),
-				bitmapFrame.IntegerWidth() + 1, bitmapFrame.IntegerHeight() + 1,
-				fDragBitmap->ColorSpace()), true);
-			fCursorAndDragBitmap->SetHotSpot(BPoint(-fDragBitmapOffset.x, -fDragBitmapOffset.y));
+			ServerCursor* dragCursor = new(std::nothrow) ServerCursor(
+				fDragBitmap->Bits(), fDragBitmap->Width(),
+				fDragBitmap->Height(), fDragBitmap->ColorSpace());
+			if (dragCursor != NULL && fRenderScale != 100) {
+				ServerCursor* scaled = _CursorAtRenderScale(dragCursor);
+				delete dragCursor;
+				dragCursor = scaled;
+			}
+			fCursorAndDragBitmap.SetTo(dragCursor, true);
+			if (fCursorAndDragBitmap)
+				fCursorAndDragBitmap->SetHotSpot(BPoint(-dragOffset.x, -dragOffset.y));
 		}
 	} else {
 		fCursorAndDragBitmap = fCursor;
