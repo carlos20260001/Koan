@@ -13,10 +13,23 @@
 
 #include <Alert.h>
 #include <Application.h>
+#include <InterfacePrivate.h>
+#include <Message.h>
 #include <Screen.h>
 
 #include "ScreenMode.h"
 
+
+enum {
+	kOptionDisplay = 256,
+	kOptionScale,
+	kOptionPosition,
+	kOptionEnable,
+	kOptionDisable,
+	kOptionPrimary,
+	kOptionDisplayMode,
+	kOptionZoomToDisplay,
+};
 
 static struct option const kLongOptions[] = {
 	{"fall-back", no_argument, 0, 'f'},
@@ -27,6 +40,15 @@ static struct option const kLongOptions[] = {
 	{"help", no_argument, 0, 'h'},
 	{"brightness", required_argument, 0, 'b'},
 	{"get-brightness", no_argument, 0, 'B'},
+	{"displays", no_argument, 0, 'd'},
+	{"display", required_argument, 0, kOptionDisplay},
+	{"scale", required_argument, 0, kOptionScale},
+	{"position", required_argument, 0, kOptionPosition},
+	{"enable", no_argument, 0, kOptionEnable},
+	{"disable", no_argument, 0, kOptionDisable},
+	{"primary", no_argument, 0, kOptionPrimary},
+	{"display-mode", required_argument, 0, kOptionDisplayMode},
+	{"zoom-to-display", required_argument, 0, kOptionZoomToDisplay},
 	{NULL}
 };
 
@@ -84,6 +106,115 @@ print_mode(const display_mode& displayMode, const screen_mode& mode)
 
 
 static void
+print_displays(bool shortOutput)
+{
+	BMessage layout;
+	status_t status = BPrivate::get_display_layout(layout);
+	if (status != B_OK) {
+		fprintf(stderr, "%s: Could not get the display layout: %s\n",
+			kProgramName, strerror(status));
+		exit(1);
+	}
+
+	bool hasLayout;
+	if (layout.FindBool("has layout", &hasLayout) != B_OK)
+		hasLayout = false;
+	BRect frame;
+	layout.FindRect("screen frame", &frame);
+	if (!shortOutput) {
+		printf("Desktop: %g x %g%s\n", frame.Width() + 1, frame.Height() + 1,
+			hasLayout ? "" : " (the driver drives one display, unscaled)");
+	}
+
+	BMessage display;
+	for (int32 i = 0; layout.FindMessage("display", i, &display) == B_OK;
+			i++) {
+		int32 id, scale, width, height, nativeWidth, nativeHeight;
+		float refresh, nativeRefresh, widthCM, heightCM;
+		const char* name;
+		const char* monitor;
+		const char* vendor;
+		bool enabled, connected, primary;
+		BRect displayFrame;
+		display.FindInt32("id", &id);
+		display.FindString("name", &name);
+		display.FindString("monitor", &monitor);
+		display.FindString("vendor", &vendor);
+		display.FindBool("enabled", &enabled);
+		display.FindBool("connected", &connected);
+		display.FindBool("primary", &primary);
+		display.FindRect("frame", &displayFrame);
+		display.FindInt32("scale", &scale);
+		display.FindInt32("mode width", &width);
+		display.FindInt32("mode height", &height);
+		display.FindFloat("mode refresh", &refresh);
+		display.FindInt32("native width", &nativeWidth);
+		display.FindInt32("native height", &nativeHeight);
+		display.FindFloat("native refresh", &nativeRefresh);
+		display.FindFloat("width cm", &widthCM);
+		display.FindFloat("height cm", &heightCM);
+
+		if (shortOutput) {
+			printf("%" B_PRId32 " %s %d %d %g %g %" B_PRId32 " %" B_PRId32
+				" %" B_PRId32 " %g %d\n", i + 1, name, enabled, connected,
+				displayFrame.left, displayFrame.top, scale, width, height,
+				refresh, primary);
+			continue;
+		}
+
+		printf("%" B_PRId32 ": %s%s%s%s\n", i + 1, name,
+			monitor[0] != '\0' ? " - " : "", monitor,
+			primary ? " (main display)" : "");
+		printf("   %s%s, %s\n", connected ? "connected" : "disconnected",
+			enabled ? "" : ", off", vendor);
+		if (enabled) {
+			printf("   mode %" B_PRId32 " x %" B_PRId32 " at %g Hz, native %"
+				B_PRId32 " x %" B_PRId32 " at %g Hz\n", width, height, refresh,
+				nativeWidth, nativeHeight, nativeRefresh);
+			printf("   scale %" B_PRId32 "%%: %g x %g at %g, %g\n", scale,
+				displayFrame.Width() + 1, displayFrame.Height() + 1,
+				displayFrame.left, displayFrame.top);
+		}
+		if (widthCM > 0) {
+			printf("   %.0f x %.0f cm, %.0f dpi\n", widthCM, heightCM,
+				nativeWidth / (widthCM / 2.54f));
+		}
+		BMessage mode;
+		int32 count = 0;
+		while (display.FindMessage("modes", count, &mode) == B_OK)
+			count++;
+		printf("   %" B_PRId32 " modes\n", count);
+	}
+
+	bool zoomToDisplay;
+	if (!shortOutput && layout.FindBool("zoom to display", &zoomToDisplay)
+			== B_OK) {
+		printf("Windows maximize to %s.\n",
+			zoomToDisplay ? "the display they are on" : "the whole desktop");
+	}
+}
+
+
+static int32
+find_display(const BMessage& layout, const char* which)
+{
+	BMessage display;
+	for (int32 i = 0; layout.FindMessage("display", i, &display) == B_OK;
+			i++) {
+		int32 id;
+		const char* name;
+		display.FindInt32("id", &id);
+		display.FindString("name", &name);
+		char number[16];
+		snprintf(number, sizeof(number), "%" B_PRId32, i + 1);
+		if (strcasecmp(name, which) == 0 || strcmp(number, which) == 0)
+			return id;
+	}
+	return -1;
+}
+
+
+static void
 usage(int status)
 {
 	fprintf(stderr,
@@ -106,7 +237,18 @@ usage(int status)
 		"\t\t\t  <pclk> <h-display> <h-sync-start> <h-sync-end> <h-total>\n"
 		"\t\t\t  <v-disp> <v-sync-start> <v-sync-end> <v-total> [flags] "
 			"[depth]\n"
-		"\t\t\t(supported flags are: +/-HSync, +/-VSync, Interlace)\n",
+		"\t\t\t(supported flags are: +/-HSync, +/-VSync, Interlace)\n"
+		"  -d  --displays\tlist the displays: their arrangement, scale and "
+			"modes.\n"
+		"      --display <n|name>\tthe display the following options change\n"
+		"\t\t\t(its number in the list, or its connector like DP-2):\n"
+		"      --scale <percent>\t100, 125, 150, 175, 200, 225 or 250\n"
+		"      --position <x> <y>\twhere its top left corner goes\n"
+		"      --display-mode <w>x<h>[@<hz>]\n"
+		"      --enable, --disable, --primary\n"
+		"      --zoom-to-display on|off\n"
+		"\t\t\twhether maximizing a window fills only the display it "
+			"is on\n",
 		kProgramName);
 
 	exit(status);
@@ -130,14 +272,76 @@ main(int argc, char** argv)
 	float brightness = std::nanf("0");
 	bool relativeBrightness = false;
 	display_mode mode;
+	bool listDisplays = false;
+	const char* displayName = NULL;
+	BMessage displayRequest;
+	bool changeDisplay = false;
+	int zoomToDisplay = -1;
 
 	// TODO: add a possibility to set a virtual screen size in addition to
 	// the display resolution!
 
 	int c;
-	while ((c = getopt_long(argc, argv, "shlfqmb:B", kLongOptions, NULL)) != -1) {
+	while ((c = getopt_long(argc, argv, "shlfqmb:Bd", kLongOptions, NULL)) != -1) {
 		switch (c) {
 			case 0:
+				break;
+			case 'd':
+				listDisplays = true;
+				break;
+			case kOptionDisplay:
+				displayName = optarg;
+				break;
+			case kOptionScale:
+				displayRequest.AddInt32("scale", strtol(optarg, NULL, 0));
+				changeDisplay = true;
+				break;
+			case kOptionPosition:
+			{
+				if (optind >= argc)
+					usage(1);
+				BPoint origin(strtol(optarg, NULL, 0),
+					strtol(argv[optind++], NULL, 0));
+				displayRequest.AddPoint("origin", origin);
+				changeDisplay = true;
+				break;
+			}
+			case kOptionEnable:
+				displayRequest.AddBool("enabled", true);
+				changeDisplay = true;
+				break;
+			case kOptionDisable:
+				displayRequest.AddBool("enabled", false);
+				changeDisplay = true;
+				break;
+			case kOptionPrimary:
+				displayRequest.AddBool("primary", true);
+				changeDisplay = true;
+				break;
+			case kOptionDisplayMode:
+			{
+				int modeWidth, modeHeight;
+				float modeRefresh = 0;
+				int parsed = sscanf(optarg, "%dx%d@%f", &modeWidth,
+					&modeHeight, &modeRefresh);
+				if (parsed < 2)
+					usage(1);
+				displayRequest.AddInt32("mode width", modeWidth);
+				displayRequest.AddInt32("mode height", modeHeight);
+				if (parsed == 3)
+					displayRequest.AddFloat("mode refresh", modeRefresh);
+				changeDisplay = true;
+				break;
+			}
+			case kOptionZoomToDisplay:
+				if (!strcasecmp(optarg, "on") || !strcasecmp(optarg, "yes")
+					|| !strcmp(optarg, "1"))
+					zoomToDisplay = 1;
+				else if (!strcasecmp(optarg, "off")
+					|| !strcasecmp(optarg, "no") || !strcmp(optarg, "0"))
+					zoomToDisplay = 0;
+				else
+					usage(1);
 				break;
 			case 'f':
 				fallbackMode = true;
@@ -246,6 +450,47 @@ main(int argc, char** argv)
 	}
 
 	BApplication application("application/x-vnd.vos-screenmode");
+
+	if (zoomToDisplay >= 0)
+		BPrivate::set_zoom_to_display(zoomToDisplay == 1);
+
+	if (changeDisplay) {
+		if (displayName == NULL) {
+			fprintf(stderr, "%s: --display says which display to change\n",
+				kProgramName);
+			return 1;
+		}
+		BMessage layout;
+		status_t status = BPrivate::get_display_layout(layout);
+		if (status != B_OK) {
+			fprintf(stderr, "%s: Could not get the display layout: %s\n",
+				kProgramName, strerror(status));
+			return 1;
+		}
+		int32 id = find_display(layout, displayName);
+		if (id < 0) {
+			fprintf(stderr, "%s: There is no display \"%s\"\n", kProgramName,
+				displayName);
+			return 1;
+		}
+		displayRequest.AddInt32("id", id);
+		BMessage request;
+		request.AddMessage("display", &displayRequest);
+		status = BPrivate::set_display_layout(request);
+		if (status != B_OK) {
+			fprintf(stderr, "%s: Could not change the display: %s\n",
+				kProgramName, strerror(status));
+			return 1;
+		}
+		listDisplays = true;
+	}
+
+	if (listDisplays) {
+		print_displays(shortOutput);
+		return 0;
+	}
+	if (zoomToDisplay >= 0 && !setMode && !listModes && !getBrightness)
+		return 0;
 
 	ScreenMode screenMode(NULL);
 	screen_mode currentMode;

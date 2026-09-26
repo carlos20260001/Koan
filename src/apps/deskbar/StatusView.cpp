@@ -1619,7 +1619,7 @@ TDragRegion::SwitchModeForRegion(BPoint where, BRegion region,
 void
 TDragRegion::CalculateRegions()
 {
-	const BRect screenFrame((BScreen(Window())).Frame());
+	const BRect screenFrame(DeskbarScreenFrame(Window()));
 
 	float menuBarHeight = fBarView->BarMenuBar()->Frame().Height();
 	float hDivider = floorf(screenFrame.Width() / 4);

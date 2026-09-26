@@ -376,6 +376,7 @@ private:
 
 			void				_GetDecoratorSize(float* _borderWidth,
 									float* _tabHeight) const;
+			BRect				_DisplayFrame();
 			void				_SendShowOrHideMessage();
 			void				_PropagateMessageToChildViews(BMessage*);
 

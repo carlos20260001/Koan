@@ -1654,6 +1654,101 @@ set_control_look(const BString& path)
 
 
 status_t
+get_display_layout(BMessage& layout)
+{
+	BPrivate::AppServerLink link;
+	link.StartMessage(AS_GET_DISPLAY_LAYOUT);
+
+	status_t status;
+	if (link.FlushWithReply(status) != B_OK)
+		return B_ERROR;
+	if (status != B_OK)
+		return status;
+
+	int32 size;
+	if (link.Read<int32>(&size) != B_OK || size <= 0)
+		return B_ERROR;
+
+	char* buffer = new(std::nothrow) char[size];
+	if (buffer == NULL)
+		return B_NO_MEMORY;
+	status = link.Read(buffer, size);
+	if (status == B_OK)
+		status = layout.Unflatten(buffer);
+	delete[] buffer;
+	return status;
+}
+
+
+status_t
+set_display_layout(const BMessage& request)
+{
+	int32 size = request.FlattenedSize();
+	char* buffer = new(std::nothrow) char[size];
+	if (buffer == NULL)
+		return B_NO_MEMORY;
+	status_t status = request.Flatten(buffer, size);
+	if (status != B_OK) {
+		delete[] buffer;
+		return status;
+	}
+
+	BPrivate::AppServerLink link;
+	link.StartMessage(AS_SET_DISPLAY_LAYOUT);
+	link.Attach<int32>(size);
+	link.Attach(buffer, size);
+	delete[] buffer;
+
+	if (link.FlushWithReply(status) != B_OK)
+		return B_ERROR;
+	return status;
+}
+
+
+status_t
+get_display_frame(BRect frame, bool forZoom, BRect& _displayFrame)
+{
+	BPrivate::AppServerLink link;
+	link.StartMessage(AS_GET_DISPLAY_FRAME);
+	link.Attach<BRect>(frame);
+	link.Attach<bool>(forZoom);
+
+	status_t status;
+	if (link.FlushWithReply(status) != B_OK)
+		return B_ERROR;
+	if (status != B_OK)
+		return status;
+	return link.Read<BRect>(&_displayFrame);
+}
+
+
+bool
+get_zoom_to_display()
+{
+	bool zoomToDisplay = true;
+
+	BPrivate::AppServerLink link;
+	link.StartMessage(AS_GET_ZOOM_TO_DISPLAY);
+
+	int32 code;
+	if (link.FlushWithReply(code) == B_OK && code == B_OK)
+		link.Read<bool>(&zoomToDisplay);
+
+	return zoomToDisplay;
+}
+
+
+void
+set_zoom_to_display(bool zoomToDisplay)
+{
+	BPrivate::AppServerLink link;
+	link.StartMessage(AS_SET_ZOOM_TO_DISPLAY);
+	link.Attach<bool>(zoomToDisplay);
+	link.Flush();
+}
+
+
+status_t
 get_application_order(int32 workspace, team_id** _applications,
 	int32* _count)
 {

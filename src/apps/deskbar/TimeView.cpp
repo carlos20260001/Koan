@@ -390,7 +390,7 @@ TTimeView::ShowCalendar(BPoint where)
 	where.y = Bounds().bottom + 4.0;
 	ConvertToScreen(&where);
 
-	if (where.y >= BScreen().Frame().bottom)
+	if (where.y >= DeskbarScreenFrame(Window()).bottom)
 		where.y -= (Bounds().Height() + 4.0);
 
 	fCalendarWindow = new CalendarMenuWindow(where);
