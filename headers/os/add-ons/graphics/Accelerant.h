@@ -214,9 +214,16 @@ typedef struct {
 	int32			y;					/* this output shows, in frame */
 	uint16			width;				/* buffer pixels */
 	uint16			height;
-	uint16			scale;				/* percent; 100 shows one frame */
-										/* buffer pixel per monitor pixel */
-	uint16			_reserved0;
+	uint16			scale;				/* percent; the size of the picture */
+										/* on the monitor relative to the */
+										/* region's logical size */
+	uint16			render_scale;		/* frame buffer pixels per logical */
+										/* pixel, in percent: the region is */
+										/* the logical size times this. Equal */
+										/* to scale, the region is the */
+										/* monitor's own size and nothing is */
+										/* scaled (HiDPI rendering); smaller, */
+										/* the monitor enlarges it */
 	display_timing	native_timing;		/* the monitor's preferred timing */
 	display_timing	timing;				/* the timing it is driven with */
 	uint32			edid_length;		/* 0 when the monitor has no EDID */
@@ -226,10 +233,10 @@ typedef struct {
 typedef struct {
 	uint32			id;
 	uint32			flags;				/* B_DISPLAY_OUTPUT_ENABLED */
-	int32			x;					/* position in the frame buffer */
+	int32			x;					/* position, in logical pixels */
 	int32			y;
 	uint16			scale;				/* percent, see display_output */
-	uint16			_reserved0;
+	uint16			render_scale;		/* see display_output; 0 means 100 */
 	display_timing	timing;				/* all zero: the native timing */
 } display_output_config;
 
