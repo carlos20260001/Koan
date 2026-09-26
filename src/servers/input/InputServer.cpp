@@ -583,9 +583,33 @@ InputServer::MessageReceived(BMessage* message)
 			if (message->FindInt32("screen_reflection", &reflection) != B_OK)
 				reflection = 0;
 
+			BRegion displays;
+			BRect displayFrame;
+			for (int32 i = 0; message->FindRect("display_frames", i,
+					&displayFrame) == B_OK; i++) {
+				displays.Include(displayFrame);
+			}
+			bool displaysChanged = displays.CountRects()
+				!= fDisplays.CountRects();
+			for (int32 i = 0; !displaysChanged && i < displays.CountRects();
+					i++) {
+				displaysChanged = displays.RectAt(i) != fDisplays.RectAt(i);
+			}
+			fDisplays = displays;
+
 			if (frame == fFrame && orientation == fScreenOrientation
-				&& reflection == fScreenReflection)
+				&& reflection == fScreenReflection) {
+				if (displaysChanged) {
+					BPoint pos = fMousePos;
+					_ConstrainToDisplays(pos);
+					if (pos != fMousePos) {
+						BMessage set;
+						set.AddPoint("where", pos);
+						HandleSetMousePosition(&set, NULL);
+					}
+				}
 				return;
+			}
 
 			// The pointer lives in logical space, so it only rescales, also
 			// across a rotation, as on other desktops.
@@ -595,6 +619,7 @@ InputServer::MessageReceived(BMessage* message)
 				pos.y = fMousePos.y * frame.Height() / fFrame.Height();
 			}
 			fFrame = frame;
+			_ConstrainToDisplays(pos);
 			fScreenOrientation = orientation;
 			fScreenReflection = reflection;
 			fScreenBoundsValid = true;
@@ -1086,6 +1111,46 @@ InputServer::HandleGetSetClickSpeed(BMessage* message, BMessage* reply)
 	if (settings == NULL)
 		settings = _RunningMouseSettings();
 	return reply->AddInt64("speed", settings->ClickSpeed());
+}
+
+
+/*!	Keeps the cursor on a monitor. The screen bounds are the rectangle
+	around every monitor, and with monitors of different sizes there are
+	parts of it nothing shows. A move into such a part is held back to the
+	edge of the monitor the cursor came from, in the direction that left
+	it - sliding along that edge still works, and crossing to another
+	monitor wherever they touch.
+*/
+void
+InputServer::_ConstrainToDisplays(BPoint& where)
+{
+	if (fDisplays.CountRects() == 0)
+		return;
+	if (fDisplays.Contains(where)) {
+		for (int32 i = 0; i < fDisplays.CountRects(); i++) {
+			if (fDisplays.RectAt(i).Contains(where)) {
+				fLastDisplay = fDisplays.RectAt(i);
+				break;
+			}
+		}
+		return;
+	}
+
+	BRect last = fLastDisplay;
+	if (!last.IsValid() || !fDisplays.Intersects(last))
+		last = fDisplays.RectAt(0);
+
+	BPoint keepX(where.x, min_c(max_c(where.y, last.top), last.bottom));
+	if (fDisplays.Contains(keepX)) {
+		where = keepX;
+		return;
+	}
+	BPoint keepY(min_c(max_c(where.x, last.left), last.right), where.y);
+	if (fDisplays.Contains(keepY)) {
+		where = keepY;
+		return;
+	}
+	where.ConstrainTo(last);
 }
 
 
@@ -1827,6 +1892,7 @@ InputServer::_SanitizeEvents(EventList& events)
 				where.x = roundf(where.x);
 				where.y = roundf(where.y);
 				where.ConstrainTo(fFrame);
+				_ConstrainToDisplays(where);
 				if (event->ReplacePoint("where", where) != B_OK)
 					event->AddPoint("where", where);
 

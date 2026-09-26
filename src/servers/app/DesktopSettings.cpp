@@ -57,6 +57,7 @@ DesktopSettingsPrivate::_SetDefaults()
 	fFocusFollowsMouseMode = B_NORMAL_FOCUS_FOLLOWS_MOUSE;
 	fAcceptFirstClick = true;
 	fShowAllDraggers = true;
+	fZoomToDisplay = true;
 
 	// init scrollbar info
 	fScrollBarInfo.proportional = true;
@@ -335,6 +336,23 @@ DesktopSettingsPrivate::_Load()
 		}
 	}
 
+	// read display settings: the monitor layout, and how windows zoom
+
+	path = basePath;
+	path.Append("displays");
+
+	status = file.SetTo(path.Path(), B_READ_ONLY);
+	if (status == B_OK) {
+		BMessage settings;
+		status = settings.Unflatten(&file);
+		if (status == B_OK) {
+			if (settings.FindBool("zoom to display", &fZoomToDisplay) != B_OK)
+				fZoomToDisplay = true;
+			if (settings.FindMessage("layout", &fDisplaysMessage) != B_OK)
+				fDisplaysMessage.MakeEmpty();
+		}
+	}
+
 	return B_OK;
 }
 
@@ -407,6 +425,22 @@ DesktopSettingsPrivate::Save(uint32 mask)
 			settings.AddInt32("focus follows mouse mode",
 				(int32)fFocusFollowsMouseMode);
 			settings.AddBool("accept first click", fAcceptFirstClick);
+
+			BFile file;
+			status = file.SetTo(path.Path(), B_CREATE_FILE | B_ERASE_FILE
+				| B_READ_WRITE);
+			if (status == B_OK) {
+				status = settings.Flatten(&file, NULL);
+			}
+		}
+	}
+
+	if (mask & kDisplaySettings) {
+		BPath path(basePath);
+		if (path.Append("displays") == B_OK) {
+			BMessage settings('asdp');
+			settings.AddBool("zoom to display", fZoomToDisplay);
+			settings.AddMessage("layout", &fDisplaysMessage);
 
 			BFile file;
 			status = file.SetTo(path.Path(), B_CREATE_FILE | B_ERASE_FILE
@@ -611,6 +645,36 @@ bool
 DesktopSettingsPrivate::ShowAllDraggers() const
 {
 	return fShowAllDraggers;
+}
+
+
+void
+DesktopSettingsPrivate::SetZoomToDisplay(bool zoomToDisplay)
+{
+	fZoomToDisplay = zoomToDisplay;
+	Save(kDisplaySettings);
+}
+
+
+bool
+DesktopSettingsPrivate::ZoomToDisplay() const
+{
+	return fZoomToDisplay;
+}
+
+
+void
+DesktopSettingsPrivate::SetDisplaysMessage(const BMessage& message)
+{
+	fDisplaysMessage = message;
+	Save(kDisplaySettings);
+}
+
+
+const BMessage*
+DesktopSettingsPrivate::DisplaysMessage() const
+{
+	return &fDisplaysMessage;
 }
 
 
@@ -908,6 +972,20 @@ DesktopSettings::ShowAllDraggers() const
 }
 
 
+bool
+DesktopSettings::ZoomToDisplay() const
+{
+	return fSettings->ZoomToDisplay();
+}
+
+
+const BMessage*
+DesktopSettings::DisplaysMessage() const
+{
+	return fSettings->DisplaysMessage();
+}
+
+
 int32
 DesktopSettings::WorkspacesCount() const
 {
@@ -1062,6 +1140,20 @@ void
 LockedDesktopSettings::SetShowAllDraggers(bool show)
 {
 	fSettings->SetShowAllDraggers(show);
+}
+
+
+void
+LockedDesktopSettings::SetZoomToDisplay(bool zoomToDisplay)
+{
+	fSettings->SetZoomToDisplay(zoomToDisplay);
+}
+
+
+void
+LockedDesktopSettings::SetDisplaysMessage(const BMessage& message)
+{
+	fSettings->SetDisplaysMessage(message);
 }
 
 

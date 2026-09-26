@@ -314,8 +314,10 @@ LibEvdevEventStream::UpdateScreenBounds(BRect bounds)
 
 void
 LibEvdevEventStream::UpdateScreenBounds(BRect bounds, int32 orientation,
-	int32 reflection)
+	int32 reflection, const BRegion* displays)
 {
+	// TODO: keep the pointer off the parts of bounds no monitor shows
+	// (displays), as input_server does.
 	fWidth = bounds.IntegerWidth() + 1;
 	fHeight = bounds.IntegerHeight() + 1;
 	fOrientation = orientation;

@@ -144,12 +144,18 @@ InputServerStream::UpdateScreenBounds(BRect bounds)
 
 void
 InputServerStream::UpdateScreenBounds(BRect bounds, int32 orientation,
-	int32 reflection)
+	int32 reflection, const BRegion* displays)
 {
 	BMessage update(IS_SCREEN_BOUNDS_UPDATED);
 	update.AddRect("screen_bounds", bounds);
 	update.AddInt32("screen_orientation", orientation);
 	update.AddInt32("screen_reflection", reflection);
+	// With monitors of different sizes, parts of the bounds show nothing;
+	// the cursor is kept out of those.
+	if (displays != NULL) {
+		for (int32 i = 0; i < displays->CountRects(); i++)
+			update.AddRect("display_frames", displays->RectAt(i));
+	}
 
 	fInputServer.SendMessage(&update);
 }

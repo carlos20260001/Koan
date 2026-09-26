@@ -403,6 +403,13 @@ enum {
 	// team_id (BSurface: team the window is listed under)
 	AS_SET_WINDOW_TEAM,
 
+	// Display layout: the monitors, their arrangement and scaling
+	AS_GET_DISPLAY_LAYOUT,
+	AS_SET_DISPLAY_LAYOUT,
+	AS_GET_DISPLAY_FRAME,
+	AS_SET_ZOOM_TO_DISPLAY,
+	AS_GET_ZOOM_TO_DISPLAY,
+
 	AS_LAST_CODE
 };
 

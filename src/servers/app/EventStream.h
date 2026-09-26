@@ -13,6 +13,7 @@
 #include <LinkReceiver.h>
 #include <MessageQueue.h>
 #include <Messenger.h>
+#include <Region.h>
 #include <SharedEvent.h>
 
 
@@ -33,8 +34,9 @@ class EventStream {
 		// orientation: 0..3, matching DRM_MODE_PANEL_ORIENTATION_*.
 		// reflection: B_PANEL_REFLECTION_*. Not pure, so backends that
 		// don't care about rotation or reflection need no change.
+		// displays: the parts of bounds that are monitors (NULL: all).
 		virtual void UpdateScreenBounds(BRect bounds, int32 orientation,
-				int32 reflection = 0)
+				int32 reflection = 0, const BRegion* displays = NULL)
 				{ UpdateScreenBounds(bounds); }
 
 		// Relays the seat pointer constraint (flags: 1 = confined to
@@ -73,7 +75,7 @@ class InputServerStream : public EventStream {
 
 		virtual void UpdateScreenBounds(BRect bounds);
 		virtual void UpdateScreenBounds(BRect bounds, int32 orientation,
-				int32 reflection = 0);
+				int32 reflection = 0, const BRegion* displays = NULL);
 
 		virtual void SetPointerConstraint(uint32 flags,
 				const BRect& rect);

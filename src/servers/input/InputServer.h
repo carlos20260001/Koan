@@ -23,6 +23,7 @@
 #include <Locker.h>
 #include <Message.h>
 #include <ObjectList.h>
+#include <Region.h>
 #include <OS.h>
 #include <Screen.h>
 #include <StringList.h>
@@ -238,6 +239,10 @@ class InputServer : public BApplication {
 
 		BScreen			fScreen;
 		BRect			fFrame;
+		BRegion			fDisplays;		// the parts of fFrame that are shown
+		BRect			fLastDisplay;	// the display the mouse was last on
+
+		void			_ConstrainToDisplays(BPoint& where);
 		int32			fScreenOrientation;
 		int32			fScreenReflection;
 		// True once app_server has sent IS_SCREEN_BOUNDS_UPDATED;

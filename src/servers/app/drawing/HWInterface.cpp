@@ -11,6 +11,7 @@
 #include "HWInterface.h"
 
 #include <new>
+#include <math.h>
 #include <stdio.h>
 #include <string.h>
 #include <unistd.h>
@@ -49,6 +50,7 @@ HWInterface::HWInterface()
 	fDragBitmapOffset(0, 0),
 	fCursorAndDragBitmap(NULL),
 	fCursorVisible(false),
+	fSoftwareScale(100),
 	fCursorObscured(false),
 	fHardwareCursorEnabled(false),
 	fCursorLocation(0, 0),
@@ -283,6 +285,59 @@ HWInterface::SetDragBitmap(const ServerBitmap* bitmap,
 		_AdoptDragBitmap();
 		fFloatingOverlaysLock.Unlock();
 	}
+}
+
+
+status_t
+HWInterface::GetDisplayOutputs(display_output** _outputs, uint32* _count)
+{
+	return B_UNSUPPORTED;
+}
+
+
+status_t
+HWInterface::SetSoftwareScale(uint16 percent)
+{
+	if (percent < 100 || percent > 400)
+		return B_BAD_VALUE;
+	fSoftwareScale = percent;
+	return B_OK;
+}
+
+
+int32
+HWInterface::LogicalWidth() const
+{
+	RenderingBuffer* front = FrontBuffer();
+	if (front == NULL)
+		return 0;
+	return (front->Width() * 100 + fSoftwareScale / 2) / fSoftwareScale;
+}
+
+
+int32
+HWInterface::LogicalHeight() const
+{
+	RenderingBuffer* front = FrontBuffer();
+	if (front == NULL)
+		return 0;
+	return (front->Height() * 100 + fSoftwareScale / 2) / fSoftwareScale;
+}
+
+
+status_t
+HWInterface::GetDisplayOutputModes(uint32 id, display_mode** _modes,
+	uint32* _count)
+{
+	return B_UNSUPPORTED;
+}
+
+
+status_t
+HWInterface::SetDisplayLayout(const display_output_config* configs,
+	uint32 count, bool switchMode)
+{
+	return B_UNSUPPORTED;
 }
 
 
@@ -645,10 +700,209 @@ HWInterface::_DrawCursor(IntRect area) const
 	- location in front buffer is calculated
 	- conversion from B_RGBA32 to format of front buffer is taken care of
 */
+/*!	Enlarges the logical rectangle \a x, \a y - \a right, \a bottom of the
+	B_RGBA32 source onto the front buffer, by the software scale. Whole
+	scales duplicate pixels, which keeps text crisp; fractional ones
+	interpolate. Neighbours outside the source rectangle are taken from
+	its edge, which is right for the cursor's private buffer and close
+	enough for a partial update of the back buffer.
+*/
+void
+HWInterface::_CopyToFrontScaled(uint8* src, uint32 srcBPR, int32 x, int32 y,
+	int32 right, int32 bottom) const
+{
+	RenderingBuffer* frontBuffer = FrontBuffer();
+	const float scale = fSoftwareScale / 100.0f;
+	const bool whole = fSoftwareScale % 100 == 0;
+
+	int32 left = (int32)floorf(x * scale);
+	int32 top = (int32)floorf(y * scale);
+	int32 physicalRight = (int32)ceilf((right + 1) * scale) - 1;
+	int32 physicalBottom = (int32)ceilf((bottom + 1) * scale) - 1;
+	if (left < 0)
+		left = 0;
+	if (top < 0)
+		top = 0;
+	if (physicalRight > (int32)frontBuffer->Width() - 1)
+		physicalRight = frontBuffer->Width() - 1;
+	if (physicalBottom > (int32)frontBuffer->Height() - 1)
+		physicalBottom = frontBuffer->Height() - 1;
+	if (left > physicalRight || top > physicalBottom)
+		return;
+
+	const int32 width = physicalRight - left + 1;
+	const int32 sourceWidth = right - x + 1;
+	const int32 sourceHeight = bottom - y + 1;
+
+	uint8* row = new(std::nothrow) uint8[width * 4];
+	int32* column = new(std::nothrow) int32[width];
+	uint16* columnWeight = new(std::nothrow) uint16[width];
+	if (row == NULL || column == NULL || columnWeight == NULL) {
+		delete[] row;
+		delete[] column;
+		delete[] columnWeight;
+		return;
+	}
+
+	// where each output column samples the source, relative to the source
+	// rectangle, and how far it is towards the next column (in 1/256)
+	for (int32 i = 0; i < width; i++) {
+		float sourceX = whole ? (left + i) / scale
+			: (left + i + 0.5f) / scale - 0.5f;
+		float relative = sourceX - x;
+		int32 index = (int32)floorf(relative);
+		int32 weight = whole ? 0 : (int32)((relative - index) * 256);
+		if (index < 0) {
+			index = 0;
+			weight = 0;
+		}
+		if (index >= sourceWidth - 1) {
+			index = sourceWidth - 1;
+			weight = 0;
+		}
+		column[i] = index;
+		columnWeight[i] = weight;
+	}
+
+	for (int32 py = top; py <= physicalBottom; py++) {
+		float sourceY = whole ? py / scale : (py + 0.5f) / scale - 0.5f;
+		float relative = sourceY - y;
+		int32 rowIndex = (int32)floorf(relative);
+		int32 rowWeight = whole ? 0 : (int32)((relative - rowIndex) * 256);
+		if (rowIndex < 0) {
+			rowIndex = 0;
+			rowWeight = 0;
+		}
+		if (rowIndex >= sourceHeight - 1) {
+			rowIndex = sourceHeight - 1;
+			rowWeight = 0;
+		}
+		const uint8* line0 = src + rowIndex * srcBPR;
+		const uint8* line1 = rowWeight != 0 ? line0 + srcBPR : line0;
+
+		uint8* out = row;
+		for (int32 i = 0; i < width; i++) {
+			const uint8* p00 = line0 + column[i] * 4;
+			int32 wx = columnWeight[i];
+			if (wx == 0 && rowWeight == 0) {
+				out[0] = p00[0];
+				out[1] = p00[1];
+				out[2] = p00[2];
+				out[3] = 255;
+			} else {
+				const uint8* p01 = wx != 0 ? p00 + 4 : p00;
+				const uint8* p10 = line1 + column[i] * 4;
+				const uint8* p11 = wx != 0 ? p10 + 4 : p10;
+				for (int32 c = 0; c < 3; c++) {
+					int32 top = p00[c] * (256 - wx) + p01[c] * wx;
+					int32 bottom = p10[c] * (256 - wx) + p11[c] * wx;
+					out[c] = (uint8)((top * (256 - rowWeight)
+						+ bottom * rowWeight) >> 16);
+				}
+				out[3] = 255;
+			}
+			out += 4;
+		}
+		_CopyRowToFront(row, left, py, width);
+	}
+
+	delete[] row;
+	delete[] column;
+	delete[] columnWeight;
+}
+
+
+/*!	One row of B_RGBA32 pixels to the front buffer at \a x, \a y, converted
+	to its color space.
+*/
+void
+HWInterface::_CopyRowToFront(const uint8* row, int32 x, int32 y,
+	int32 count) const
+{
+	RenderingBuffer* frontBuffer = FrontBuffer();
+	uint8* dst = (uint8*)frontBuffer->Bits();
+	uint32 dstBPR = frontBuffer->BytesPerRow();
+	const uint8* srcHandle = row;
+
+	switch (frontBuffer->ColorSpace()) {
+		case B_RGB32:
+		case B_RGBA32:
+			memcpy(dst + y * dstBPR + x * 4, row, count * 4);
+			break;
+
+		case B_RGB30:
+		{
+			uint32* dstHandle = (uint32*)(dst + y * dstBPR + x * 4);
+			for (int32 i = 0; i < count; i++, srcHandle += 4) {
+				uint32 r = srcHandle[0];
+				uint32 g = srcHandle[1];
+				uint32 b = srcHandle[2];
+				*dstHandle++ = ((r * 1023) / 255) | (((g * 1023) / 255) << 10)
+					| (((b * 1023) / 255) << 20);
+			}
+			break;
+		}
+
+		case B_RGB24:
+		{
+			uint8* dstHandle = dst + y * dstBPR + x * 3;
+			for (int32 i = 0; i < count; i++, srcHandle += 4) {
+				dstHandle[0] = srcHandle[0];
+				dstHandle[1] = srcHandle[1];
+				dstHandle[2] = srcHandle[2];
+				dstHandle += 3;
+			}
+			break;
+		}
+
+		case B_RGB16:
+		{
+			uint16* dstHandle = (uint16*)(dst + y * dstBPR + x * 2);
+			for (int32 i = 0; i < count; i++, srcHandle += 4) {
+				*dstHandle++ = (uint16)(((srcHandle[2] & 0xf8) << 8)
+					| ((srcHandle[1] & 0xfc) << 3) | (srcHandle[0] >> 3));
+			}
+			break;
+		}
+
+		case B_RGB15:
+		case B_RGBA15:
+		{
+			uint16* dstHandle = (uint16*)(dst + y * dstBPR + x * 2);
+			for (int32 i = 0; i < count; i++, srcHandle += 4) {
+				*dstHandle++ = (uint16)(((srcHandle[2] & 0xf8) << 7)
+					| ((srcHandle[1] & 0xf8) << 2) | (srcHandle[0] >> 3));
+			}
+			break;
+		}
+
+		case B_CMAP8:
+		{
+			const color_map* colorMap = SystemColorMap();
+			uint8* dstHandle = dst + y * dstBPR + x;
+			for (int32 i = 0; i < count; i++, srcHandle += 4) {
+				uint16 index = ((srcHandle[2] & 0xf8) << 7)
+					| ((srcHandle[1] & 0xf8) << 2) | (srcHandle[0] >> 3);
+				*dstHandle++ = colorMap->index_map[index];
+			}
+			break;
+		}
+
+		default:
+			break;
+	}
+}
+
+
 void
 HWInterface::_CopyToFront(uint8* src, uint32 srcBPR, int32 x, int32 y,
 	int32 right, int32 bottom) const
 {
+	if (fSoftwareScale != 100) {
+		_CopyToFrontScaled(src, srcBPR, x, y, right, bottom);
+		return;
+	}
+
 	_CopyToBuffer(FrontBuffer(), src, srcBPR, x, y, right, bottom);
 }
 

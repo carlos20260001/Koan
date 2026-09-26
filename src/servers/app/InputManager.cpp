@@ -89,18 +89,18 @@ InputManager::PutStream(EventStream* stream)
 
 void
 InputManager::UpdateScreenBounds(BRect bounds, int32 orientation,
-	int32 reflection)
+	int32 reflection, const BRegion* displays)
 {
 	BAutolock _(this);
 
 	for (int32 i = fUsedStreams.CountItems(); i-- > 0;) {
 		fUsedStreams.ItemAt(i)->UpdateScreenBounds(bounds, orientation,
-			reflection);
+			reflection, displays);
 	}
 
 	for (int32 i = fFreeStreams.CountItems(); i-- > 0;) {
 		fFreeStreams.ItemAt(i)->UpdateScreenBounds(bounds, orientation,
-			reflection);
+			reflection, displays);
 	}
 }
 

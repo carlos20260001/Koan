@@ -122,7 +122,11 @@ VirtualScreen::AddScreen(Screen* screen, const ScreenConfigurations& configurati
 
 	status_t status = B_ERROR;
 	display_mode mode;
-	if (_GetMode(screen, configurations, mode) == B_OK) {
+	if (screen->HWInterface()->HasDisplayLayout()) {
+		// The monitors' arrangement decides the frame buffer, not a mode
+		// remembered for one of them; the accelerant reports it as the
+		// preferred mode.
+	} else if (_GetMode(screen, configurations, mode) == B_OK) {
 		// we found settings for this screen, and try to apply them now
 		status = screen->SetMode(mode);
 	}
@@ -179,10 +183,9 @@ VirtualScreen::UpdateFrame()
 	for (int32 i = 0; i < fScreenList.CountItems(); i++) {
 		Screen* screen = fScreenList.ItemAt(i)->screen;
 
-		uint16 width, height;
-		uint32 colorSpace;
-		float frequency;
-		screen->GetMode(width, height, colorSpace, frequency);
+		BRect frame = screen->Frame();
+		int32 width = frame.IntegerWidth() + 1;
+		int32 height = frame.IntegerHeight() + 1;
 
 		// TODO: compute virtual size depending on the actual screen position!
 		virtualWidth += width;

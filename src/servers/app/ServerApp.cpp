@@ -3168,6 +3168,108 @@ ServerApp::_DispatchMessage(int32 code, BPrivate::LinkReceiver& link)
 			break;
 		}
 
+		case AS_GET_DISPLAY_LAYOUT:
+		{
+			STRACE(("ServerApp %s: AS_GET_DISPLAY_LAYOUT\n", Signature()));
+
+			// Reply: status, then the flattened size and the message
+
+			BMessage layout;
+			status_t status = fDesktop->GetDisplayLayout(layout);
+
+			fLink.StartMessage(status);
+			if (status == B_OK) {
+				int32 size = layout.FlattenedSize();
+				char* buffer = new(std::nothrow) char[size];
+				if (buffer != NULL && layout.Flatten(buffer, size) == B_OK) {
+					fLink.Attach<int32>(size);
+					fLink.Attach(buffer, size);
+				} else
+					fLink.Attach<int32>(0);
+				delete[] buffer;
+			}
+			fLink.Flush();
+			break;
+		}
+
+		case AS_SET_DISPLAY_LAYOUT:
+		{
+			STRACE(("ServerApp %s: AS_SET_DISPLAY_LAYOUT\n", Signature()));
+
+			// Attached data: int32 size, flattened BMessage
+
+			int32 size;
+			status_t status = link.Read<int32>(&size);
+			BMessage request;
+			if (status == B_OK && size > 0 && size < 1024 * 1024) {
+				char* buffer = new(std::nothrow) char[size];
+				if (buffer == NULL)
+					status = B_NO_MEMORY;
+				else {
+					status = link.Read(buffer, size);
+					if (status == B_OK)
+						status = request.Unflatten(buffer);
+					delete[] buffer;
+				}
+			} else if (status == B_OK)
+				status = B_BAD_VALUE;
+
+			if (status == B_OK)
+				status = fDesktop->SetDisplayLayout(request);
+
+			fLink.StartMessage(status);
+			fLink.Flush();
+			break;
+		}
+
+		case AS_GET_DISPLAY_FRAME:
+		{
+			STRACE(("ServerApp %s: AS_GET_DISPLAY_FRAME\n", Signature()));
+
+			// Attached data: BRect frame, bool forZoom
+
+			BRect frame;
+			bool forZoom;
+			link.Read<BRect>(&frame);
+			if (link.Read<bool>(&forZoom) != B_OK)
+				forZoom = false;
+
+			fLink.StartMessage(B_OK);
+			fLink.Attach<BRect>(fDesktop->DisplayFrameFor(frame, forZoom));
+			fLink.Flush();
+			break;
+		}
+
+		case AS_SET_ZOOM_TO_DISPLAY:
+		{
+			STRACE(("ServerApp %s: AS_SET_ZOOM_TO_DISPLAY\n", Signature()));
+
+			bool zoomToDisplay;
+			if (link.Read<bool>(&zoomToDisplay) == B_OK) {
+				LockedDesktopSettings settings(fDesktop);
+				settings.SetZoomToDisplay(zoomToDisplay);
+			}
+			break;
+		}
+
+		case AS_GET_ZOOM_TO_DISPLAY:
+		{
+			STRACE(("ServerApp %s: AS_GET_ZOOM_TO_DISPLAY\n", Signature()));
+
+			if (fDesktop->LockSingleWindow()) {
+				DesktopSettings settings(fDesktop);
+
+				fLink.StartMessage(B_OK);
+				fLink.Attach<bool>(settings.ZoomToDisplay());
+
+				fDesktop->UnlockSingleWindow();
+			} else
+				fLink.StartMessage(B_ERROR);
+
+			fLink.Flush();
+			break;
+		}
+
 		case AS_GET_DESKTOP_COLOR:
 		{
 			STRACE(("ServerApp %s: get desktop color\n", Signature()));

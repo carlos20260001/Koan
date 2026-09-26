@@ -30,6 +30,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <syslog.h>
+#include <vector>
 
 #include <Debug.h>
 #include <debugger.h>
@@ -638,6 +639,18 @@ Desktop::Init()
 		reflected->HWInterface()->SetPanelReflection(reflection);
 	gScreenManager->Unlock();
 
+	// Arrange the monitors the way the user left them before the first mode
+	// is set, so that the screen comes up right rather than twice.
+	{
+		BAutolock locker(gScreenManager);
+		Screen* screen = gScreenManager->ScreenAt(0);
+		if (screen != NULL && screen->HWInterface() != NULL
+			&& screen->HWInterface()->HasDisplayLayout()) {
+			AutoWriteLocker screenLocker(fScreenLock);
+			_ConfigureDisplayLayout(screen->HWInterface(), false);
+		}
+	}
+
 	status_t status = fVirtualScreen.SetConfiguration(*this,
 		fWorkspaces[0].StoredScreenConfiguration(),
 		fWorkspaces[0].CurrentScreenConfiguration());
@@ -653,6 +666,22 @@ Desktop::Init()
 	}
 
 	HWInterface()->SetDPMSMode(B_DPMS_ON);
+
+	{
+		AutoWriteLocker screenLocker(fScreenLock);
+		_UpdateDisplays();
+		_RememberScreenMode(fVirtualScreen.ScreenAt(0));
+
+		// Hardware that cannot arrange monitors can still be scaled, by
+		// drawing smaller and enlarging the result.
+		if (!HWInterface()->HasDisplayLayout()) {
+			uint16 scale = fDisplays.SavedScale(*fSettings->DisplaysMessage());
+			if (scale != 100 && HWInterface()->SetSoftwareScale(scale) == B_OK) {
+				fVirtualScreen.UpdateFrame();
+				_UpdateDisplays();
+			}
+		}
+	}
 
 	// Restore brightness
 	{
@@ -685,18 +714,33 @@ Desktop::Init()
 	if (fSettings->DefaultPlainFont() == *gFontManager->DefaultPlainFont()
 			&& !fSettings->DidLoadFontSettings()) {
 		float fontSize = fSettings->DefaultPlainFont().Size();
-		gScreenManager->Lock();
-		Screen* screen = gScreenManager->ScreenAt(0);
-		if (screen != NULL) {
-			display_mode mode;
-			screen->GetMode(mode);
-
-			if (mode.virtual_width > 3840 && mode.virtual_height > 2160)
-				fontSize *= 2.0f;
-			else if (mode.virtual_width > 1920 && mode.virtual_height > 1080)
-				fontSize *= 1.5f;
+		{
+			// The smallest monitor decides, in the pixels it actually shows:
+			// a monitor scaled up already reads comfortably, and this must
+			// not scale it a second time.
+			AutoReadLocker screenLocker(fScreenLock);
+			int32 width = 0, height = 0;
+			bool scaled = false;
+			for (int32 i = 0; i < fDisplays.CountDisplays(); i++) {
+				const DisplayInfo* display = fDisplays.DisplayAt(i);
+				if (!display->IsEnabled())
+					continue;
+				if (display->scale != 100)
+					scaled = true;
+				int32 displayWidth = display->frame.IntegerWidth() + 1;
+				int32 displayHeight = display->frame.IntegerHeight() + 1;
+				if (width == 0 || displayWidth < width)
+					width = displayWidth;
+				if (height == 0 || displayHeight < height)
+					height = displayHeight;
+			}
+			if (!scaled) {
+				if (width > 3840 && height > 2160)
+					fontSize *= 2.0f;
+				else if (width > 1920 && height > 1080)
+					fontSize *= 1.5f;
+			}
 		}
-		gScreenManager->Unlock();
 
 		// modify settings without saving them
 		const_cast<ServerFont&>(fSettings->DefaultPlainFont()).SetSize(fontSize);
@@ -750,9 +794,13 @@ Desktop::Init()
 
 	// _ScreenChanged() normally does this, but nothing calls it at cold
 	// boot, only on later mode changes.
-	gInputManager->UpdateScreenBounds(fVirtualScreen.Frame(),
-		HWInterface()->PanelScanoutOrientation(),
-		HWInterface()->PanelReflection());
+	{
+		AutoReadLocker screenLocker(fScreenLock);
+		BRegion displays = fDisplays.Region();
+		gInputManager->UpdateScreenBounds(fVirtualScreen.Frame(),
+			HWInterface()->PanelScanoutOrientation(),
+			HWInterface()->PanelReflection(), &displays);
+	}
 
 	BRegion stillAvailableOnScreen;
 	_RebuildClippingForAllWindows(stillAvailableOnScreen);
@@ -4435,16 +4483,33 @@ Desktop::_ResumeDirectFrameBufferAccess()
 }
 
 
+/*!	The hardware reports a change: a monitor was plugged in or pulled out,
+	or the display came back from suspend with its contents lost. The
+	monitors are arranged again from what the settings remember, which also
+	restores the mode after a resume.
+*/
 void
 Desktop::ScreenChanged(Screen* screen)
 {
 	AutoWriteLocker windowLocker(fWindowLock);
 
+	_SuspendDirectFrameBufferAccess();
+
 	AutoWriteLocker screenLocker(fScreenLock);
-	screen->SetPreferredMode();
+	DisplayLayout before = fDisplays;
+	if (screen->HWInterface()->HasDisplayLayout()) {
+		if (_ConfigureDisplayLayout(screen->HWInterface(), true) != B_OK)
+			screen->SetPreferredMode();
+	} else
+		screen->SetPreferredMode();
+	_RememberScreenMode(screen);
+	DisplayLayout after = fDisplays;
 	screenLocker.Unlock();
 
+	_MoveWindowsWithDisplays(before, after);
 	_ScreenChanged(screen);
+
+	_ResumeDirectFrameBufferAccess();
 }
 
 
@@ -4536,9 +4601,17 @@ Desktop::_ScreenChanged(Screen* screen)
 
 	// update our cached screen region
 	fScreenRegion.Set(newFrame);
-	gInputManager->UpdateScreenBounds(newFrame,
-		screen->HWInterface()->PanelScanoutOrientation(),
-		screen->HWInterface()->PanelReflection());
+	{
+		AutoWriteLocker screenLocker(fScreenLock);
+		_UpdateDisplays();
+		BRegion displays = fDisplays.Region();
+		gInputManager->UpdateScreenBounds(newFrame,
+			screen->HWInterface()->PanelScanoutOrientation(),
+			screen->HWInterface()->PanelReflection(), &displays);
+	}
+
+	// windows that would be left where no monitor is come along
+	_KeepWindowsOnDisplays();
 
 	BRegion background;
 	_RebuildClippingForAllWindows(background);
@@ -4570,6 +4643,313 @@ Desktop::_ScreenChanged(Screen* screen)
 		if (window->Screen() == screen)
 			window->ServerWindow()->ScreenChanged(&update);
 	}
+}
+
+
+// #pragma mark - display layout
+
+
+/*!	Reads the monitors from the hardware, puts each where the settings say
+	(or where a new one goes), and hands the arrangement to the accelerant.
+	The screen lock must be held for writing.
+*/
+status_t
+Desktop::_ConfigureDisplayLayout(::HWInterface* interface, bool switchMode)
+{
+	status_t status = fDisplays.ReadOutputs(interface);
+	if (status != B_OK) {
+		debug_printf("app_server: reading the displays failed: %s\n",
+			strerror(status));
+		return status;
+	}
+
+	fDisplays.Configure(*fSettings->DisplaysMessage(), false);
+
+	std::vector<display_output_config> configs;
+	fDisplays.GetConfigs(configs);
+	status = interface->SetDisplayLayout(configs.data(), configs.size(),
+		switchMode);
+	if (status != B_OK) {
+		debug_printf("app_server: arranging the displays failed: %s\n",
+			strerror(status));
+		fDisplays.ReadOutputs(interface);
+		return status;
+	}
+
+	// what the accelerant made of it
+	fDisplays.ReadOutputs(interface);
+	_StoreDisplayLayout();
+	return B_OK;
+}
+
+
+/*!	Brings the display list in line with the screen. The screen lock must be
+	held for writing.
+*/
+void
+Desktop::_UpdateDisplays()
+{
+	Screen* screen = fVirtualScreen.ScreenAt(0);
+	if (screen == NULL || screen->HWInterface() == NULL)
+		return;
+	::HWInterface* interface = screen->HWInterface();
+
+	if (interface->HasDisplayLayout()
+		&& fDisplays.ReadOutputs(interface) == B_OK
+		&& fDisplays.Frame() == screen->Frame())
+		return;
+
+	// Either the hardware knows nothing of layouts, or a program set a
+	// classic mode that drives one monitor with the whole frame buffer.
+	monitor_info info;
+	bool hasInfo = screen->GetMonitorInfo(info) == B_OK;
+	fDisplays.SetSingle(screen->Frame(), interface->SoftwareScale(),
+		hasInfo ? &info : NULL);
+}
+
+
+void
+Desktop::_StoreDisplayLayout()
+{
+	BMessage saved = *fSettings->DisplaysMessage();
+	fDisplays.Store(saved);
+	fSettings->SetDisplaysMessage(saved);
+}
+
+
+/*!	Keeps the per-workspace screen configurations pointing at the mode the
+	layout produced, so that nothing reverts to a mode remembered for one
+	monitor alone.
+*/
+void
+Desktop::_RememberScreenMode(Screen* screen)
+{
+	if (screen == NULL || !screen->HWInterface()->HasDisplayLayout())
+		return;
+
+	display_mode mode;
+	screen->GetMode(mode);
+	monitor_info info;
+	bool hasInfo = screen->GetMonitorInfo(info) == B_OK;
+
+	for (int32 i = 0; i < kMaxWorkspaces; i++) {
+		fWorkspaces[i].CurrentScreenConfiguration().Set(screen->ID(),
+			hasInfo ? &info : NULL, screen->Frame(), mode);
+		fWorkspaces[i].StoredScreenConfiguration().Set(screen->ID(),
+			hasInfo ? &info : NULL, screen->Frame(), mode);
+		BMessage settings;
+		fWorkspaces[i].StoreConfiguration(settings);
+		fSettings->SetWorkspacesMessage(i, settings);
+	}
+	fSettings->Save(kWorkspacesSettings);
+}
+
+
+/*!	After the monitors changed, a window can find itself where nothing is
+	shown any more. Such windows are moved onto the monitor nearest to where
+	they were. The window lock must be held for writing.
+*/
+void
+Desktop::_KeepWindowsOnDisplays()
+{
+	BRegion displays;
+	{
+		AutoReadLocker screenLocker(fScreenLock);
+		displays = fDisplays.Region();
+	}
+	if (displays.CountRects() == 0)
+		return;
+
+	for (Window* window = fAllWindows.FirstWindow(); window != NULL;
+			window = window->NextWindow(kAllWindowList)) {
+		if (window->IsHidden() || !window->InWorkspace(fCurrentWorkspace)
+			|| window->Feel() == kDesktopWindowFeel
+			|| window->IsOffscreenWindow())
+			continue;
+
+		BRect frame = window->Frame();
+		::Decorator* decorator = window->Decorator();
+		if (decorator != NULL) {
+			if (decorator->TitleBarRect().IsValid())
+				frame = frame | decorator->TitleBarRect();
+			if (decorator->BorderRect().IsValid())
+				frame = frame | decorator->BorderRect();
+		}
+
+		// Enough of the title bar left to grab counts as on screen.
+		BRegion visible(frame);
+		visible.IntersectWith(&displays);
+		BRect visibleFrame = visible.Frame();
+		if (visibleFrame.IsValid()
+			&& visibleFrame.Width() >= min_c(64.0f, frame.Width())
+			&& visibleFrame.Height() >= min_c(32.0f, frame.Height()))
+			continue;
+
+		const DisplayInfo* target;
+		{
+			AutoReadLocker screenLocker(fScreenLock);
+			target = fDisplays.DisplayFor(frame);
+		}
+		if (target == NULL)
+			continue;
+		BRect area = target->frame;
+
+		float dx = 0, dy = 0;
+		if (frame.right + dx > area.right)
+			dx = area.right - frame.right;
+		if (frame.left + dx < area.left)
+			dx = area.left - frame.left;
+		if (frame.bottom + dy > area.bottom)
+			dy = area.bottom - frame.bottom;
+		if (frame.top + dy < area.top)
+			dy = area.top - frame.top;
+		if (dx == 0 && dy == 0)
+			continue;
+
+		window->MoveBy((int32)dx, (int32)dy);
+		NotifyWindowMoved(window);
+	}
+}
+
+
+/*!	When monitors are rearranged or rescaled, the windows on each one go
+	along with it, keeping their place on it: swapping two monitors swaps
+	their windows, and a monitor that got smaller in desktop pixels keeps
+	its windows in proportion. The window lock must be held for writing.
+*/
+void
+Desktop::_MoveWindowsWithDisplays(const DisplayLayout& before,
+	const DisplayLayout& after)
+{
+	for (Window* window = fAllWindows.FirstWindow(); window != NULL;
+			window = window->NextWindow(kAllWindowList)) {
+		if (window->IsHidden() || !window->InWorkspace(fCurrentWorkspace)
+			|| window->Feel() == kDesktopWindowFeel
+			|| window->IsOffscreenWindow())
+			continue;
+
+		BRect frame = window->Frame();
+		const DisplayInfo* was = before.DisplayFor(frame);
+		if (was == NULL || !was->IsEnabled())
+			continue;
+		const DisplayInfo* now = after.DisplayByID(was->id);
+		if (now == NULL || !now->IsEnabled() || now->frame == was->frame)
+			continue;
+
+		float scaleX = (now->frame.Width() + 1) / (was->frame.Width() + 1);
+		float scaleY = (now->frame.Height() + 1) / (was->frame.Height() + 1);
+		float left = now->frame.left + (frame.left - was->frame.left) * scaleX;
+		float top = now->frame.top + (frame.top - was->frame.top) * scaleY;
+		int32 dx = (int32)roundf(left - frame.left);
+		int32 dy = (int32)roundf(top - frame.top);
+		if (dx == 0 && dy == 0)
+			continue;
+
+		window->MoveBy(dx, dy);
+		NotifyWindowMoved(window);
+	}
+}
+
+
+status_t
+Desktop::GetDisplayLayout(BMessage& layout)
+{
+	AutoReadLocker _(fScreenLock);
+
+	::HWInterface* interface = HWInterface();
+	if (interface == NULL)
+		return B_NO_INIT;
+
+	status_t status = fDisplays.Archive(layout,
+		interface->HasDisplayLayout() ? interface : NULL);
+	if (status != B_OK)
+		return status;
+
+	layout.AddRect("screen frame", fVirtualScreen.Frame());
+	layout.AddBool("has layout", interface->HasDisplayLayout());
+	layout.AddBool("zoom to display", fSettings->ZoomToDisplay());
+	return B_OK;
+}
+
+
+/*!	Applies an arrangement a client asks for, see DisplayLayout::ApplyRequest
+	for the message. It is remembered for the monitors involved.
+*/
+status_t
+Desktop::SetDisplayLayout(const BMessage& request)
+{
+	AutoWriteLocker _(fWindowLock);
+
+	Screen* screen = fVirtualScreen.ScreenAt(0);
+	if (screen == NULL || HWInterface() == NULL)
+		return B_NO_INIT;
+
+	_SuspendDirectFrameBufferAccess();
+
+	status_t status;
+	DisplayLayout before;
+	DisplayLayout after;
+	{
+		AutoWriteLocker screenLocker(fScreenLock);
+		before = fDisplays;
+
+		DisplayLayout layout = fDisplays;
+		status = layout.ApplyRequest(request);
+		if (status == B_OK && !HWInterface()->HasDisplayLayout()) {
+			// One monitor, scaled in software: the scale is all that can
+			// change.
+			const DisplayInfo* display = layout.DisplayAt(0);
+			status = display != NULL
+				? HWInterface()->SetSoftwareScale(display->scale)
+				: B_BAD_VALUE;
+			if (status == B_OK) {
+				fVirtualScreen.UpdateFrame();
+				fDisplays = layout;
+				_UpdateDisplays();
+				_StoreDisplayLayout();
+			}
+		} else if (status == B_OK) {
+			std::vector<display_output_config> configs;
+			layout.GetConfigs(configs);
+			status = HWInterface()->SetDisplayLayout(configs.data(),
+				configs.size(), true);
+			if (status == B_OK) {
+				fDisplays = layout;
+				fDisplays.ReadOutputs(HWInterface());
+				_StoreDisplayLayout();
+				_RememberScreenMode(screen);
+			}
+		}
+		after = fDisplays;
+	}
+
+	if (status == B_OK) {
+		_MoveWindowsWithDisplays(before, after);
+		_ScreenChanged(screen);
+	}
+
+	_ResumeDirectFrameBufferAccess();
+	return status;
+}
+
+
+/*!	The frame of the monitor most of \a frame is on. With \a forZoom, the
+	whole screen instead when the user turned zooming to one monitor off.
+*/
+BRect
+Desktop::DisplayFrameFor(BRect frame, bool forZoom)
+{
+	AutoReadLocker _(fScreenLock);
+
+	if (forZoom && !fSettings->ZoomToDisplay())
+		return fVirtualScreen.Frame();
+
+	// an invalid frame asks for the main display
+	const DisplayInfo* display = frame.IsValid()
+		? fDisplays.DisplayFor(frame) : fDisplays.PrimaryDisplay();
+	if (display == NULL)
+		return fVirtualScreen.Frame();
+	return display->frame;
 }
 
 

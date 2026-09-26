@@ -4559,6 +4559,16 @@ ServerWindow::HandleDirectConnection(int32 bufferState, int32 driverState)
 	if (!fDirectWindowInfo.IsSet())
 		return;
 
+	// A frame buffer scaled in software is not what the window draws in: its
+	// coordinates are the logical ones. Such windows are left disconnected,
+	// which every direct window has to cope with anyway.
+	if (fDesktop->HWInterface()->SoftwareScale() != 100
+		&& (bufferState & B_DIRECT_MODE_MASK) != B_DIRECT_STOP) {
+		if (!fIsDirectlyAccessing)
+			return;
+		bufferState = (bufferState & ~B_DIRECT_MODE_MASK) | B_DIRECT_STOP;
+	}
+
 	STRACE(("HandleDirectConnection(bufferState = %" B_PRId32 ", driverState = "
 		"%" B_PRId32 ")\n", bufferState, driverState));
 

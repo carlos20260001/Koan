@@ -65,6 +65,11 @@ public:
 			void				SetShowAllDraggers(bool show);
 			bool				ShowAllDraggers() const;
 
+			void				SetZoomToDisplay(bool zoomToDisplay);
+			bool				ZoomToDisplay() const;
+			void				SetDisplaysMessage(const BMessage& message);
+			const BMessage*		DisplaysMessage() const;
+
 			void				SetWorkspacesLayout(int32 columns,
 									int32 rows, bool save = true);
 			int32				WorkspacesCount() const;
@@ -117,6 +122,8 @@ private:
 			mode_focus_follows_mouse	fFocusFollowsMouseMode;
 			bool				fAcceptFirstClick;
 			bool				fShowAllDraggers;
+			bool				fZoomToDisplay;
+			BMessage			fDisplaysMessage;
 			int32				fWorkspacesColumns;
 			int32				fWorkspacesRows;
 			BMessage			fWorkspaceMessages[kMaxWorkspaces];

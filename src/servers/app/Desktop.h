@@ -38,6 +38,7 @@
 #include "DelayedMessage.h"
 #include "DesktopListener.h"
 #include "DesktopSettings.h"
+#include "DisplayLayout.h"
 #include "DisplayChangeTracker.h"
 #include "EventDispatcher.h"
 #include "MessageLooper.h"
@@ -165,6 +166,13 @@ public:
 			status_t			ConfirmScreenChange(team_id owner);
 			status_t			CancelScreenChange(team_id owner);
 			void				ScreenChangeOwnerDied(team_id owner);
+
+	// the monitors making up the screen
+			status_t			GetDisplayLayout(BMessage& layout);
+			status_t			SetDisplayLayout(const BMessage& request);
+			BRect				DisplayFrameFor(BRect frame, bool forZoom);
+			const DisplayLayout& Displays() const { return fDisplays; }
+									// the screen lock must be held
 
 			BRWLocker&		ScreenLocker() { return fScreenLock; }
 
@@ -390,6 +398,15 @@ private:
 			void				_ResumeDirectFrameBufferAccess();
 
 			void				_ScreenChanged(Screen* screen);
+			status_t			_ConfigureDisplayLayout(
+									::HWInterface* interface, bool switchMode);
+			void				_UpdateDisplays();
+			void				_StoreDisplayLayout();
+			void				_RememberScreenMode(Screen* screen);
+			void				_KeepWindowsOnDisplays();
+			void				_MoveWindowsWithDisplays(
+									const DisplayLayout& before,
+									const DisplayLayout& after);
 			void				_RelayoutWindowsForScreen(Screen* screen,
 									const BRect& oldFrame,
 									const BRect& newFrame);
@@ -415,6 +432,7 @@ private:
 			uid_t				fUserID;
 			char*				fTargetScreen;
 			::VirtualScreen		fVirtualScreen;
+			DisplayLayout		fDisplays;
 			ObjectDeleter<DesktopSettingsPrivate>
 								fSettings;
 			port_id				fMessagePort;

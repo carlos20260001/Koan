@@ -48,7 +48,8 @@ public:
 
 	virtual	void				UpdateScreenBounds(BRect bounds);
 	virtual	void				UpdateScreenBounds(BRect bounds,
-									int32 orientation, int32 reflection = 0);
+									int32 orientation, int32 reflection = 0,
+									const BRegion* displays = NULL);
 	virtual	bool				GetNextEvent(BMessage** _event);
 	virtual	status_t			InsertEvent(BMessage* event);
 	virtual	BMessage*			PeekLatestMouseMoved();

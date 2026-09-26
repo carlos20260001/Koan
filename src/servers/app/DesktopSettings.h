@@ -32,6 +32,7 @@ enum {
 	kAppearanceSettings	= 0x04,
 	kMouseSettings		= 0x08,
 	kDraggerSettings	= 0x10,
+	kDisplaySettings	= 0x20,
 };
 
 
@@ -63,6 +64,8 @@ public:
 			bool				AcceptFirstClick() const;
 
 			bool				ShowAllDraggers() const;
+			bool				ZoomToDisplay() const;
+			const BMessage*		DisplaysMessage() const;
 
 			int32				WorkspacesCount() const;
 			int32				WorkspacesColumns() const;
@@ -101,6 +104,8 @@ public:
 			void				SetAcceptFirstClick(bool acceptFirstClick);
 
 			void				SetShowAllDraggers(bool show);
+			void				SetZoomToDisplay(bool zoomToDisplay);
+			void				SetDisplaysMessage(const BMessage& message);
 
 			void				SetUIColors(const BMessage& colors,
 									bool* changed = NULL);

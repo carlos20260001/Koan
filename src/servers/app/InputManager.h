@@ -11,6 +11,7 @@
 
 
 #include <Locker.h>
+#include <Region.h>
 #include <ObjectList.h>
 
 
@@ -22,7 +23,7 @@ class InputManager : public BLocker {
 		virtual ~InputManager();
 
 		void UpdateScreenBounds(BRect bounds, int32 orientation = 0,
-				int32 reflection = 0);
+				int32 reflection = 0, const BRegion* displays = NULL);
 
 		// Relays the seat pointer constraint (confinement rect and
 		// relative mode) that a grab established.

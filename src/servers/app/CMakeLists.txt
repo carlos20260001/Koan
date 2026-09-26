@@ -87,6 +87,7 @@ Server(
 		Desktop.cpp
 		DesktopListener.cpp
 		DesktopSettings.cpp
+		DisplayLayout.cpp
 		DirectWindowInfo.cpp
 		DisplayChangeTracker.cpp
 		DrawState.cpp
