@@ -78,6 +78,15 @@ enum {
 	B_SCREEN_TO_SCREEN_SCALED_FILTERED_BLIT,	/* optional.
 		NOTE: source and dest may NOT overlap */
 
+	/* display outputs: the monitors one device drives, where each one sits
+	   in the frame buffer, and how it is scaled. A device without these
+	   hooks drives one monitor with the whole frame buffer. */
+	B_GET_DISPLAY_OUTPUT_COUNT = 0x600,	/* optional */
+	B_GET_DISPLAY_OUTPUTS,				/* optional */
+	B_GET_DISPLAY_OUTPUT_MODES,			/* optional */
+	B_SET_DISPLAY_LAYOUT,				/* optional */
+	B_SET_DISPLAY_CHANGE_PORT,			/* optional */
+
 	/* 3D acceleration */
 	B_ACCELERANT_PRIVATE_START = (int)0x80000000
 };
@@ -179,6 +188,50 @@ typedef struct {
 	uint32	max_vertical_frequency;
 	uint32	max_pixel_clock;			/* in kHz */
 } monitor_info;
+
+
+/* display outputs */
+#define B_DISPLAY_OUTPUT_VERSION		1
+#define B_DISPLAY_OUTPUT_NAME_LENGTH	32
+#define B_DISPLAY_OUTPUT_EDID_LENGTH	512
+
+enum {
+	B_DISPLAY_OUTPUT_CONNECTED	= 1 << 0,	/* a monitor is attached */
+	B_DISPLAY_OUTPUT_ENABLED	= 1 << 1,	/* the output is being driven */
+	B_DISPLAY_OUTPUT_SCALABLE	= 1 << 2,	/* the hardware scales this */
+											/* output's frame buffer region */
+											/* to the monitor's resolution */
+	B_DISPLAY_OUTPUT_INTERNAL	= 1 << 3,	/* a built-in panel */
+};
+
+typedef struct {
+	uint32			version;			/* B_DISPLAY_OUTPUT_VERSION */
+	uint32			id;					/* identifies the connector; stable */
+										/* for the life of the accelerant */
+	char			name[B_DISPLAY_OUTPUT_NAME_LENGTH];	/* e.g. "DP-2" */
+	uint32			flags;				/* B_DISPLAY_OUTPUT_* */
+	int32			x;					/* the region of the frame buffer */
+	int32			y;					/* this output shows, in frame */
+	uint16			width;				/* buffer pixels */
+	uint16			height;
+	uint16			scale;				/* percent; 100 shows one frame */
+										/* buffer pixel per monitor pixel */
+	uint16			_reserved0;
+	display_timing	native_timing;		/* the monitor's preferred timing */
+	display_timing	timing;				/* the timing it is driven with */
+	uint32			edid_length;		/* 0 when the monitor has no EDID */
+	uint8			edid[B_DISPLAY_OUTPUT_EDID_LENGTH];
+} display_output;
+
+typedef struct {
+	uint32			id;
+	uint32			flags;				/* B_DISPLAY_OUTPUT_ENABLED */
+	int32			x;					/* position in the frame buffer */
+	int32			y;
+	uint16			scale;				/* percent, see display_output */
+	uint16			_reserved0;
+	display_timing	timing;				/* all zero: the native timing */
+} display_output_config;
 
 
 /* mode flags */
@@ -311,6 +364,25 @@ typedef status_t (*set_brightness)(float brightness);
 typedef status_t (*get_brightness)(float* brightness);
 
 typedef sem_id (*accelerant_retrace_semaphore)(void);
+
+typedef uint32 (*get_display_output_count)(void);
+typedef status_t (*get_display_outputs)(display_output* outputs,
+	uint32* _count);
+	/* _count is the capacity of the array on entry and the number of
+	   outputs described on return. */
+typedef status_t (*get_display_output_modes)(uint32 id, display_mode* modes,
+	uint32* _count);
+	/* The timings the monitor on that output accepts; _count as above. */
+typedef status_t (*set_display_layout)(const display_output_config* configs,
+	uint32 count, display_mode* _mode);
+	/* Arranges the outputs in the frame buffer. Outputs left out are
+	   disabled. Returns the mode describing the resulting frame buffer,
+	   whose virtual size covers every enabled output's region; the layout
+	   takes effect when that mode is set with B_SET_DISPLAY_MODE. */
+typedef status_t (*set_display_change_port)(port_id port, int32 code);
+	/* The accelerant writes an empty message with that code to the port
+	   whenever a monitor is connected or disconnected. A negative port id
+	   stops the notifications. */
 
 typedef status_t (*set_cursor_shape)(uint16 width, uint16 height,
 	uint16 hotX, uint16 hotY, const uint8* andMask, const uint8* xorMask);
