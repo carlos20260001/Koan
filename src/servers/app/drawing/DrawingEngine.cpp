@@ -1709,11 +1709,16 @@ DrawingEngine::ReadBitmap(ServerBitmap* bitmap, bool drawCursor, BRect bounds)
 {
 	ASSERT_EXCLUSIVE_LOCKED();
 
-	RenderingBuffer* buffer = fGraphicsCard->FrontBuffer();
+	float scale = fPainter->DeviceScale();
+	// At native density direct windows may update only the front buffer.
+	// At a higher density they are disconnected (see HandleDirectConnection),
+	// so the drawing buffer holds the complete desktop. Read its RAM copy
+	// instead of pulling the high-resolution frame back across the GPU bus.
+	RenderingBuffer* buffer = scale != 1
+		? fGraphicsCard->DrawingBuffer() : fGraphicsCard->FrontBuffer();
 	if (buffer == NULL)
 		return B_ERROR;
 
-	float scale = fPainter->DeviceScale();
 	if (scale != 1) {
 		// The screen has more pixels than the caller's bitmap: average each
 		// block of them into one, which is what a screenshot of a HiDPI
