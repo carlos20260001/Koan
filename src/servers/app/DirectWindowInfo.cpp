@@ -10,6 +10,7 @@
 
 #include "DirectWindowInfo.h"
 
+#include <math.h>
 #include <stdio.h>
 #include <string.h>
 #include <syslog.h>
@@ -43,6 +44,7 @@ DirectWindowInfo::DirectWindowInfo()
 	memset(fBufferInfo, 0, DIRECT_BUFFER_INFO_AREA_SIZE);
 	fBufferInfo->buffer_state = B_DIRECT_STOP;
 	fBufferInfo->bits_area = -1;
+	fBufferInfo->drawing_bits_area = -1;
 
 	// The sync words live in the shared area tail, mapped by the daemon too.
 	fDisableEvent.SetTo(direct_window_disable_state(fBufferInfo));
@@ -91,10 +93,48 @@ DirectWindowInfo::GetSyncData(direct_window_sync_data& data) const
 }
 
 
+/*!	A rectangle in the window system's coordinates in frame buffer pixels,
+	rounded the way the Painter rounds (DrawingEngine::_ScaleRegion()), so
+	that what a direct window draws meets what app_server draws next to it.
+*/
+static clipping_rect
+to_device_pixels(clipping_rect rect, float scale)
+{
+	rect.left = (int32)floorf(rect.left * scale);
+	rect.top = (int32)floorf(rect.top * scale);
+	rect.right = (int32)floorf((rect.right + 1) * scale) - 1;
+	rect.bottom = (int32)floorf((rect.bottom + 1) * scale) - 1;
+	return rect;
+}
+
+
+/*!	The area that holds \a buffer, made cloneable, if the buffer is an area
+	of its own; -1 otherwise. A heap allocation is never handed out: the
+	area around it would hold other things too.
+*/
+static area_id
+area_of_buffer(RenderingBuffer* buffer)
+{
+	if (buffer == NULL || !IS_USER_ADDRESS(buffer->Bits()))
+		return -1;
+
+	area_id area = area_for(buffer->Bits());
+	area_info info;
+	if (area < 0 || get_area_info(area, &info) != B_OK
+		|| info.address != buffer->Bits()
+		|| info.size < (size_t)buffer->BytesPerRow() * buffer->Height())
+		return -1;
+
+	set_area_protection(area, B_READ_AREA | B_WRITE_AREA | B_CLONEABLE_AREA);
+	return area;
+}
+
+
 status_t
 DirectWindowInfo::SetState(direct_buffer_state bufferState,
 	direct_driver_state driverState, RenderingBuffer* buffer,
-	const BRect& windowFrame, const BRegion& clipRegion)
+	const BRect& windowFrame, const BRegion& clipRegion, uint16 deviceScale,
+	RenderingBuffer* drawingBuffer)
 {
 	if ((fBufferInfo->buffer_state & B_DIRECT_MODE_MASK) == B_DIRECT_STOP
 		&& (bufferState & B_DIRECT_MODE_MASK) != B_DIRECT_START)
@@ -173,7 +213,17 @@ DirectWindowInfo::SetState(direct_buffer_state bufferState,
 		fBufferInfo->layout = B_BUFFER_NONINTERLEAVED;
 		fBufferInfo->orientation = B_BUFFER_TOP_TO_BOTTOM;
 			// TODO
+
+		fBufferInfo->drawing_bits_area = area_of_buffer(drawingBuffer);
+		fBufferInfo->drawing_bytes_per_row
+			= fBufferInfo->drawing_bits_area >= 0
+				? drawingBuffer->BytesPerRow() : 0;
 	}
+
+	// Only windows that draw in frame buffer pixels are told the density;
+	// for the others the coordinates are their own and it stays 0.
+	fBufferInfo->device_scale = deviceScale;
+	float scale = deviceScale > 100 ? deviceScale / 100.0f : 1;
 
 	if ((bufferState & B_DIRECT_MODE_MASK) != B_DIRECT_STOP) {
 		fBufferInfo->window_bounds = to_clipping_rect(windowFrame);
@@ -188,6 +238,17 @@ DirectWindowInfo::SetState(direct_buffer_state bufferState,
 
 		for (uint32 i = 0; i < fBufferInfo->clip_list_count; i++)
 			fBufferInfo->clip_list[i] = clipRegion.RectAtInt(i);
+
+		if (scale != 1) {
+			fBufferInfo->window_bounds = to_device_pixels(
+				fBufferInfo->window_bounds, scale);
+			fBufferInfo->clip_bounds = to_device_pixels(
+				fBufferInfo->clip_bounds, scale);
+			for (uint32 i = 0; i < fBufferInfo->clip_list_count; i++) {
+				fBufferInfo->clip_list[i] = to_device_pixels(
+					fBufferInfo->clip_list[i], scale);
+			}
+		}
 	}
 
 	return _SynchronizeWithClient();

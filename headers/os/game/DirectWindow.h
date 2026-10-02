@@ -45,7 +45,17 @@ typedef struct {
 	buffer_layout		layout;
 	buffer_orientation	orientation;
 	area_id				bits_area;
-	uint32				_reserved1[10];
+	// Set for a window with B_DIRECT_DEVICE_PIXELS. device_scale is the
+	// density the desktop is drawn at, in percent; above 100 the window
+	// bounds and clipping are in frame buffer pixels rather than in the
+	// window's own coordinates. drawing_bits_area, unless it is -1, is the
+	// window system's own copy of the screen: it draws there first and
+	// copies to the frame buffer, so whatever a window puts in the frame
+	// buffer belongs there as well, or the next copy replaces it.
+	uint32				device_scale;
+	area_id				drawing_bits_area;
+	int32				drawing_bytes_per_row;
+	uint32				_reserved1[7];
 	uint32				clip_list_count;
 	clipping_rect		window_bounds;
 	clipping_rect		clip_bounds;

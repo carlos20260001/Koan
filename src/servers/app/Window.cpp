@@ -1782,6 +1782,7 @@ Window::ValidWindowFlags()
 		| B_AUTO_UPDATE_SIZE_LIMITS
 		| B_CLOSE_ON_ESCAPE
 		| B_NO_SERVER_SIDE_WINDOW_MODIFIERS
+		| B_DIRECT_DEVICE_PIXELS
 		| kWindowScreenFlag
 		| kAcceptKeyboardFocusFlag;
 }

@@ -33,7 +33,9 @@ public:
 									direct_driver_state driverState,
 									RenderingBuffer* renderingBuffer,
 									const BRect& windowFrame,
-									const BRegion& clipRegion);
+									const BRegion& clipRegion,
+									uint16 deviceScale = 0,
+									RenderingBuffer* drawingBuffer = NULL);
 
 			void				EnableFullScreen(const BRect& frame,
 									window_feel feel);

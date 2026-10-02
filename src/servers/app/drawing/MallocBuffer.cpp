@@ -1,6 +1,6 @@
 // MallocBuffer.h
 
-#include <malloc.h>
+#include <OS.h>
 
 #include "MallocBuffer.h"
 
@@ -10,22 +10,33 @@
 // could be avoided, but I'm in a hurry... :-)
 
 // constructor
+//
+// The pixels are an area of their own rather than a heap block: a direct
+// window that draws in frame buffer pixels on a scaled desktop is given this
+// buffer to keep up to date as well (DirectWindowInfo), and handing out the
+// area around a heap block would hand out everything else in it too.
 MallocBuffer::MallocBuffer(uint32 width,
 						   uint32 height)
 	: fBuffer(NULL),
+	  fArea(-1),
 	  fWidth(width),
 	  fHeight(height)
 {
 	if (fWidth > 0 && fHeight > 0) {
-		fBuffer = malloc((fWidth * 4) * fHeight);
+		size_t size = ((size_t)fWidth * 4 * fHeight + B_PAGE_SIZE - 1)
+			& ~(size_t)(B_PAGE_SIZE - 1);
+		fArea = create_area("back buffer", &fBuffer, B_ANY_ADDRESS, size,
+			B_NO_LOCK, B_READ_AREA | B_WRITE_AREA);
+		if (fArea < 0)
+			fBuffer = NULL;
 	}
 }
 
 // destructor
 MallocBuffer::~MallocBuffer()
 {
-	if (fBuffer)
-		free(fBuffer);
+	if (fArea >= 0)
+		delete_area(fArea);
 }
 
 // InitCheck

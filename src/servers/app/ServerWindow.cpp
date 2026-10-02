@@ -828,8 +828,20 @@ ServerWindow::_DispatchMessage(int32 code, BPrivate::LinkReceiver& link)
 					? B_OK : B_BAD_VALUE;
 			}
 
-			if (status == B_OK && !fWindow->IsOffscreenWindow())
+			if (status == B_OK && !fWindow->IsOffscreenWindow()) {
+				uint32 changed = fWindow->Flags() ^ flags;
 				fDesktop->SetWindowFlags(fWindow.Get(), flags);
+
+				// On a desktop drawn at a higher density this decides whether
+				// a direct window is connected at all.
+				if ((changed & B_DIRECT_DEVICE_PIXELS) != 0
+					&& HasDirectFrameBufferAccess() && fWindow->IsVisible()) {
+					if (fIsDirectlyAccessing)
+						HandleDirectConnection(B_DIRECT_STOP);
+					HandleDirectConnection(B_DIRECT_START | B_BUFFER_RESET,
+						B_MODE_CHANGED);
+				}
+			}
 
 			fLink.StartMessage(status);
 			fLink.Flush();
@@ -4612,9 +4624,16 @@ ServerWindow::HandleDirectConnection(int32 bufferState, int32 driverState)
 
 	// A frame buffer scaled in software is not what the window draws in: its
 	// coordinates are the logical ones. Such windows are left disconnected,
-	// which every direct window has to cope with anyway.
-	if ((fDesktop->HWInterface()->SoftwareScale() != 100
-			|| fDesktop->HWInterface()->RenderScale() != 100)
+	// which every direct window has to cope with anyway. On a desktop drawn
+	// at a higher density the frame buffer has more pixels than the window
+	// has coordinates; a window that asked for B_DIRECT_DEVICE_PIXELS is
+	// told where it is in those pixels instead, and draws in them.
+	::HWInterface* graphicsCard = fDesktop->HWInterface();
+	bool devicePixels = (fWindow->Flags() & B_DIRECT_DEVICE_PIXELS) != 0
+		&& graphicsCard->SoftwareScale() == 100;
+	if ((graphicsCard->SoftwareScale() != 100
+			|| graphicsCard->RenderScale() != 100)
+		&& !devicePixels
 		&& (bufferState & B_DIRECT_MODE_MASK) != B_DIRECT_STOP) {
 		if (!fIsDirectlyAccessing)
 			return;
@@ -4634,7 +4653,10 @@ ServerWindow::HandleDirectConnection(int32 bufferState, int32 driverState)
 	status_t status = fDirectWindowInfo->SetState(
 		(direct_buffer_state)bufferState, (direct_driver_state)driverState,
 		hwInterface->FrontBuffer(), fWindow->Frame(),
-		fWindow->VisibleContentRegion());
+		fWindow->VisibleContentRegion(),
+		devicePixels ? hwInterface->RenderScale() : 0,
+		devicePixels && hwInterface->IsDoubleBuffered()
+			? hwInterface->BackBuffer() : NULL);
 
 	hwInterface->UnlockParallelAccess();
 

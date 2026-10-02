@@ -77,7 +77,11 @@ enum {
 	B_SAME_POSITION_IN_ALL_WORKSPACES	= 0x00200000,
 	B_AUTO_UPDATE_SIZE_LIMITS			= 0x00400000,
 	B_CLOSE_ON_ESCAPE					= 0x00800000,
-	B_NO_SERVER_SIDE_WINDOW_MODIFIERS	= 0x00000200
+	B_NO_SERVER_SIDE_WINDOW_MODIFIERS	= 0x00000200,
+	B_DIRECT_DEVICE_PIXELS				= 0x00000400
+		// a BDirectWindow that draws in the frame buffer's own pixels,
+		// so it stays connected when the desktop is drawn at a higher
+		// density (see direct_buffer_info::device_scale)
 };
 
 #define B_CURRENT_WORKSPACE				0

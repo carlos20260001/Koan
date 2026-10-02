@@ -24,6 +24,7 @@ class MallocBuffer : public RenderingBuffer {
  private:
 
 			void*				fBuffer;
+			area_id				fArea;
 			uint32				fWidth;
 			uint32				fHeight;
 };

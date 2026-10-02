@@ -1712,7 +1712,8 @@ DrawingEngine::ReadBitmap(ServerBitmap* bitmap, bool drawCursor, BRect bounds)
 	float scale = fPainter->DeviceScale();
 	// At native density direct windows may update only the front buffer.
 	// At a higher density they are disconnected (see HandleDirectConnection),
-	// so the drawing buffer holds the complete desktop. Read its RAM copy
+	// or, with B_DIRECT_DEVICE_PIXELS, keep the drawing buffer up to date
+	// themselves, so it holds the complete desktop. Read its RAM copy
 	// instead of pulling the high-resolution frame back across the GPU bus.
 	RenderingBuffer* buffer = scale != 1
 		? fGraphicsCard->DrawingBuffer() : fGraphicsCard->FrontBuffer();
