@@ -46,7 +46,8 @@ typedef struct {
 	buffer_orientation	orientation;
 	area_id				bits_area;
 	// Set for a window with B_DIRECT_DEVICE_PIXELS. device_scale is the
-	// density the desktop is drawn at, in percent; above 100 the window
+	// density the desktop is drawn at in percent (200 at 200 percent, not
+	// 2; 0 for windows without the flag); above 100 the window
 	// bounds and clipping are in frame buffer pixels rather than in the
 	// window's own coordinates. drawing_bits_area, unless it is -1, is the
 	// window system's own copy of the screen: it draws there first and
