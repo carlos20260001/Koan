@@ -25,6 +25,7 @@
 #include "ServerBitmap.h"
 #include "ServerCursor.h"
 #include "RenderingBuffer.h"
+#include "ScaledReadback.h"
 
 #include "drawing_support.h"
 
@@ -1737,6 +1738,63 @@ DrawingEngine::ReadBitmap(ServerBitmap* bitmap, bool drawCursor, BRect bounds)
 
 		int32 width = bounds.IntegerWidth() + 1;
 		int32 height = bounds.IntegerHeight() + 1;
+
+		// The drawing buffer is in memory: average its pixels straight into
+		// the caller's bitmap. This runs with the engine locked, and every
+		// window waits meanwhile; copying the buffer first and averaging
+		// pixel by pixel took a quarter of a second for 3840x1080 at 200%.
+		color_space bufferSpace = buffer->ColorSpace();
+		if (bufferSpace == B_RGB32 || bufferSpace == B_RGBA32) {
+			ScaledReadbackPixels source = {
+				(const uint8*)buffer->Bits(), buffer->BytesPerRow() };
+			ServerCursorReference cursorRef;
+			ScaledReadbackCursor cursorInfo;
+			const ScaledReadbackCursor* cursorPointer = NULL;
+			if (drawCursor) {
+				cursorRef = fGraphicsCard->Cursor();
+				ServerCursor* cursor = cursorRef.Get();
+				if (cursor != NULL) {
+					BPoint position = fGraphicsCard->CursorPosition();
+					cursorInfo.bits = (const uint8*)cursor->Bits();
+					cursorInfo.width = cursor->Width();
+					cursorInfo.height = cursor->Height();
+					cursorInfo.left = (int32)(floorf(position.x * scale)
+						- cursor->GetHotSpot().x);
+					cursorInfo.top = (int32)(floorf(position.y * scale)
+						- cursor->GetHotSpot().y);
+					cursorPointer = &cursorInfo;
+				}
+			}
+
+			color_space space = bitmap->ColorSpace();
+			if ((space == B_RGB32 || space == B_RGBA32)
+				&& bitmap->Bits() != NULL) {
+				return scaled_readback(source, scale, bounds.left, bounds.top,
+					min_c(width, bitmap->Width()),
+					min_c(height, bitmap->Height()),
+					(int32)deviceBounds.left, (int32)deviceBounds.top,
+					(int32)deviceBounds.right, (int32)deviceBounds.bottom,
+					cursorPointer, bitmap->Bits(), bitmap->BytesPerRow());
+			}
+
+			// Another format: converted from 32 bits by ImportBits().
+			BBitmap logical(BRect(0, 0, width - 1, height - 1),
+				B_BITMAP_NO_SERVER_LINK, B_RGB32);
+			if (logical.InitCheck() != B_OK)
+				return logical.InitCheck();
+			status_t result = scaled_readback(source, scale, bounds.left,
+				bounds.top, width, height, (int32)deviceBounds.left,
+				(int32)deviceBounds.top, (int32)deviceBounds.right,
+				(int32)deviceBounds.bottom, cursorPointer,
+				(uint8*)logical.Bits(), logical.BytesPerRow());
+			if (result != B_OK)
+				return result;
+			return bitmap->ImportBits(logical.Bits(), logical.BitsLength(),
+				logical.BytesPerRow(), logical.ColorSpace(), BPoint(0, 0),
+				BPoint(0, 0), width, height);
+		}
+
+		// Other frame buffer formats: a converted copy first.
 		int32 deviceWidth = deviceBounds.IntegerWidth() + 1;
 		int32 deviceHeight = deviceBounds.IntegerHeight() + 1;
 		BBitmap device(BRect(0, 0, deviceWidth - 1, deviceHeight - 1),

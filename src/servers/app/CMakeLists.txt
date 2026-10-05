@@ -153,6 +153,7 @@ Server(
 		drawing/drawing_support.cpp
 		drawing/DrawingEngine.cpp
 		drawing/MallocBuffer.cpp
+		drawing/ScaledReadback.cpp
 		drawing/PatternHandler.cpp
 		drawing/Overlay.cpp
 		drawing/BitmapHWInterface.cpp
