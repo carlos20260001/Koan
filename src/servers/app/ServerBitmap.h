@@ -16,6 +16,7 @@
 #include <OS.h>
 
 #include <Referenceable.h>
+#include <locks.h>
 
 #include "ClientMemoryAllocator.h"
 
@@ -24,6 +25,8 @@ class BitmapManager;
 class HWInterface;
 class Overlay;
 class ServerApp;
+class BMessage;
+struct BitmapVectorIcon;
 
 
 /*!	\class ServerBitmap ServerBitmap.h
@@ -80,6 +83,8 @@ public:
 								int32 height);
 
 			void			PrintToStream();
+			status_t		SetVectorIcon(const BMessage& description);
+			BReference<ServerBitmap> ScaledIcon(float scale, BRect& source) const;
 
 protected:
 	friend class BitmapManager;
@@ -107,6 +112,8 @@ protected:
 
 			ServerApp*		fOwner;
 			int32			fToken;
+	mutable	mutex			fIconLock;
+	mutable	BitmapVectorIcon* fVectorIcon;
 };
 
 class UtilityBitmap : public ServerBitmap {

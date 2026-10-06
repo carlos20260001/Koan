@@ -15,6 +15,7 @@
 #include <new>
 
 #include <Bitmap.h>
+#include <BitmapPrivate.h>
 
 #include <AutoDeleter.h>
 
@@ -228,6 +229,7 @@ BIcon::UpdateIcon(const BBitmap* bitmap, uint32 flags, BIcon*& _icon)
 		return error;
 	}
 
+	delete _icon;
 	_icon = icon;
 	return B_OK;
 }
@@ -346,6 +348,8 @@ BIcon::_TrimBitmap(const BBitmap* bitmap, bool keepAspect,
 		bits += bpr;
 	}
 
+	BBitmap::Private(trimmedBitmap).CopyVectorIcon(bitmap,
+		B_VECTOR_ICON_UNCHANGED, &trimmed);
 	_trimmedBitmap = trimmedBitmap;
 	return B_OK;
 }
@@ -622,6 +626,20 @@ BIcon::_MakeBitmaps(const BBitmap* bitmap, uint32 flags)
 	} else {
 		// unsupported format
 		return B_BAD_VALUE;
+	}
+
+	bool opaque = format == B_RGB32 || format == B_RGB32_BIG;
+	BBitmap::Private(normalBitmap).CopyVectorIcon(bitmap,
+		opaque ? B_VECTOR_ICON_OPAQUE : B_VECTOR_ICON_UNCHANGED);
+	if (clickedBitmap != NULL)
+		BBitmap::Private(clickedBitmap).CopyVectorIcon(normalBitmap, B_VECTOR_ICON_ACTIVE);
+	if (disabledBitmap != NULL) {
+		BBitmap::Private(disabledBitmap).CopyVectorIcon(bitmap, opaque
+			? B_VECTOR_ICON_DISABLED_OPAQUE : B_VECTOR_ICON_DISABLED);
+	}
+	if (disabledClickedBitmap != NULL) {
+		BBitmap::Private(disabledClickedBitmap).CopyVectorIcon(bitmap, opaque
+			? B_VECTOR_ICON_DISABLED_ACTIVE_OPAQUE : B_VECTOR_ICON_DISABLED_ACTIVE);
 	}
 
 	// make the partially-on bitmaps a copy of the on bitmaps

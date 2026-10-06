@@ -51,6 +51,34 @@ static BObjectList<BBitmap> sBitmapList;
 static BLocker sBitmapListLock("BBitmap list");
 
 
+// Keep optional icon information out of BBitmap's public ABI. The saved pixels
+// make raw Bits() writes authoritative: changed bitmaps lose their vector
+// representation rather than silently drawing the old artwork.
+struct BitmapIconData {
+	BitmapIconData(const BBitmap* owner)
+		: bitmap(owner), pixels(NULL), size(0) {}
+	~BitmapIconData() { delete[] pixels; }
+	const BBitmap* bitmap;
+	BMessage description;
+	uint8* pixels;
+	size_t size;
+};
+
+static BObjectList<BitmapIconData, true> sBitmapIcons;
+static BLocker sBitmapIconsLock("BBitmap icons");
+
+static BitmapIconData*
+find_bitmap_icon(const BBitmap* bitmap)
+{
+	for (int32 i = 0; i < sBitmapIcons.CountItems(); i++) {
+		BitmapIconData* icon = sBitmapIcons.ItemAt(i);
+		if (icon->bitmap == bitmap)
+			return icon;
+	}
+	return NULL;
+}
+
+
 void
 reconnect_bitmaps_to_app_server()
 {
@@ -80,6 +108,135 @@ void
 BBitmap::Private::ReconnectToAppServer()
 {
 	fBitmap->_ReconnectToAppServer();
+	BMessage icon;
+	if (GetVectorIcon(icon) == B_OK)
+		SetVectorIcon(icon);
+}
+
+
+status_t
+BBitmap::Private::SetVectorIcon(const uint8* data, size_t size)
+{
+	if (data == NULL || size == 0 || size > 256 * 1024)
+		return B_BAD_VALUE;
+	BMessage description;
+	status_t status = description.AddData("data", B_RAW_TYPE, data, size);
+	BRect bounds = fBitmap->Bounds().OffsetToCopy(B_ORIGIN);
+	if (status == B_OK)
+		status = description.AddRect("bounds", bounds);
+	if (status == B_OK)
+		status = description.AddRect("crop", bounds);
+	if (status == B_OK && fBitmap->ColorSpace() == B_CMAP8)
+		status = description.AddInt32("effect", B_VECTOR_ICON_CMAP8);
+	return status == B_OK ? SetVectorIcon(description) : status;
+}
+
+
+status_t
+BBitmap::Private::SetVectorIcon(const BMessage& description)
+{
+	if (fBitmap->InitCheck() != B_OK || fBitmap->BitsLength() > 4 * 1024 * 1024
+		|| (fBitmap->Flags() & (B_BITMAP_ACCEPTS_VIEWS | B_BITMAP_WILL_OVERLAY)) != 0)
+		return B_BAD_VALUE;
+
+	BitmapIconData* icon = new(std::nothrow) BitmapIconData(fBitmap);
+	if (icon == NULL)
+		return B_NO_MEMORY;
+	icon->size = fBitmap->BitsLength();
+	icon->pixels = new(std::nothrow) uint8[icon->size];
+	if (icon->pixels == NULL) {
+		delete icon;
+		return B_NO_MEMORY;
+	}
+	memcpy(icon->pixels, fBitmap->Bits(), icon->size);
+	icon->description = description;
+	{
+		BAutolock lock(sBitmapIconsLock);
+		BitmapIconData* old = find_bitmap_icon(fBitmap);
+		if (old != NULL)
+			sBitmapIcons.RemoveItem(old, true);
+		if (!sBitmapIcons.AddItem(icon)) {
+			delete icon;
+			return B_NO_MEMORY;
+		}
+	}
+
+	if (fBitmap->fServerToken < 0)
+		return B_OK;
+
+	ssize_t size = description.FlattenedSize();
+	if (size <= 0 || size > 512 * 1024)
+		return B_BAD_VALUE;
+	char* bytes = new(std::nothrow) char[size];
+	if (bytes == NULL)
+		return B_NO_MEMORY;
+	status_t status = description.Flatten(bytes, size);
+	if (status == B_OK) {
+		AppServerLink link;
+		link.StartMessage(AS_SET_BITMAP_VECTOR_ICON);
+		link.Attach<int32>(fBitmap->fServerToken);
+		link.Attach<int32>(size);
+		link.Attach(bytes, size);
+		status_t reply;
+		status = link.FlushWithReply(reply);
+		if (status == B_OK)
+			status = reply;
+	}
+	delete[] bytes;
+	return status;
+}
+
+
+status_t
+BBitmap::Private::GetVectorIcon(BMessage& description) const
+{
+	BAutolock lock(sBitmapIconsLock);
+	BitmapIconData* icon = find_bitmap_icon(fBitmap);
+	if (icon == NULL)
+		return B_ENTRY_NOT_FOUND;
+	if (icon->size != fBitmap->BitsLength()
+		|| memcmp(icon->pixels, fBitmap->Bits(), icon->size) != 0) {
+		sBitmapIcons.RemoveItem(icon, true);
+		return B_ENTRY_NOT_FOUND;
+	}
+	description = icon->description;
+	return B_OK;
+}
+
+
+void
+BBitmap::Private::CopyVectorIcon(const BBitmap* source, uint32 effect,
+	const BRect* crop)
+{
+	if (source == NULL)
+		return;
+	color_space space = fBitmap->ColorSpace();
+	if (space != B_RGBA32 && space != B_RGBA32_BIG && space != B_RGB32
+		&& space != B_RGB32_BIG && space != B_CMAP8)
+		return;
+	BMessage description;
+	if (Private(const_cast<BBitmap*>(source)).GetVectorIcon(description) != B_OK)
+		return;
+	if (crop != NULL) {
+		BRect sourceCrop;
+		if (description.FindRect("crop", &sourceCrop) != B_OK)
+			return;
+		BRect newCrop = crop->OffsetByCopy(sourceCrop.LeftTop()
+			- source->Bounds().LeftTop());
+		if (!sourceCrop.Contains(newCrop))
+			return;
+		description.ReplaceRect("crop", newCrop);
+	}
+	if (space != source->ColorSpace()) {
+		if (space == B_RGB32 || space == B_RGB32_BIG
+			|| source->ColorSpace() == B_RGB32 || source->ColorSpace() == B_RGB32_BIG)
+			description.AddInt32("effect", B_VECTOR_ICON_OPAQUE);
+		else if (space == B_CMAP8)
+			description.AddInt32("effect", B_VECTOR_ICON_CMAP8);
+	}
+	if (effect != B_VECTOR_ICON_UNCHANGED)
+		description.AddInt32("effect", effect);
+	SetVectorIcon(description);
 }
 
 
@@ -273,6 +430,7 @@ BBitmap::BBitmap(const BBitmap* source, bool acceptsViews, bool needsContiguous)
 			memcpy(Bits(), source->Bits(), min_c(BitsLength(),
 				source->BitsLength()));
 			fDensity = source->fDensity;
+			Private(this).CopyVectorIcon(source);
 		}
 	}
 }
@@ -303,6 +461,7 @@ BBitmap::BBitmap(const BBitmap& source, uint32 flags)
 	if (IsValid()) {
 		memcpy(Bits(), source.Bits(), min_c(BitsLength(), source.BitsLength()));
 		fDensity = source.fDensity;
+		Private(this).CopyVectorIcon(&source);
 	}
 }
 
@@ -412,6 +571,9 @@ BBitmap::BBitmap(BMessage* data)
 			if ((size_t)size == fSize) {
 				_AssertPointer();
 				memcpy(fBasePointer, buffer, size);
+				BMessage icon;
+				if (data->FindMessage("_vector_icon", &icon) == B_OK)
+					Private(this).SetVectorIcon(icon);
 			}
 		}
 	}
@@ -486,6 +648,10 @@ BBitmap::Archive(BMessage* data, bool deep) const
 	if (ret == B_OK) {
 		const_cast<BBitmap*>(this)->_AssertPointer();
 		ret = data->AddData("_data", B_RAW_TYPE, fBasePointer, fSize);
+		BMessage icon;
+		if (ret == B_OK
+			&& Private(const_cast<BBitmap*>(this)).GetVectorIcon(icon) == B_OK)
+			ret = data->AddMessage("_vector_icon", &icon);
 	}
 	return ret;
 }
@@ -877,8 +1043,11 @@ BBitmap::ImportBits(const BBitmap* bitmap)
 	if (!bitmap || bitmap->InitCheck() != B_OK || bitmap->Bounds() != fBounds)
 		return B_BAD_VALUE;
 
-	return ImportBits(bitmap->Bits(), bitmap->BitsLength(),
+	status_t status = ImportBits(bitmap->Bits(), bitmap->BitsLength(),
 		bitmap->BytesPerRow(), 0, bitmap->ColorSpace());
+	if (status == B_OK)
+		Private(this).CopyVectorIcon(bitmap);
+	return status;
 }
 
 
@@ -1067,6 +1236,7 @@ BBitmap::operator=(const BBitmap& source)
 	if (IsValid()) {
 		memcpy(Bits(), source.Bits(), min_c(BitsLength(), source.BitsLength()));
 		fDensity = source.fDensity;
+		Private(this).CopyVectorIcon(&source);
 	}
 
 	return *this;
@@ -1316,6 +1486,13 @@ BBitmap::_InitObject(BRect bounds, color_space colorSpace, uint32 flags,
 void
 BBitmap::_CleanUp()
 {
+	{
+		BAutolock lock(sBitmapIconsLock);
+		BitmapIconData* icon = find_bitmap_icon(this);
+		if (icon != NULL)
+			sBitmapIcons.RemoveItem(icon, true);
+	}
+
 	if (fWindow != NULL) {
 		if (fWindow->Lock())
 			delete fWindow;

@@ -204,7 +204,8 @@ DisplayLayout::ReadOutputs(HWInterface* interface)
 	whole frame buffer.
 */
 void
-DisplayLayout::SetSingle(BRect frame, uint16 scale, const monitor_info* info)
+DisplayLayout::SetSingle(BRect frame, uint16 scale, const monitor_info* info,
+	const display_timing* timing)
 {
 	DisplayInfo display;
 	display.id = 0;
@@ -227,6 +228,8 @@ DisplayLayout::SetSingle(BRect frame, uint16 scale, const monitor_info* info)
 		= (uint16)(frame.IntegerWidth() + 1) * scale / 100;
 	display.native.v_display = display.timing.v_display
 		= (uint16)(frame.IntegerHeight() + 1) * scale / 100;
+	if (timing != NULL)
+		display.native = display.timing = *timing;
 	if (info != NULL) {
 		display.vendor = info->vendor;
 		display.monitorName = info->name;

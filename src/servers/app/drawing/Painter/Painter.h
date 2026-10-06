@@ -290,6 +290,8 @@ private:
 			BPoint				_Align(const BPoint& point,
 									bool centerOffset = true) const;
 			BRect				_Clipped(const BRect& rect) const;
+			void				_MakeRectPath(const BPoint& a,
+									const BPoint& b) const;
 			BRect				_DeviceRect(const BRect& rect) const;
 									// a logical pixel rectangle in buffer
 									// pixels

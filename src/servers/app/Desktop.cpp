@@ -2121,9 +2121,13 @@ Desktop::MoveWindowBy(Window* window, float x, float y, int32 workspace)
 	// NOTE: Having all windows locked should prevent any
 	// problems with locking the drawing engine here.
 	if (GetDrawingEngine()->LockParallelAccess()) {
-		GetDrawingEngine()->CopyRegion(&copyRegion, (int32)x, (int32)y);
+		bool copied = GetDrawingEngine()->CopyRegion(&copyRegion, (int32)x,
+			(int32)y);
 		GetDrawingEngine()->UnlockParallelAccess();
-	}
+		if (!copied)
+			copyRegion.MakeEmpty();
+	} else
+		copyRegion.MakeEmpty();
 
 	// in the dirty region, exclude the parts that we
 	// could move by blitting
@@ -4729,8 +4733,11 @@ Desktop::_UpdateDisplays()
 	// classic mode that drives one monitor with the whole frame buffer.
 	monitor_info info;
 	bool hasInfo = screen->GetMonitorInfo(info) == B_OK;
+	display_mode mode;
+	interface->GetMode(&mode);
 	fDisplays.SetSingle(screen->Frame(), interface->HasDisplayLayout()
-			? 100 : interface->RenderScale(), hasInfo ? &info : NULL);
+			? 100 : interface->RenderScale(), hasInfo ? &info : NULL,
+			&mode.timing);
 }
 
 

@@ -18,6 +18,9 @@
 #include <string.h>
 
 #include <Bitmap.h>
+#ifndef HAIKU_BUILD_ICON_UTILS
+#include <BitmapPrivate.h>
+#endif
 #include <FindDirectory.h>
 #include <Node.h>
 #include <NodeInfo.h>
@@ -359,6 +362,10 @@ BIconUtils::GetIcon(BNode* node, const char* vectorIconAttrName,
 				uint32 bytesPerRow = temp.BytesPerRow();
 				result = ConvertToCMAP8((uint8*)temp.Bits(), width, height,
 					bytesPerRow, icon);
+#ifndef HAIKU_BUILD_ICON_UTILS
+				if (result == B_OK)
+					BBitmap::Private(icon).CopyVectorIcon(&temp);
+#endif
 			}
 			break;
 
@@ -494,6 +501,11 @@ BIconUtils::GetVectorIcon(const uint8* buffer, size_t size, BBitmap* icon)
 	// lighter transparent colors should be too dark if
 	// app_server uses correct blending
 	//renderer.Demultiply();
+
+#ifndef HAIKU_BUILD_ICON_UTILS
+	if (result == B_OK)
+		BBitmap::Private(icon).SetVectorIcon(buffer, size);
+#endif
 
 	return result;
 }

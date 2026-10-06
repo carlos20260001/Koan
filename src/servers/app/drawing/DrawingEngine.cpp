@@ -553,7 +553,7 @@ is_above(const BRect& a, const BRect& b)
 }
 
 
-void
+bool
 DrawingEngine::CopyRegion(/*const*/ BRegion* region, int32 xOffset,
 	int32 yOffset)
 {
@@ -563,16 +563,23 @@ DrawingEngine::CopyRegion(/*const*/ BRegion* region, int32 xOffset,
 	// pixels move in the buffer, which is finer than the region
 	BRegion scaledRegion;
 	if (fPainter->DeviceScale() != 1) {
-		// At a fractional scale a logical offset is not a whole number of
-		// buffer pixels; the nearest one has to do until the next redraw.
+		// A copy is exact only when the translation is an integer number of
+		// device pixels. Rounding each movement accumulates error and changes
+		// the phase of borders relative to clipping and subsequent drawing.
+		float deviceX = xOffset * fPainter->DeviceScale();
+		float deviceY = yOffset * fPainter->DeviceScale();
+		if (deviceX != floorf(deviceX) || deviceY != floorf(deviceY))
+			return false;
 		_ScaleRegion(*region, scaledRegion);
 		region = &scaledRegion;
-		xOffset = (int32)roundf(xOffset * fPainter->DeviceScale());
-		yOffset = (int32)roundf(yOffset * fPainter->DeviceScale());
+		xOffset = (int32)deviceX;
+		yOffset = (int32)deviceY;
 	}
 
 	BRect frame = region->Frame();
 	frame = frame | frame.OffsetByCopy(xOffset, yOffset);
+	if (!fGraphicsCard->DrawingBuffer()->Bounds().Contains(frame))
+		return false;
 
 	AutoFloatingOverlaysHider _(fGraphicsCard, frame);
 
@@ -584,7 +591,7 @@ DrawingEngine::CopyRegion(/*const*/ BRegion* region, int32 xOffset,
 	for (int32 i= 0; i < count; i++) {
 		nodes[i].init(region->RectAt(i), count);
 		if (nodes[i].pointers == NULL)
-			return;
+			return false;
 	}
 
 	for (int32 i = 0; i < count; i++) {
@@ -656,6 +663,7 @@ DrawingEngine::CopyRegion(/*const*/ BRegion* region, int32 xOffset,
 				inDegreeZeroNodes.push(n->pointers[k]);
 		}
 	}
+	return true;
 }
 
 

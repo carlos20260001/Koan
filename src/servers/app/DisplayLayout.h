@@ -73,7 +73,8 @@ public:
 			// what the hardware has
 			status_t			ReadOutputs(HWInterface* interface);
 			void				SetSingle(BRect frame, uint16 scale,
-									const monitor_info* info);
+									const monitor_info* info,
+									const display_timing* timing = NULL);
 
 			// what to do with it
 			void				Configure(const BMessage& saved,

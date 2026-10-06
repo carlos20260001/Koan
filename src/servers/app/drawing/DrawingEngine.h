@@ -93,7 +93,8 @@ public:
 								int32 xOffset, int32 yOffset);
 
 	// drawing functions
-	virtual	void			CopyRegion(/*const*/ BRegion* region,
+	// Returns false when the destination must be redrawn instead.
+	virtual	bool			CopyRegion(/*const*/ BRegion* region,
 								int32 xOffset, int32 yOffset);
 
 	virtual	void			InvertRect(BRect r);

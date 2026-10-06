@@ -393,6 +393,11 @@ Painter::ConstrainClipping(const BRegion* region)
 			r.bottom = (int32)floorf((r.bottom + 1) * fDeviceScale) - 1;
 			fScaledClippingRegion.Include(r);
 		}
+		// The last logical pixel can extend beyond the physical buffer when
+		// the desktop size was rounded up (800 / 2.25, for example).
+		BRegion bufferBounds(BRect(0, 0, fBuffer.width() - 1,
+			fBuffer.height() - 1));
+		fScaledClippingRegion.IntersectWith(&bufferBounds);
 		region = &fScaledClippingRegion;
 	}
 	fClippingRegion = region;
@@ -1112,18 +1117,7 @@ Painter::FillRect(const BRect& r) const
 		}
 	}
 
-	// account for stricter interpretation of coordinates in AGG
-	// the rectangle ranges from the top-left (.0, .0)
-	// to the bottom-right (.9999, .9999) corner of pixels
-	b.x += 1.0;
-	b.y += 1.0;
-
-	fPath.remove_all();
-	fPath.move_to(a.x, a.y);
-	fPath.line_to(b.x, a.y);
-	fPath.line_to(b.x, b.y);
-	fPath.line_to(a.x, b.y);
-	fPath.close_polygon();
+	_MakeRectPath(a, b);
 
 	return _FillPath(fPath);
 }
@@ -1158,18 +1152,7 @@ Painter::FillRect(const BRect& r, const BGradient& gradient)
 		}
 	}
 
-	// account for stricter interpretation of coordinates in AGG
-	// the rectangle ranges from the top-left (.0, .0)
-	// to the bottom-right (.9999, .9999) corner of pixels
-	b.x += 1.0;
-	b.y += 1.0;
-
-	fPath.remove_all();
-	fPath.move_to(a.x, a.y);
-	fPath.line_to(b.x, a.y);
-	fPath.line_to(b.x, b.y);
-	fPath.line_to(a.x, b.y);
-	fPath.close_polygon();
+	_MakeRectPath(a, b);
 
 	return _FillPath(fPath, gradient);
 }
@@ -1287,6 +1270,14 @@ Painter::FillRectNoClipping(const clipping_rect& logical, const rgb_color& c) co
 		r.right = (int32)floorf((r.right + 1) * fDeviceScale) - 1;
 		r.bottom = (int32)floorf((r.bottom + 1) * fDeviceScale) - 1;
 	}
+	// Callers clip in logical coordinates. A fractional edge still needs
+	// clipping in device coordinates before this unbounded memory fill.
+	r.left = max_c(r.left, 0);
+	r.top = max_c(r.top, 0);
+	r.right = min_c(r.right, (int32)fBuffer.width() - 1);
+	r.bottom = min_c(r.bottom, (int32)fBuffer.height() - 1);
+	if (r.left > r.right || r.top > r.bottom)
+		return;
 	int32 y = (int32)r.top;
 
 	uint8* dst = fBuffer.row_ptr(y) + r.left * 4;
@@ -1740,16 +1731,23 @@ Painter::DrawBitmap(ServerBitmap* bitmap, BRect bitmapRect,
 	BRect touched = TransformAlignAndClipRect(viewRect);
 
 	if (touched.IsValid()) {
-		BitmapPainter bitmapPainter(this, bitmap, options);
+		BRect destination = viewRect;
 		if (fIdentityViewTransform && fDeviceScale != 1) {
-			// the bitmap painter scales into the buffer itself; with a view
-			// transform it applies fTransform, which has the device scale
-			BRect deviceRect = viewRect;
 			if (!fSubpixelPrecise)
-				deviceRect = AlignRect(deviceRect);
-			bitmapPainter.Draw(bitmapRect, _DeviceRect(deviceRect));
-		} else
-			bitmapPainter.Draw(bitmapRect, viewRect);
+				destination = AlignRect(destination);
+			destination = _DeviceRect(destination);
+		}
+		float scale = max_c((destination.Width() + 1) / (bitmapRect.Width() + 1),
+			(destination.Height() + 1) / (bitmapRect.Height() + 1));
+		if (!fIdentityViewTransform)
+			scale *= fTransform.scale();
+		BReference<ServerBitmap> icon = bitmap->ScaledIcon(scale, bitmapRect);
+		if (icon.IsSet()) {
+			bitmap = icon.Get();
+			options |= B_FILTER_BITMAP_BILINEAR;
+		}
+		BitmapPainter bitmapPainter(this, bitmap, options);
+		bitmapPainter.Draw(bitmapRect, destination);
 	}
 
 	return touched;
@@ -1883,6 +1881,28 @@ Painter::_DeviceRect(const BRect& rect) const
 		floorf(rect.top * fDeviceScale),
 		floorf((rect.right + 1) * fDeviceScale) - 1,
 		floorf((rect.bottom + 1) * fDeviceScale) - 1);
+}
+
+
+// Use the same device pixel boundaries as solid fills, strokes and clipping.
+// Otherwise an antialiased gradient can paint over the adjacent border.
+void
+Painter::_MakeRectPath(const BPoint& a, const BPoint& b) const
+{
+	double left = a.x, top = a.y;
+	double right = b.x + 1.0, bottom = b.y + 1.0;
+	if (fIdentityViewTransform && fDeviceScale != 1 && !fSubpixelPrecise) {
+		left = floor(left * fDeviceScale) / fDeviceScale;
+		top = floor(top * fDeviceScale) / fDeviceScale;
+		right = floor(right * fDeviceScale) / fDeviceScale;
+		bottom = floor(bottom * fDeviceScale) / fDeviceScale;
+	}
+	fPath.remove_all();
+	fPath.move_to(left, top);
+	fPath.line_to(right, top);
+	fPath.line_to(right, bottom);
+	fPath.line_to(left, bottom);
+	fPath.close_polygon();
 }
 
 

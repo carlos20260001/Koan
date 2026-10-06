@@ -43,4 +43,4 @@ AddOn(
 	"transformer/"
 )
 
-UsePrivateHeaders( icon shared )
+UsePrivateHeaders( icon shared interface )

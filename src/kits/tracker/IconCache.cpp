@@ -68,6 +68,7 @@ All rights reserved.
 
 #include <algorithm>
 
+#include <BitmapPrivate.h>
 #include <ControlLook.h>
 #include <Debug.h>
 #include <IconUtils.h>
@@ -1482,6 +1483,9 @@ IconCache::MakeTransformedIcon(const BBitmap* source, BSize /*size*/,
 			// "black" should make the problem stand out
 			break;
 	}
+
+	if (result->ColorSpace() == B_RGBA32 || result->ColorSpace() == B_RGB32)
+		BBitmap::Private(result).CopyVectorIcon(source, B_VECTOR_ICON_SELECTED);
 
 	return result;
 }

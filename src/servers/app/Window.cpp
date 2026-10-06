@@ -505,8 +505,11 @@ Window::CopyContents(BRegion* region, int32 xOffset, int32 yOffset)
 					copyRegion->Exclude(allDirtyRegions);
 
 				if (fDrawingEngine->LockParallelAccess()) {
-					fDrawingEngine->CopyRegion(copyRegion, xOffset, yOffset);
+					bool copied = fDrawingEngine->CopyRegion(copyRegion,
+						xOffset, yOffset);
 					fDrawingEngine->UnlockParallelAccess();
+					if (!copied)
+						copyRegion->MakeEmpty();
 
 					// Prevent those parts from being added to the dirty region...
 					newDirty->Exclude(copyRegion);

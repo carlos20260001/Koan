@@ -780,6 +780,37 @@ ServerApp::_DispatchMessage(int32 code, BPrivate::LinkReceiver& link)
 			break;
 		}
 
+		case AS_SET_BITMAP_VECTOR_ICON:
+		{
+			int32 token, size;
+			status_t status = link.Read<int32>(&token);
+			if (status == B_OK)
+				status = link.Read<int32>(&size);
+			BMessage description;
+			if (status == B_OK && size > 0 && size <= 512 * 1024) {
+				char* data = new(std::nothrow) char[size];
+				if (data == NULL)
+					status = B_NO_MEMORY;
+				else {
+					status = link.Read(data, size);
+					if (status == B_OK) {
+						BMemoryIO input(data, size);
+						status = description.Unflatten(&input);
+					}
+					delete[] data;
+				}
+			} else if (status == B_OK)
+				status = B_BAD_VALUE;
+			if (status == B_OK) {
+				BReference<ServerBitmap> bitmap(GetBitmap(token), true);
+				status = bitmap.IsSet() ? bitmap->SetVectorIcon(description)
+					: B_BAD_VALUE;
+			}
+			fLink.StartMessage(status);
+			fLink.Flush();
+			break;
+		}
+
 		case AS_DELETE_BITMAP:
 		{
 			STRACE(("ServerApp %s: received BBitmap delete request\n",
