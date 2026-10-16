@@ -138,7 +138,8 @@ public:
 
 		fRenderer(renderer)
 	{
-		fSubpixelAntiAliased = gSubpixelAntialiasing && fRenderer.Antialiasing();
+		fSubpixelAntiAliased = subpixel_antialiasing_active()
+			&& fRenderer.Antialiasing();
 	}
 
 	bool NeedsVector()

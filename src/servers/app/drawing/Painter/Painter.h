@@ -295,6 +295,10 @@ private:
 			BRect				_DeviceRect(const BRect& rect) const;
 									// a logical pixel rectangle in buffer
 									// pixels
+			BPoint				_DeviceBaseLine(BPoint baseLine) const;
+			const escapement_delta* _DeviceDelta(
+									const escapement_delta* delta,
+									escapement_delta& scaled) const;
 			void				_FillRectDevice(const BRect& rect,
 									const rgb_color& c) const;
 			void				_UpdateTextTransform();

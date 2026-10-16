@@ -430,6 +430,7 @@ FontEngine::FontEngine()
 
 	fGlyphRendering(glyph_ren_native_gray8),
 	fHinting(true),
+	fDeviceScaled(false),
 
 	fDataSize(0),
 	fDataType(glyph_data_invalid),
@@ -486,8 +487,16 @@ bool
 FontEngine::PrepareGlyph(uint32 glyphIndex)
 {
 	FT_Int32 loadFlags = fHinting ? FT_LOAD_DEFAULT : FT_LOAD_NO_HINTING;
-	loadFlags |= fGlyphRendering == glyph_ren_subpix ?
-		FT_LOAD_TARGET_LCD : FT_LOAD_TARGET_NORMAL;
+	if (fDeviceScaled) {
+		// Only the vertical metrics (baseline, x-height, stems of horizontal
+		// strokes) snap to the pixel grid; nothing moves sideways, so the
+		// advances stay those of the logical size times the scale.
+		if (fHinting)
+			loadFlags |= FT_LOAD_TARGET_LIGHT;
+	} else {
+		loadFlags |= fGlyphRendering == glyph_ren_subpix ?
+			FT_LOAD_TARGET_LCD : FT_LOAD_TARGET_NORMAL;
+	}
 
 	// Load unscaled and without hinting to get precise advance values
 	// for B_CHAR_SPACING
@@ -508,6 +517,10 @@ FontEngine::PrepareGlyph(uint32 glyphIndex)
 
 	fAdvanceX = int26p6_to_dbl(fFace->glyph->advance.x);
 	fAdvanceY = int26p6_to_dbl(fFace->glyph->advance.y);
+	if (fDeviceScaled && FT_IS_SCALABLE(fFace)) {
+		// light hinting rounds the advance to whole pixels
+		fAdvanceX = fFace->glyph->linearHoriAdvance / 65536.0;
+	}
 
 	fInsetLeft = int26p6_to_dbl(fFace->glyph->metrics.horiBearingX);
 	fInsetRight = int26p6_to_dbl(fFace->glyph->metrics.horiBearingX
@@ -685,9 +698,16 @@ FontEngine::Init(const char* fontFilePath, unsigned faceIndex, double size,
 			break;
 	}
 
-	FT_Set_Pixel_Sizes(fFace,
-		unsigned(size * 64.0) >> 6,		// pixel_width
-		unsigned(size * 64.0) >> 6);	// pixel_height
+	if (fDeviceScaled && FT_IS_SCALABLE(fFace)) {
+		// A logical size times the scale is rarely a whole number of
+		// pixels; rounding it would make the glyphs narrower or wider than
+		// their measured advances.
+		FT_Set_Char_Size(fFace, 0, (FT_F26Dot6)(size * 64.0 + 0.5), 72, 72);
+	} else {
+		FT_Set_Pixel_Sizes(fFace,
+			unsigned(size * 64.0) >> 6,		// pixel_width
+			unsigned(size * 64.0) >> 6);	// pixel_height
+	}
 
 	if (charMap != FT_ENCODING_NONE) {
 		fLastError = FT_Select_Charmap(fFace, charMap);

@@ -118,6 +118,15 @@ class ServerFont {
 									{ return fStyle->CharMapCount(); }
 	inline	bool				Hinting() const;
 
+			// A font the Painter renders at the drawing density: its size is
+			// the logical size times the device scale. Its glyph shapes are
+			// hinted vertically only, and its advances are not hinted, so
+			// they are the logical font's advances times the scale.
+			void				SetDeviceScaled(bool deviceScaled)
+									{ fDeviceScaled = deviceScaled; }
+			bool				IsDeviceScaled() const
+									{ return fDeviceScaled; }
+
 			status_t			GetGlyphShapes(const char charArray[],
 									int32 numChars, BShape *shapeArray[]) const;
 
@@ -201,14 +210,17 @@ protected:
 			font_direction		fDirection;
 			uint16				fFace;
 			uint32				fEncoding;
+			bool				fDeviceScaled;
 };
 
 inline bool ServerFont::Hinting() const
 {
 	// Hinting bends glyphs to the pixel grid, which at the logical size and
-	// at the rendered size would bend them differently; at high density
-	// it is not needed anyway.
-	if (gRenderScale > 1)
+	// at the rendered size would bend them differently: what a program
+	// measures at the logical size is not hinted when the screen is drawn
+	// at a higher density. The glyphs the Painter renders at that density
+	// are hinted lightly (vertically) instead, which keeps their advances.
+	if (gRenderScale > 1 && !fDeviceScaled)
 		return false;
 	switch (gDefaultHintingMode) {
 		case HINTING_MODE_OFF:

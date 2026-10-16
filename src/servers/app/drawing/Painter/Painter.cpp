@@ -448,8 +448,10 @@ Painter::_UpdateTextTransform()
 		fTextTransform = fTransform;
 
 	ServerFont font = fLogicalFont;
-	if (fIdentityViewTransform && fDeviceScale != 1)
+	if (fIdentityViewTransform && fDeviceScale != 1) {
 		font.SetSize(font.Size() * fDeviceScale);
+		font.SetDeviceScaled(true);
+	}
 	fTextRenderer.SetFont(font);
 }
 
@@ -1592,14 +1594,14 @@ Painter::DrawString(const char* utf8String, uint32 length, BPoint baseLine,
 {
 	CHECK_CLIPPING
 
-	if (!fSubpixelPrecise) {
-		baseLine.x = roundf(baseLine.x);
-		baseLine.y = roundf(baseLine.y);
-	}
+	escapement_delta scaledDelta;
 	if (fIdentityViewTransform && fDeviceScale != 1) {
 		// the glyphs are rendered at device size, see _UpdateTextTransform()
-		baseLine.x *= fDeviceScale;
-		baseLine.y *= fDeviceScale;
+		baseLine = _DeviceBaseLine(baseLine);
+		delta = _DeviceDelta(delta, scaledDelta);
+	} else if (!fSubpixelPrecise) {
+		baseLine.x = roundf(baseLine.x);
+		baseLine.y = roundf(baseLine.y);
 	}
 
 	BRect bounds;
@@ -1632,10 +1634,8 @@ Painter::DrawString(const char* utf8String, uint32 length,
 		BStackOrHeapArray<BPoint, 64> scaled(count);
 		if (!scaled.IsValid())
 			return BRect(0, 0, -1, -1);
-		for (int32 i = 0; i < count; i++) {
-			scaled[i].x = offsets[i].x * fDeviceScale;
-			scaled[i].y = offsets[i].y * fDeviceScale;
-		}
+		for (int32 i = 0; i < count; i++)
+			scaled[i] = _DeviceBaseLine(offsets[i]);
 		bounds = fTextRenderer.RenderString(utf8String, length,
 			scaled, fClippingRegion->Frame(), false, NULL,
 			cacheReference);
@@ -1656,14 +1656,14 @@ Painter::BoundingBox(const char* utf8String, uint32 length, BPoint baseLine,
 	BPoint* penLocation, const escapement_delta* delta,
 	FontCacheReference* cacheReference) const
 {
-	if (!fSubpixelPrecise) {
+	bool scaled = fIdentityViewTransform && fDeviceScale != 1;
+	escapement_delta scaledDelta;
+	if (scaled) {
+		baseLine = _DeviceBaseLine(baseLine);
+		delta = _DeviceDelta(delta, scaledDelta);
+	} else if (!fSubpixelPrecise) {
 		baseLine.x = roundf(baseLine.x);
 		baseLine.y = roundf(baseLine.y);
-	}
-	bool scaled = fIdentityViewTransform && fDeviceScale != 1;
-	if (scaled) {
-		baseLine.x *= fDeviceScale;
-		baseLine.y *= fDeviceScale;
 	}
 
 	static BRect dummy;
@@ -1692,10 +1692,8 @@ Painter::BoundingBox(const char* utf8String, uint32 length,
 		BStackOrHeapArray<BPoint, 64> scaled(count);
 		if (!scaled.IsValid())
 			return BRect(0, 0, -1, -1);
-		for (int32 i = 0; i < count; i++) {
-			scaled[i].x = offsets[i].x * fDeviceScale;
-			scaled[i].y = offsets[i].y * fDeviceScale;
-		}
+		for (int32 i = 0; i < count; i++)
+			scaled[i] = _DeviceBaseLine(offsets[i]);
 		BRect bounds = fTextRenderer.RenderString(utf8String, length,
 			scaled, dummy, true, penLocation, cacheReference);
 		if (penLocation != NULL) {
@@ -1881,6 +1879,39 @@ Painter::_DeviceRect(const BRect& rect) const
 		floorf(rect.top * fDeviceScale),
 		floorf((rect.right + 1) * fDeviceScale) - 1,
 		floorf((rect.bottom + 1) * fDeviceScale) - 1);
+}
+
+
+/*!	Where text drawn at a logical base line starts in the buffer. The base
+	line is the top edge of a pixel row, and goes where filled rectangles
+	put that edge, so text keeps its place among the lines and fills drawn
+	around it; a base line between two rows of pixels would blur every
+	horizontal stroke. Horizontally, text starts where the scale puts it:
+	the glyphs are placed one by one on whole pixels from there.
+*/
+BPoint
+Painter::_DeviceBaseLine(BPoint baseLine) const
+{
+	if (!fSubpixelPrecise) {
+		baseLine.x = roundf(baseLine.x);
+		baseLine.y = roundf(baseLine.y);
+	}
+	return BPoint(baseLine.x * fDeviceScale,
+		floorf(baseLine.y * fDeviceScale + 0.001f));
+}
+
+
+/*!	Extra spacing between characters is given in logical pixels.
+*/
+const escapement_delta*
+Painter::_DeviceDelta(const escapement_delta* delta,
+	escapement_delta& scaled) const
+{
+	if (delta == NULL)
+		return NULL;
+	scaled.nonspace = delta->nonspace * fDeviceScale;
+	scaled.space = delta->space * fDeviceScale;
+	return &scaled;
 }
 
 
@@ -2259,7 +2290,7 @@ Painter::_RasterizePath(VertexSource& path) const
 		fRasterizer.add_path(path);
 		agg::render_scanlines(fRasterizer, *fMaskedUnpackedScanline,
 			fRenderer);
-	} else if (gSubpixelAntialiasing) {
+	} else if (subpixel_antialiasing_active()) {
 		fSubpixRasterizer.reset();
 		fSubpixRasterizer.add_path(path);
 		agg::render_scanlines(fSubpixRasterizer,

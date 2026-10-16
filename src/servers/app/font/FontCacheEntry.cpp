@@ -157,6 +157,7 @@ FontCacheEntry::Init(const ServerFont& font, bool forceVector)
 	// TODO: encoding from font
 	FT_Encoding charMap = FT_ENCODING_NONE;
 	bool hinting = font.Hinting();
+	fEngine.SetDeviceScaled(font.IsDeviceScaled());
 
 	bool success;
 	if (font.FontData() != NULL)
@@ -399,9 +400,11 @@ FontCacheEntry::GenerateSignature(char* signature, size_t signatureSize,
 	bool hinting = font.Hinting();
 	uint8 averageWeight = gSubpixelAverageWeight;
 
-	snprintf(signature, signatureSize, "%" B_PRId32 ",%p,%u,%d,%d,%.1f,%d,%d",
+	snprintf(signature, signatureSize,
+		"%" B_PRId32 ",%p,%u,%d,%d,%.2f,%d,%d,%d",
 		font.GetFamilyAndStyle(), font.Manager(), charMap,
-		font.Face(), int(renderingType), font.Size(), hinting, averageWeight);
+		font.Face(), int(renderingType), font.Size(), hinting, averageWeight,
+		font.IsDeviceScaled());
 }
 
 
@@ -423,14 +426,14 @@ FontCacheEntry::UpdateUsage()
 /*static*/ glyph_rendering
 FontCacheEntry::_RenderTypeFor(const ServerFont& font, bool forceVector)
 {
-	glyph_rendering renderingType = gSubpixelAntialiasing ?
+	glyph_rendering renderingType = subpixel_antialiasing_active() ?
 		glyph_ren_subpix : glyph_ren_native_gray8;
 
 	if (forceVector || font.Rotation() != 0.0 || font.Shear() != 90.0
 		|| font.FalseBoldWidth() != 0.0
 		|| (font.Flags() & B_DISABLE_ANTIALIASING) != 0
 		|| font.Size() > 30.0f * gRenderScale
-		|| !font.Hinting()) {
+		|| (!font.Hinting() && !font.IsDeviceScaled())) {
 		renderingType = glyph_ren_outline;
 	}
 

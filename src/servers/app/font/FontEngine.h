@@ -91,6 +91,12 @@ class FontEngine {
 			bool				Hinting() const
 									{ return fHinting; }
 
+			// For glyphs rendered at the drawing density, before Init():
+			// fractional pixel sizes, light (vertical only) hinting and
+			// unhinted advances, see ServerFont::IsDeviceScaled().
+			void				SetDeviceScaled(bool deviceScaled)
+									{ fDeviceScaled = deviceScaled; }
+
 
 			uint32				GlyphIndexForGlyphCode(uint32 glyphCode) const;
 			bool				PrepareGlyph(uint32 glyphIndex);
@@ -132,6 +138,7 @@ class FontEngine {
 
 			glyph_rendering		fGlyphRendering;
 			bool				fHinting;
+			bool				fDeviceScaled;
 
 			// members needed to generate individual glyphs according
 			// to glyph rendering type

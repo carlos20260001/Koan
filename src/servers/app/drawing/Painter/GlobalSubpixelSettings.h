@@ -21,10 +21,23 @@ enum {
 
 extern bool gSubpixelAntialiasing;
 extern uint8 gDefaultHintingMode;
-// Buffer pixels per logical pixel on screen. Above 1, fonts are rendered
-// that many times larger and without hinting, so that what a program
-// measures at the logical size is exactly what it gets drawn.
+// Buffer pixels per logical pixel on screen. Above 1, fonts are measured at
+// the logical size without hinting and rendered that many times larger with
+// light hinting, so that what a program measures at the logical size is
+// exactly what it gets drawn.
 extern float gRenderScale;
+
+// Subpixel anti-aliasing paints for the colour stripes of the panel's own
+// pixels. A desktop drawn at a higher density puts most edges between
+// pixels at fractional scales, where the stripes turn into colour fringes,
+// and its pixels are not always the panel's (a display engine may shrink
+// or enlarge them). Everything is anti-aliased in grey there instead, as
+// other systems do on high density displays.
+inline bool
+subpixel_antialiasing_active()
+{
+	return gSubpixelAntialiasing && gRenderScale == 1.0f;
+}
 
 // The weight with which the average of the subpixels is applied to counter
 // color fringes (0 = full sharpness ... 255 = grayscale anti-aliasing)

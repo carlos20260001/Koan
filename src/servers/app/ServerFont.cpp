@@ -141,14 +141,16 @@ ServerFont::ServerFont(FontStyle& style, float size, float rotation,
 	fSpacing(spacing),
 	fDirection(style.Direction()),
 	fFace(style.Face()),
-	fEncoding(B_UNICODE_UTF8)
+	fEncoding(B_UNICODE_UTF8),
+	fDeviceScaled(false)
 {
 }
 
 
 ServerFont::ServerFont()
 	:
-	fStyle(NULL)
+	fStyle(NULL),
+	fDeviceScaled(false)
 {
 	*this = *gFontManager->DefaultPlainFont();
 }
@@ -160,7 +162,8 @@ ServerFont::ServerFont()
 */
 ServerFont::ServerFont(const ServerFont &font)
 	:
-	fStyle(NULL)
+	fStyle(NULL),
+	fDeviceScaled(false)
 {
 	*this = font;
 }
@@ -190,6 +193,7 @@ ServerFont::operator=(const ServerFont& font)
 	fSpacing = font.fSpacing;
 	fEncoding = font.fEncoding;
 	fBounds = font.fBounds;
+	fDeviceScaled = font.fDeviceScaled;
 
 	SetStyle(font.fStyle);
 
@@ -209,7 +213,8 @@ ServerFont::operator==(const ServerFont& other) const
 		&& fShear == other.fShear && fFalseBoldWidth == other.fFalseBoldWidth
 		&& fFlags == other.fFlags && fSpacing == other.fSpacing
 		&& fEncoding == other.fEncoding && fBounds == other.fBounds
-		&& fDirection == other.fDirection && fFace == other.fFace;
+		&& fDirection == other.fDirection && fFace == other.fFace
+		&& fDeviceScaled == other.fDeviceScaled;
 }
 
 
