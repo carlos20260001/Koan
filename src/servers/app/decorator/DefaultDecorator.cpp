@@ -27,10 +27,12 @@
 #include <stdio.h>
 
 #include <Autolock.h>
+#include <ControlLook.h>
 #include <Debug.h>
 #include <GradientLinear.h>
 #include <Rect.h>
 #include <Region.h>
+#include <StackOrHeapArray.h>
 #include <View.h>
 
 #include <WindowPrivate.h>
@@ -64,6 +66,58 @@ blend_color_value(uint8 a, uint8 b, float position)
 
 	return (uint8)value;
 }
+
+
+/*!	Collects lines of the border's rings, one logical pixel each from the
+	outside in, and draws them in one go. At a fractional scale a ring drawn
+	alone is one buffer pixel on some sides of a window and two on others;
+	drawn together, DrawingEngine::StrokeFrameLineArray() shares the band's
+	pixels out the same way on every side, and the outermost and innermost
+	rings, the dark outlines, keep their width.
+*/
+class BorderLines {
+public:
+	BorderLines(DrawingEngine* engine, const BRect& border, int32 rings)
+		:
+		fEngine(engine),
+		fLines(rings + 4),
+		fCapacity(rings + 4),
+		fCount(0)
+	{
+		fInfo.frame = border;
+		fInfo.rings = rings;
+		fInfo.borders = BControlLook::B_ALL_BORDERS;
+		fInfo.uniformRings = rings > 0 && rings <= 32
+			? 1 | 1u << (rings - 1) : 0;
+		fInfo.flags = 0;
+	}
+
+	void Add(BPoint start, BPoint end, const rgb_color& color)
+	{
+		if (!fLines.IsValid() || fCount == fCapacity)
+			return;
+		fLines[fCount].startPoint = start;
+		fLines[fCount].endPoint = end;
+		fLines[fCount].color = color;
+		fCount++;
+	}
+
+	void Draw()
+	{
+		if (fCount == 0)
+			return;
+		fInfo.lineCount = fCount;
+		fEngine->StrokeFrameLineArray(fInfo, &fLines[0]);
+		fCount = 0;
+	}
+
+private:
+	DrawingEngine*							fEngine;
+	ViewFrameLineArrayInfo					fInfo;
+	BStackOrHeapArray<ViewLineArrayInfo, 16>	fLines;
+	int32									fCapacity;
+	int32									fCount;
+};
 
 
 //	#pragma mark -
@@ -221,63 +275,73 @@ DefaultDecorator::_DrawFrame(BRect rect)
 				ComponentColors colors;
 				_GetComponentColors(COMPONENT_TOP_BORDER, colors, fTopTab);
 
+				BorderLines lines(fDrawingEngine, border, fBorderWidth);
 				for (int8 i = 0; i < fBorderWidth; i++) {
 					const int8 colorsIndex = COLORS_INDEX(i, fBorderWidth, 5);
-					fDrawingEngine->StrokeLine(
+					lines.Add(
 						BPoint(border.left + i, border.top + i),
 						BPoint(border.right - i, border.top + i),
 						colors[colorsIndex]);
 				}
 				if (fTitleBarRect.IsValid()) {
 					// grey along the bottom of the tab
-					// (overwrites "white" from frame)
+					// (overwrites "white" from frame); the tab covers the
+					// outer ring as the grid has it, the grey what the ring
+					// gets beyond that at a fractional scale
 					const int overdraw = (int)ceilf(fBorderWidth / 5.0f);
-					for (int i = 1; i <= overdraw; i++) {
-						fDrawingEngine->StrokeLine(
+					for (int i = 0; i <= overdraw; i++) {
+						lines.Add(
 							BPoint(fTitleBarRect.left + 2, fTitleBarRect.bottom + i),
 							BPoint(fTitleBarRect.right - 2, fTitleBarRect.bottom + i),
 							colors[2]);
 					}
 				}
+				lines.Draw();
 			}
 			// left
 			if (rect.Intersects(fLeftBorder.InsetByCopy(0, -fBorderWidth))) {
 				ComponentColors colors;
 				_GetComponentColors(COMPONENT_LEFT_BORDER, colors, fTopTab);
 
+				BorderLines lines(fDrawingEngine, border, fBorderWidth);
 				for (int8 i = 0; i < fBorderWidth; i++) {
 					const int8 colorsIndex = COLORS_INDEX(i, fBorderWidth, 5);
-					fDrawingEngine->StrokeLine(
+					lines.Add(
 						BPoint(border.left + i, border.top + i),
 						BPoint(border.left + i, border.bottom - i),
 						colors[colorsIndex]);
 				}
+				lines.Draw();
 			}
 			// bottom
 			if (rect.Intersects(fBottomBorder)) {
 				ComponentColors colors;
 				_GetComponentColors(COMPONENT_BOTTOM_BORDER, colors, fTopTab);
 
+				BorderLines lines(fDrawingEngine, border, fBorderWidth);
 				for (int8 i = 0; i < fBorderWidth; i++) {
 					const int8 colorsIndex = COLORS_INDEX(i, fBorderWidth, 5);
-					fDrawingEngine->StrokeLine(
+					lines.Add(
 						BPoint(border.left + i, border.bottom - i),
 						BPoint(border.right - i, border.bottom - i),
 						colors[(4 - colorsIndex) == 4 ? 5 : (4 - colorsIndex)]);
 				}
+				lines.Draw();
 			}
 			// right
 			if (rect.Intersects(fRightBorder.InsetByCopy(0, -fBorderWidth))) {
 				ComponentColors colors;
 				_GetComponentColors(COMPONENT_RIGHT_BORDER, colors, fTopTab);
 
+				BorderLines lines(fDrawingEngine, border, fBorderWidth);
 				for (int8 i = 0; i < fBorderWidth; i++) {
 					const int8 colorsIndex = COLORS_INDEX(i, fBorderWidth, 5);
-					fDrawingEngine->StrokeLine(
+					lines.Add(
 						BPoint(border.right - i, border.top + i),
 						BPoint(border.right - i, border.bottom - i),
 						colors[(4 - colorsIndex) == 4 ? 5 : (4 - colorsIndex)]);
 				}
+				lines.Draw();
 			}
 			break;
 		}
@@ -290,33 +354,38 @@ DefaultDecorator::_DrawFrame(BRect rect)
 				ComponentColors colors;
 				_GetComponentColors(COMPONENT_TOP_BORDER, colors, fTopTab);
 
+				BorderLines lines(fDrawingEngine, border, fBorderWidth);
 				for (int8 i = 0; i < fBorderWidth; i++) {
 					const int8 colorsIndex = COLORS_INDEX(i, fBorderWidth, 3);
-					fDrawingEngine->StrokeLine(
+					lines.Add(
 						BPoint(border.left + i, border.top + i),
 						BPoint(border.right - i, border.top + i),
 						colors[colorsIndex * 2]);
 				}
 				if (fTitleBarRect.IsValid() && fTopTab->look != kLeftTitledWindowLook) {
 					// grey along the bottom of the tab
-					// (overwrites "white" from frame)
+					// (overwrites "white" from frame); the tab covers the
+					// outer ring as the grid has it, the grey what the ring
+					// gets beyond that at a fractional scale
 					const int overdraw = (int)ceilf(fBorderWidth / 5.0f);
-					for (int i = 1; i <= overdraw; i++) {
-						fDrawingEngine->StrokeLine(
+					for (int i = 0; i <= overdraw; i++) {
+						lines.Add(
 							BPoint(fTitleBarRect.left + 2, fTitleBarRect.bottom + i),
 							BPoint(fTitleBarRect.right - 2, fTitleBarRect.bottom + i),
 							colors[2]);
 					}
 				}
+				lines.Draw();
 			}
 			// left
 			if (rect.Intersects(fLeftBorder.InsetByCopy(0, -fBorderWidth))) {
 				ComponentColors colors;
 				_GetComponentColors(COMPONENT_LEFT_BORDER, colors, fTopTab);
 
+				BorderLines lines(fDrawingEngine, border, fBorderWidth);
 				for (int8 i = 0; i < fBorderWidth; i++) {
 					const int8 colorsIndex = COLORS_INDEX(i, fBorderWidth, 3);
-					fDrawingEngine->StrokeLine(
+					lines.Add(
 						BPoint(border.left + i, border.top + i),
 						BPoint(border.left + i, border.bottom - i),
 						colors[colorsIndex * 2]);
@@ -325,38 +394,45 @@ DefaultDecorator::_DrawFrame(BRect rect)
 					&& fTitleBarRect.IsValid()) {
 					// grey along the right side of the tab
 					// (overwrites "white" from frame)
-					fDrawingEngine->StrokeLine(
-						BPoint(fTitleBarRect.right + 1,
-							fTitleBarRect.top + 2),
-						BPoint(fTitleBarRect.right + 1,
-							fTitleBarRect.bottom - 2), colors[2]);
+					for (int i = 0; i <= 1; i++) {
+						lines.Add(
+							BPoint(fTitleBarRect.right + i,
+								fTitleBarRect.top + 2),
+							BPoint(fTitleBarRect.right + i,
+								fTitleBarRect.bottom - 2), colors[2]);
+					}
 				}
+				lines.Draw();
 			}
 			// bottom
 			if (rect.Intersects(fBottomBorder)) {
 				ComponentColors colors;
 				_GetComponentColors(COMPONENT_BOTTOM_BORDER, colors, fTopTab);
 
+				BorderLines lines(fDrawingEngine, border, fBorderWidth);
 				for (int8 i = 0; i < fBorderWidth; i++) {
 					const int8 colorsIndex = COLORS_INDEX(i, fBorderWidth, 3);
-					fDrawingEngine->StrokeLine(
+					lines.Add(
 						BPoint(border.left + i, border.bottom - i),
 						BPoint(border.right - i, border.bottom - i),
 						colors[(2 - colorsIndex) == 2 ? 5 : (2 - colorsIndex) * 2]);
 				}
+				lines.Draw();
 			}
 			// right
 			if (rect.Intersects(fRightBorder.InsetByCopy(0, -fBorderWidth))) {
 				ComponentColors colors;
 				_GetComponentColors(COMPONENT_RIGHT_BORDER, colors, fTopTab);
 
+				BorderLines lines(fDrawingEngine, border, fBorderWidth);
 				for (int8 i = 0; i < fBorderWidth; i++) {
 					const int8 colorsIndex = COLORS_INDEX(i, fBorderWidth, 3);
-					fDrawingEngine->StrokeLine(
+					lines.Add(
 						BPoint(border.right - i, border.top + i),
 						BPoint(border.right - i, border.bottom - i),
 						colors[(2 - colorsIndex) == 2 ? 5 : (2 - colorsIndex) * 2]);
 				}
+				lines.Draw();
 			}
 			break;
 		}
@@ -412,18 +488,22 @@ DefaultDecorator::_DrawFrame(BRect rect)
 						fBottomBorder.bottom - 1)))
 					break;
 
-				fDrawingEngine->StrokeLine(
+				// the notches cross the rings: drawn with them, they end
+				// where the rings do at a fractional scale
+				BorderLines lines(fDrawingEngine, border, fBorderWidth);
+				lines.Add(
 					BPoint(fRightBorder.left,
 						fBottomBorder.bottom - fBorderResizeLength),
 					BPoint(fRightBorder.right - 1,
 						fBottomBorder.bottom - fBorderResizeLength),
 					colors[0]);
-				fDrawingEngine->StrokeLine(
+				lines.Add(
 					BPoint(fRightBorder.right - fBorderResizeLength,
 						fBottomBorder.top),
 					BPoint(fRightBorder.right - fBorderResizeLength,
 						fBottomBorder.bottom - 1),
 					colors[0]);
+				lines.Draw();
 				break;
 			}
 
