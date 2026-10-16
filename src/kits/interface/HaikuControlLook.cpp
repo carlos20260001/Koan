@@ -1952,9 +1952,11 @@ HaikuControlLook::DrawActiveTab(BView* view, BRect& rect,
 			break;
 	}
 
-	// draw the rest of frame and fill
+	// draw the rest of frame and fill: drawn together, the outline and the
+	// bevel keep their widths on both sides at a fractional scale
+	FrameLines lines(view, rect, bordersToDraw);
 	_DrawFrame(view, rect, edgeShadowColor, edgeShadowColor, edgeLightColor,
-		edgeLightColor, borders);
+		edgeLightColor, borders, &lines, false);
 	if (side == B_TOP_BORDER || side == B_BOTTOM_BORDER) {
 		if ((borders & B_LEFT_BORDER) == 0)
 			rect.left++;
@@ -1968,10 +1970,11 @@ HaikuControlLook::DrawActiveTab(BView* view, BRect& rect,
 	}
 
 	_DrawFrame(view, rect, frameLightColor, frameLightColor, frameShadowColor,
-		frameShadowColor, bordersToDraw);
+		frameShadowColor, bordersToDraw, &lines, true);
 
 	_DrawFrame(view, rect, bevelLightColor, bevelLightColor, bevelShadowColor,
-		bevelShadowColor);
+		bevelShadowColor, B_ALL_BORDERS, &lines, true);
+	lines.Draw();
 
 	view->FillRect(rect, fillGradient);
 
@@ -2063,12 +2066,15 @@ HaikuControlLook::DrawInactiveTab(BView* view, BRect& rect,
 
 	// frame and fill
 	// Note that _DrawFrame also insets the rect, so each of the calls here
-	// operate on a smaller rect than the previous ones
+	// operate on a smaller rect than the previous ones. Drawn together, the
+	// outline keeps its width on both sides at a fractional scale.
+	FrameLines lines(view, rect, borders);
 	_DrawFrame(view, rect, edgeShadowColor, edgeShadowColor, edgeLightColor,
-		edgeLightColor, borders);
+		edgeLightColor, borders, &lines, false);
 
 	_DrawFrame(view, rect, frameLightColor, frameLightColor, frameShadowColor,
-		frameShadowColor, borders);
+		frameShadowColor, borders, &lines, true);
+	lines.Draw();
 
 	if (rect.IsValid()) {
 		if (isVertical) {
