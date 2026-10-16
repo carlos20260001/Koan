@@ -56,6 +56,9 @@ enum {
 };
 
 
+struct ViewLineArrayInfo;
+
+
 class BView::Private {
 public:
 								Private(BView* view)
@@ -78,6 +81,14 @@ public:
 
 			bool				RemoveSelf()
 									{ return fView->_RemoveSelf(); }
+
+			// The lines of a frame's rings, nested from frame inwards, see
+			// ViewFrameLineArrayInfo; defined in View.cpp
+			void				StrokeFrameLineArray(BRect frame,
+									int32 rings, uint32 borders,
+									uint32 uniformRings, uint32 flags,
+									const ViewLineArrayInfo* lines,
+									int32 count);
 
 private:
 			BView* fView;

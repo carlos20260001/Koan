@@ -113,4 +113,28 @@ struct ViewLineArrayInfo {
 };
 
 
+// Precedes the lines of AS_STROKE_FRAME_LINEARRAY: one pixel lines that draw
+// the rings of a frame, nested from \a frame inwards on the sides in
+// \a borders, \a rings of them. At a fractional scale app_server gives
+// every side of the band they cover its own pixels on the frame buffer's
+// grid, its outer and inner edges where any other drawing puts them, and
+// shares them out between the rings: those in \a uniformRings (bit i for
+// ring i, the outermost being 0) keep the same width on every side, the
+// others take what is left. Elsewhere the lines are drawn as they are.
+struct ViewFrameLineArrayInfo {
+	BRect						frame;
+	int32						rings;
+	uint32						borders;
+	uint32						uniformRings;
+	uint32						flags;
+	int32						lineCount;
+};
+
+enum {
+	// The rings are drawn over a fill that reaches under them: every ring
+	// gets its width from the outside in, and the band ends where they do.
+	kFrameLinesOverFill			= 0x01
+};
+
+
 #endif	// APP_SERVER_PROTOCOL_STRUCTS_H

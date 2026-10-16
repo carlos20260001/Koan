@@ -3222,6 +3222,31 @@ ServerWindow::_DispatchViewDrawingMessage(int32 code,
 			delete gradient;
 			break;
 		}
+		case AS_STROKE_FRAME_LINEARRAY:
+		{
+			ViewFrameLineArrayInfo info;
+			if (link.Read<ViewFrameLineArrayInfo>(&info) != B_OK
+				|| info.lineCount <= 0 || info.lineCount > 1024) {
+				break;
+			}
+
+			BStackOrHeapArray<ViewLineArrayInfo, 64> lineData(info.lineCount);
+			if (!lineData.IsValid()
+				|| link.Read(lineData, info.lineCount
+					* sizeof(ViewLineArrayInfo)) != B_OK) {
+				break;
+			}
+
+			const SimpleTransform transform =
+				fCurrentView->PenToScreenTransform();
+			transform.Apply(&info.frame);
+			for (int32 i = 0; i < info.lineCount; i++) {
+				transform.Apply(&lineData[i].startPoint);
+				transform.Apply(&lineData[i].endPoint);
+			}
+			drawingEngine->StrokeFrameLineArray(info, lineData);
+			break;
+		}
 		case AS_STROKE_LINEARRAY:
 		{
 			DTRACE(("ServerWindow %s: Message AS_STROKE_LINEARRAY\n",
@@ -3935,6 +3960,32 @@ ServerWindow::_DispatchPictureMessage(int32 code, BPrivate::LinkReceiver& link)
 				fCurrentView->PenToScreenTransform();
 			transform.Apply(&info.endPoint);
 			fCurrentView->CurrentState()->SetPenLocation(penPos);
+			break;
+		}
+
+		case AS_STROKE_FRAME_LINEARRAY:
+		{
+			// a picture keeps the lines as they are
+			ViewFrameLineArrayInfo info;
+			if (link.Read<ViewFrameLineArrayInfo>(&info) != B_OK
+				|| info.lineCount <= 0 || info.lineCount > 1024) {
+				break;
+			}
+
+			BStackOrHeapArray<ViewLineArrayInfo, 64> lineData(info.lineCount);
+			if (!lineData.IsValid()
+				|| link.Read(lineData, info.lineCount
+					* sizeof(ViewLineArrayInfo)) != B_OK) {
+				break;
+			}
+
+			picture->WritePushState();
+			for (int32 i = 0; i < info.lineCount; i++) {
+				picture->WriteSetHighColor(lineData[i].color);
+				picture->WriteStrokeLine(lineData[i].startPoint,
+					lineData[i].endPoint);
+			}
+			picture->WritePopState();
 			break;
 		}
 

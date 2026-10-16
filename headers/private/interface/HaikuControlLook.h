@@ -370,6 +370,31 @@ protected:
 									const rgb_color& leftBottom,
 									uint32 borders = B_ALL_BORDERS);
 
+			// The rings of a frame drawn together, so that on a desktop
+			// drawn at a fractional scale they are as thick on every side
+			// (see FrameLines in HaikuControlLook.cpp)
+			class FrameLines;
+			void				_DrawOuterResessedFrame(BView* view,
+									BRect& rect, const rgb_color& base,
+									uint32 flags, uint32 borders,
+									FrameLines& lines);
+			void				_DrawFrame(BView* view, BRect& rect,
+									const rgb_color& left,
+									const rgb_color& top,
+									const rgb_color& right,
+									const rgb_color& bottom,
+									uint32 borders, FrameLines* lines,
+									bool uniform);
+			void				_DrawFrame(BView* view, BRect& rect,
+									const rgb_color& left,
+									const rgb_color& top,
+									const rgb_color& right,
+									const rgb_color& bottom,
+									const rgb_color& rightTop,
+									const rgb_color& leftBottom,
+									uint32 borders, FrameLines* lines,
+									bool uniform);
+
 			void				_DrawButtonBackground(BView* view, BRect& rect,
 									const BRect& updateRect,
 									float leftTopRadius,

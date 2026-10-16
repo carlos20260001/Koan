@@ -412,6 +412,9 @@ enum {
 
 	AS_SET_BITMAP_VECTOR_ICON,
 
+	// The lines of a frame's rings, see ViewFrameLineArrayInfo
+	AS_STROKE_FRAME_LINEARRAY,
+
 	AS_LAST_CODE
 };
 

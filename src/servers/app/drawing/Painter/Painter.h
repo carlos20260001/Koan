@@ -269,6 +269,8 @@ public:
 	inline	BRect				TransformAndClipRect(BRect rect) const;
 			BRect				DeviceBitmapRect(BRect bitmapRect,
 									BRect viewRect) const;
+			void				FillDeviceRect(const BRect& deviceRect,
+									const rgb_color& color) const;
 			bool				HasIdentityViewTransform() const
 									{ return fIdentityViewTransform; }
 	inline	BRect				ClipRect(BRect rect) const;

@@ -600,6 +600,23 @@ Painter::StrokeLine(BPoint a, BPoint b)
 		}
 	}
 
+	// A translucent one pixel line on a scaled desktop covers the same
+	// buffer pixels as an opaque one; rasterized at the scale, its edges
+	// would land between pixels and blur.
+	if (fPenSize == 1.0 && fIdentityViewTransform && fDeviceScale != 1
+		&& fDrawingMode == B_OP_ALPHA && fMaskedUnpackedScanline == NULL
+		&& (a.x == b.x || a.y == b.y)
+		&& *fPatternHandler.GetR5Pattern() == B_SOLID_HIGH) {
+		BRect rect(min_c(a.x, b.x), min_c(a.y, b.y), max_c(a.x, b.x),
+			max_c(a.y, b.y));
+		rect.left = floorf(rect.left);
+		rect.top = floorf(rect.top);
+		rect.right = floorf(rect.right);
+		rect.bottom = floorf(rect.bottom);
+		FillDeviceRect(_DeviceRect(rect), fPatternHandler.HighColor());
+		return;
+	}
+
 	fPath.remove_all();
 
 	if (a == b) {
@@ -1165,6 +1182,57 @@ void
 Painter::FillRect(const BRect& r, const rgb_color& c) const
 {
 	_FillRectDevice(_DeviceRect(r), c);
+}
+
+
+/*!	Fills a rectangle of buffer pixels in a solid colour with the current
+	drawing mode, without any transformation: copied when the mode leaves
+	an opaque colour as it is, blended for B_OP_ALPHA, rasterized for the
+	others and with an alpha mask.
+*/
+void
+Painter::FillDeviceRect(const BRect& r, const rgb_color& c) const
+{
+	if (!fValidClipping || !r.IsValid())
+		return;
+
+	if (fMaskedUnpackedScanline == NULL) {
+		if (fDrawingMode == B_OP_COPY
+			|| (fDrawingMode == B_OP_OVER && c.alpha == 255)
+			|| (fDrawingMode == B_OP_ALPHA && c.alpha == 255
+				&& fAlphaSrcMode == B_PIXEL_ALPHA)) {
+			_FillRectDevice(r, c);
+			return;
+		}
+		if (fDrawingMode == B_OP_ALPHA && fAlphaFncMode == B_ALPHA_OVERLAY
+			&& fAlphaSrcMode == B_PIXEL_ALPHA) {
+			_BlendRect32(r, c);
+			return;
+		}
+	}
+
+	rgb_color oldColor = fPatternHandler.HighColor();
+	pattern oldPattern = *fPatternHandler.GetR5Pattern();
+	Painter* self = const_cast<Painter*>(this);
+	self->SetHighColor(c);
+	self->SetPattern(B_SOLID_HIGH);
+
+	agg::path_storage path;
+	path.move_to(r.left, r.top);
+	path.line_to(r.right + 1, r.top);
+	path.line_to(r.right + 1, r.bottom + 1);
+	path.line_to(r.left, r.bottom + 1);
+	path.close_polygon();
+	fRasterizer.reset();
+	fRasterizer.add_path(path);
+	if (fMaskedUnpackedScanline != NULL) {
+		agg::render_scanlines(fRasterizer, *fMaskedUnpackedScanline,
+			fRenderer);
+	} else
+		agg::render_scanlines(fRasterizer, fPackedScanline, fRenderer);
+
+	self->SetPattern(oldPattern);
+	self->SetHighColor(oldColor);
 }
 
 

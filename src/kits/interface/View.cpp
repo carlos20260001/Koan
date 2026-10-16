@@ -7284,6 +7284,32 @@ BView::Private::MinMaxValid()
 }
 
 
+void
+BView::Private::StrokeFrameLineArray(BRect frame, int32 rings, uint32 borders,
+	uint32 uniformRings, uint32 flags, const ViewLineArrayInfo* lines,
+	int32 count)
+{
+	if (fView->fOwner == NULL || count <= 0)
+		return;
+
+	fView->_CheckLockAndSwitchCurrent();
+
+	ViewFrameLineArrayInfo info;
+	info.frame = frame;
+	info.rings = rings;
+	info.borders = borders;
+	info.uniformRings = uniformRings;
+	info.flags = flags;
+	info.lineCount = count;
+
+	fView->fOwner->fLink->StartMessage(AS_STROKE_FRAME_LINEARRAY);
+	fView->fOwner->fLink->Attach<ViewFrameLineArrayInfo>(info);
+	fView->fOwner->fLink->Attach(lines, count * sizeof(ViewLineArrayInfo));
+
+	fView->_FlushIfNotInTransaction();
+}
+
+
 bool
 BView::Private::WillLayout()
 {

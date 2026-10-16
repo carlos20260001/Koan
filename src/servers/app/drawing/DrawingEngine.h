@@ -170,6 +170,9 @@ public:
 	virtual	void			StrokeLine(const BPoint& start,
 								const BPoint& end, const BGradient& gradient);
 
+			void			StrokeFrameLineArray(
+								const ViewFrameLineArrayInfo& info,
+								const ViewLineArrayInfo* lines);
 	virtual	void			StrokeLineArray(int32 numlines,
 								const ViewLineArrayInfo* data);
 

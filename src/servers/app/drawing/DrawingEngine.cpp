@@ -11,6 +11,7 @@
 #include "DrawingEngine.h"
 
 #include <Bitmap.h>
+#include <ControlLook.h>
 #include <StackOrHeapArray.h>
 
 #include <stdio.h>
@@ -1309,6 +1310,202 @@ DrawingEngine::StrokeLineArray(int32 numLines,
 	}
 
 	// restore correct drawing state highcolor and pattern
+	fPainter->SetHighColor(oldColor);
+	fPainter->SetPattern(pattern);
+}
+
+
+namespace {
+
+/*!	The buffer pixels of the logical pixels along one axis of a frame whose
+	rings are drawn with StrokeFrameLineArray(): the rings at either end get
+	the pixels of the band they cover, shared out by
+	distribute_ring_widths(), and every other pixel keeps its usual ones.
+*/
+class FrameAxis {
+public:
+	FrameAxis(int32 low, int32 high, int32 rings, bool hasLow, bool hasHigh,
+		uint32 uniformRings, bool overFill, float scale)
+		:
+		fLow(low),
+		fHigh(high),
+		fRings(rings),
+		fHasLow(hasLow),
+		fHasHigh(hasHigh),
+		fScale(scale)
+	{
+		int32 widths[kMaxRings];
+		fLowEdges[0] = _Edge(low);
+		if (overFill)
+			_Fixed(uniformRings, widths);
+		else {
+			_Distribute(_Edge(low + rings) - fLowEdges[0], uniformRings,
+				widths);
+		}
+		for (int32 i = 0; i < rings; i++)
+			fLowEdges[i + 1] = fLowEdges[i] + widths[i];
+		fHighEdges[0] = _Edge(high + 1);
+		if (!overFill) {
+			_Distribute(fHighEdges[0] - _Edge(high + 1 - rings), uniformRings,
+				widths);
+		}
+		for (int32 i = 0; i < rings; i++)
+			fHighEdges[i + 1] = fHighEdges[i] - widths[i];
+	}
+
+	static const int32 kMaxRings = 8;
+
+	//! The buffer pixels [start, end) of logical pixel \a pixel.
+	void Span(int32 pixel, int32& start, int32& end) const
+	{
+		if (fHasLow && pixel >= fLow && pixel < fLow + fRings) {
+			start = fLowEdges[pixel - fLow];
+			end = fLowEdges[pixel - fLow + 1];
+		} else if (fHasHigh && pixel <= fHigh && pixel > fHigh - fRings) {
+			start = fHighEdges[fHigh - pixel + 1];
+			end = fHighEdges[fHigh - pixel];
+		} else {
+			start = _Edge(pixel);
+			end = _Edge(pixel + 1);
+		}
+	}
+
+private:
+	int32 _Edge(int32 pixel) const
+	{
+		return (int32)floorf(pixel * fScale);
+	}
+
+	/*!	Over a fill nothing needs to meet the inner edge: the rings that keep
+		their width get the scale rounded, the others its whole part.
+	*/
+	void _Fixed(uint32 uniformRings, int32* widths) const
+	{
+		int32 base = max_c(1, (int32)floorf(fScale));
+		int32 rounded = max_c(1, (int32)floorf(fScale + 0.5f));
+		for (int32 i = 0; i < fRings; i++)
+			widths[i] = (uniformRings & (1 << i)) != 0 ? rounded : base;
+	}
+
+	/*!	Every ring gets the whole part of the scale; of the pixels left over,
+		the rings that keep their width get one each first when the scale
+		rounds up, then the others, outermost first.
+	*/
+	void _Distribute(int32 total, uint32 uniformRings, int32* widths) const
+	{
+		int32 base = max_c(1, (int32)floorf(fScale));
+		int32 extra = total - fRings * base;
+		for (int32 i = 0; i < fRings; i++)
+			widths[i] = base;
+		if (floorf(fScale + 0.5f) > base) {
+			for (int32 i = 0; i < fRings && extra > 0; i++) {
+				if ((uniformRings & (1 << i)) != 0) {
+					widths[i]++;
+					extra--;
+				}
+			}
+		}
+		for (int32 i = 0; i < fRings && extra > 0; i++) {
+			if ((uniformRings & (1 << i)) == 0) {
+				widths[i]++;
+				extra--;
+			}
+		}
+		for (int32 i = 0; i < fRings && extra > 0; i++) {
+			widths[i]++;
+			extra--;
+		}
+		for (int32 i = fRings - 1; i >= 0 && extra < 0; i--) {
+			// cannot happen with a scale above 1, but never go negative
+			int32 take = min_c(widths[i] - 1, -extra);
+			widths[i] -= take;
+			extra += take;
+		}
+	}
+
+	int32	fLow;
+	int32	fHigh;
+	int32	fRings;
+	bool	fHasLow;
+	bool	fHasHigh;
+	float	fScale;
+	int32	fLowEdges[kMaxRings + 1];
+	int32	fHighEdges[kMaxRings + 1];
+};
+
+}	// namespace
+
+
+/*!	Draws the lines of a frame's rings (see ViewFrameLineArrayInfo). At a
+	fractional scale one logical pixel is one buffer pixel in some places and
+	two in others, so the same ring would be as thick as one on one side of
+	a control and as two on the other. Here the band the rings cover keeps
+	its edges, so that it still meets what is drawn around and inside it,
+	and its pixels are shared out the same way on every side.
+*/
+void
+DrawingEngine::StrokeFrameLineArray(const ViewFrameLineArrayInfo& info,
+	const ViewLineArrayInfo* lines)
+{
+	ASSERT_PARALLEL_LOCKED();
+
+	float scale = fPainter->DeviceScale();
+	BRect frame = info.frame;
+	int32 rings = info.rings;
+	if (scale == floorf(scale) || !fPainter->HasIdentityViewTransform()
+		|| rings < 1 || rings > FrameAxis::kMaxRings
+		|| frame.Width() + 1 < 2 * rings || frame.Height() + 1 < 2 * rings) {
+		StrokeLineArray(info.lineCount, lines);
+		return;
+	}
+
+	bool overFill = (info.flags & kFrameLinesOverFill) != 0;
+	FrameAxis horizontal((int32)frame.left, (int32)frame.right, rings,
+		(info.borders & BControlLook::B_LEFT_BORDER) != 0,
+		(info.borders & BControlLook::B_RIGHT_BORDER) != 0,
+		info.uniformRings, overFill, scale);
+	FrameAxis vertical((int32)frame.top, (int32)frame.bottom, rings,
+		(info.borders & BControlLook::B_TOP_BORDER) != 0,
+		(info.borders & BControlLook::B_BOTTOM_BORDER) != 0,
+		info.uniformRings, overFill, scale);
+
+	BStackOrHeapArray<BRect, 64> deviceRects(info.lineCount);
+	if (!deviceRects.IsValid())
+		return;
+
+	BRect touched;
+	for (int32 i = 0; i < info.lineCount; i++) {
+		BPoint a = lines[i].startPoint;
+		BPoint b = lines[i].endPoint;
+		if (a.x != b.x && a.y != b.y) {
+			deviceRects[i] = BRect();
+			continue;
+		}
+		int32 left, right, top, bottom, ignore;
+		horizontal.Span((int32)floorf(min_c(a.x, b.x)), left, ignore);
+		horizontal.Span((int32)floorf(max_c(a.x, b.x)), ignore, right);
+		vertical.Span((int32)floorf(min_c(a.y, b.y)), top, ignore);
+		vertical.Span((int32)floorf(max_c(a.y, b.y)), ignore, bottom);
+		deviceRects[i] = BRect(left, top, right - 1, bottom - 1);
+		touched = touched | deviceRects[i];
+	}
+
+	DrawTransaction transaction(this, fPainter->ClipRect(touched));
+	if (!transaction.IsDirty())
+		return;
+
+	rgb_color oldColor = fPainter->HighColor();
+	struct pattern pattern = fPainter->Pattern();
+	for (int32 i = 0; i < info.lineCount; i++) {
+		if (deviceRects[i].IsValid()) {
+			fPainter->FillDeviceRect(deviceRects[i], lines[i].color);
+			continue;
+		}
+		// not along an axis: as it is
+		fPainter->SetHighColor(lines[i].color);
+		fPainter->SetPattern(B_SOLID_HIGH);
+		fPainter->StrokeLine(lines[i].startPoint, lines[i].endPoint);
+	}
 	fPainter->SetHighColor(oldColor);
 	fPainter->SetPattern(pattern);
 }
