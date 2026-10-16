@@ -426,8 +426,16 @@ struct BilinearSeparable : DrawBitmapBilinearOptimized<BilinearSeparable> {
 		fRow(NULL),
 		fRowSize(0),
 		fColumns(NULL),
-		fColumnsSize(0)
+		fColumnsSize(0),
+		fOverlay(false)
 	{
+	}
+
+	//! Blends the bitmap's pixels over the destination by their alpha
+	//! (B_OP_ALPHA, B_PIXEL_ALPHA, B_ALPHA_OVERLAY) instead of copying them.
+	void SetOverlay(bool overlay)
+	{
+		fOverlay = overlay;
 	}
 
 	~BilinearSeparable()
@@ -463,15 +471,28 @@ struct BilinearSeparable : DrawBitmapBilinearOptimized<BilinearSeparable> {
 			const uint32 wTop = _Weight(fWeightsY[y].weight);
 			const uint32* top = (const uint32*)fSource->row_ptr(sourceY)
 				+ firstColumn;
-			if (wTop < 256 && sourceY < lastRow) {
-				_BlendRows(top,
-					(const uint32*)fSource->row_ptr(sourceY + 1) + firstColumn,
-					wTop, count);
-			} else
+			const uint32* bottom = wTop < 256 && sourceY < lastRow
+				? (const uint32*)fSource->row_ptr(sourceY + 1) + firstColumn
+				: NULL;
+			if (fOverlay) {
+				// mixed with their alpha applied, or the colour of
+				// transparent pixels would show at the edges
+				for (int32 i = 0; i < count; i++) {
+					fRow[i] = bottom != NULL
+						? _Blend(_Premultiplied(top[i]),
+							_Premultiplied(bottom[i]), wTop, 256 - wTop)
+						: _Premultiplied(top[i]);
+				}
+			} else if (bottom != NULL)
+				_BlendRows(top, bottom, wTop, count);
+			else
 				memcpy(fRow, top, count * 4);
 			fRow[count] = fRow[count - 1];
 
-			_BlendColumns((uint32*)fDestination, width);
+			if (fOverlay)
+				_BlendColumnsOver((uint32*)fDestination, width);
+			else
+				_BlendColumns((uint32*)fDestination, width);
 			fDestination += fDestinationBytesPerRow;
 		}
 	}
@@ -556,6 +577,45 @@ private:
 		}
 	}
 
+	static inline uint32 _Premultiplied(uint32 color)
+	{
+		const uint32 alpha = color >> 24;
+		if (alpha == 255)
+			return color;
+		uint32 blueRed = (color & 0x00ff00ff) * alpha + 0x00800080;
+		blueRed = ((blueRed + ((blueRed >> 8) & 0x00ff00ff)) >> 8) & 0x00ff00ff;
+		uint32 green = ((color >> 8) & 0xff) * alpha + 0x80;
+		green = (green + (green >> 8)) >> 8;
+		return alpha << 24 | green << 8 | blueRed;
+	}
+
+	void _BlendColumnsOver(uint32* destination, int32 width)
+	{
+		for (int32 x = 0; x < width; x++) {
+			const Column& column = fColumns[x];
+			const uint32* s = fRow + column.offset;
+			const uint32 color = _Blend(s[0], s[1], column.weights & 0xffff,
+				column.weights >> 16);
+			const uint32 alpha = color >> 24;
+			if (alpha == 0)
+				continue;
+			if (alpha == 255) {
+				destination[x] = (destination[x] & 0xff000000)
+					| (color & 0x00ffffff);
+				continue;
+			}
+			// the colour is premultiplied: over the destination, which
+			// keeps its own alpha as B_OP_ALPHA leaves it
+			const uint32 rest = 255 - alpha;
+			uint8* d = (uint8*)&destination[x];
+			for (int32 i = 0; i < 3; i++) {
+				const uint32 value = ((color >> (8 * i)) & 0xff)
+					+ (d[i] * rest + 127) / 255;
+				d[i] = value > 255 ? 255 : value;
+			}
+		}
+	}
+
 	bool _Reserve(int32 rowSize, int32 columns)
 	{
 		if (rowSize > fRowSize) {
@@ -580,6 +640,7 @@ private:
 	int32	fRowSize;
 	Column*	fColumns;
 	int32	fColumnsSize;
+	bool	fOverlay;
 };
 
 

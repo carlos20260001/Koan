@@ -153,11 +153,19 @@ Painter::BitmapPainter::Draw(const BRect& sourceRect,
 			}
 		}
 
-		// enlarged by the device scale alone, OP_COPY only
-		if (fAreaScale > 1 && fPainter->fDrawingMode == B_OP_COPY
-			&& _HasScale() && !_HasAffineTransform() && !_HasAlphaMask()
-			&& _DrawAreaSampled(sourceRect)) {
-			return;
+		// enlarged by the device scale alone
+		if (fAreaScale > 1 && _HasScale() && !_HasAffineTransform()
+			&& !_HasAlphaMask()) {
+			if (fPainter->fDrawingMode == B_OP_COPY
+				&& _DrawAreaSampled(sourceRect, false)) {
+				return;
+			}
+			if (fPainter->fDrawingMode == B_OP_ALPHA
+				&& fPainter->fAlphaSrcMode == B_PIXEL_ALPHA
+				&& fPainter->fAlphaFncMode == B_ALPHA_OVERLAY
+				&& _DrawAreaSampled(sourceRect, true)) {
+				return;
+			}
 		}
 
 		// bilinear and nearest-neighbor scaled, OP_COPY only
@@ -270,7 +278,8 @@ Painter::BitmapPainter::_DetermineTransform(BRect sourceRect,
 	gives the same pixels as drawing all of it.
 */
 bool
-Painter::BitmapPainter::_DrawAreaSampled(const BRect& sourceRect)
+Painter::BitmapPainter::_DrawAreaSampled(const BRect& sourceRect,
+	bool overlay)
 {
 	using namespace BitmapPainterPrivate;
 
@@ -339,6 +348,7 @@ Painter::BitmapPainter::_DrawAreaSampled(const BRect& sourceRect)
 	filterData.fIndexOffsetY = top - (int32)destination.top;
 
 	BilinearSeparable painter;
+	painter.SetOverlay(overlay);
 	painter.Draw(fPainter->fInternal, destination, &fBitmap, filterData);
 	return true;
 }

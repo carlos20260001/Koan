@@ -39,7 +39,8 @@ private:
 			bool				_HasScale();
 			bool				_HasAffineTransform();
 			bool				_HasAlphaMask();
-			bool				_DrawAreaSampled(const BRect& sourceRect);
+			bool				_DrawAreaSampled(const BRect& sourceRect,
+									bool overlay);
 
 			void				_ConvertColorSpace(ObjectDeleter<BBitmap>&
 									convertedBitmapDeleter);
