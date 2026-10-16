@@ -414,6 +414,7 @@ private:
 									const BRect& oldFrame,
 									const BRect& newFrame);
 			void				_SetCurrentWorkspaceConfiguration();
+			void				_PublishDeviceScale();
 			bool				_CopyWindowApproximately(Window* window,
 									BRegion& copyRegion, float x, float y);
 			void				_SetWorkspace(int32 index,

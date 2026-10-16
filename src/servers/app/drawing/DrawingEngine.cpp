@@ -711,7 +711,11 @@ DrawingEngine::DrawBitmap(ServerBitmap* bitmap, const BRect& bitmapRect,
 {
 	ASSERT_PARALLEL_LOCKED();
 
-	DrawTransaction transaction(this, fPainter->TransformAndClipRect(viewRect));
+	BRect clipped = (options & B_DEVICE_PIXEL_BITMAP) != 0
+			&& fPainter->HasIdentityViewTransform()
+		? fPainter->ClipRect(fPainter->DeviceBitmapRect(bitmapRect, viewRect))
+		: fPainter->TransformAndClipRect(viewRect);
+	DrawTransaction transaction(this, clipped);
 	if (transaction.IsDirty())
 		fPainter->DrawBitmap(bitmap, bitmapRect, viewRect, options);
 }

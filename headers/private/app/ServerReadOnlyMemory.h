@@ -23,6 +23,8 @@ static const int32 kColorWhichCount = kColorWhichLastContinuous + 3;
 struct server_read_only_memory {
 	color_map	colormap;
 	rgb_color	colors[kColorWhichCount];
+	float		device_scale;
+		// frame buffer pixels per logical pixel, see BScreen::DeviceScale()
 };
 
 

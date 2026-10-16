@@ -13,7 +13,9 @@
 
 #include <Window.h>
 
+#include <ApplicationPrivate.h>
 #include <PrivateScreen.h>
+#include <ServerReadOnlyMemory.h>
 
 
 using namespace BPrivate;
@@ -75,6 +77,24 @@ BScreen::Frame()
 		return fScreen->Frame();
 
 	return BRect(0, 0, 0, 0);
+}
+
+
+/*!	Returns how many frame buffer pixels make up one coordinate unit on the
+	screen: 1 normally, 1.5 when the desktop is drawn at 150 percent for a
+	high density monitor. Programs that render pixels themselves can render
+	that many times as many and draw them with B_DEVICE_PIXEL_BITMAP, which
+	keeps them sharp. B_SCREEN_CHANGED is sent to the windows when it
+	changes.
+*/
+float
+BScreen::DeviceScale()
+{
+	const server_read_only_memory* memory
+		= BApplication::Private::ServerReadOnlyMemory();
+	if (memory == NULL || !(memory->device_scale >= 1.0f))
+		return 1.0f;
+	return memory->device_scale;
 }
 
 

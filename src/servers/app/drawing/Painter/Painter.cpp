@@ -1726,6 +1726,18 @@ Painter::DrawBitmap(ServerBitmap* bitmap, BRect bitmapRect,
 {
 	CHECK_CLIPPING
 
+	if ((options & B_DEVICE_PIXEL_BITMAP) != 0 && fIdentityViewTransform) {
+		// the bitmap is already at the drawing density
+		BRect destination = DeviceBitmapRect(bitmapRect, viewRect);
+		BRect touched = _Clipped(destination);
+		if (touched.IsValid()) {
+			BitmapPainter bitmapPainter(this, bitmap,
+				options & ~B_FILTER_BITMAP_BILINEAR);
+			bitmapPainter.Draw(bitmapRect, destination);
+		}
+		return touched;
+	}
+
 	BRect touched = TransformAlignAndClipRect(viewRect);
 
 	if (touched.IsValid()) {
@@ -1879,6 +1891,21 @@ Painter::_DeviceRect(const BRect& rect) const
 		floorf(rect.top * fDeviceScale),
 		floorf((rect.right + 1) * fDeviceScale) - 1,
 		floorf((rect.bottom + 1) * fDeviceScale) - 1);
+}
+
+
+/*!	The buffer pixels a bitmap drawn with B_DEVICE_PIXEL_BITMAP covers: as
+	many as it has, from the buffer pixel the top left corner of \a viewRect
+	falls on. The view rectangle may be fractional, so that a program can
+	place such a bitmap on any buffer pixel. Without a view transform only.
+*/
+BRect
+Painter::DeviceBitmapRect(BRect bitmapRect, BRect viewRect) const
+{
+	float left = floorf(viewRect.left * fDeviceScale + 0.001f);
+	float top = floorf(viewRect.top * fDeviceScale + 0.001f);
+	return BRect(left, top, left + roundf(bitmapRect.Width()),
+		top + roundf(bitmapRect.Height()));
 }
 
 

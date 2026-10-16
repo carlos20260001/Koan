@@ -334,7 +334,13 @@ enum overlay_options {
 enum bitmap_drawing_options {
 	B_FILTER_BITMAP_BILINEAR	= 0x00000100,
 
-	B_WAIT_FOR_RETRACE			= 0x00000800
+	B_WAIT_FOR_RETRACE			= 0x00000800,
+
+	B_DEVICE_PIXEL_BITMAP		= 0x00001000
+		// The bitmap holds frame buffer pixels (BScreen::DeviceScale() per
+		// view coordinate unit): it is drawn one to one, its top left pixel
+		// at the frame buffer pixel where the destination's top left corner
+		// falls, and is not scaled to the destination's size.
 };
 
 

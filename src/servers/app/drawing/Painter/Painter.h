@@ -267,6 +267,10 @@ public:
 			BRect				InvertRect(const BRect& r) const;
 
 	inline	BRect				TransformAndClipRect(BRect rect) const;
+			BRect				DeviceBitmapRect(BRect bitmapRect,
+									BRect viewRect) const;
+			bool				HasIdentityViewTransform() const
+									{ return fIdentityViewTransform; }
 	inline	BRect				ClipRect(BRect rect) const;
 									// rect is in buffer pixels already
 			BRect				ClipLogicalRect(BRect rect) const;

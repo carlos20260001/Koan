@@ -33,6 +33,9 @@ public:
 
 			color_space			ColorSpace();
 			BRect				Frame();
+			float				DeviceScale();
+									// frame buffer pixels per coordinate
+									// unit, 1.5 on a desktop drawn at 150%
 			screen_id			ID();
 
 			status_t			WaitForRetrace();
