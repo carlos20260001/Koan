@@ -405,12 +405,8 @@ BScrollBar::Draw(BRect updateRect)
 
 	bool doubleArrows = _DoubleArrows();
 
-	// draw border
+	// inset past border, which is drawn last
 	BRect rect = Bounds();
-	be_control_look->DrawScrollBarBorder(this, rect, updateRect, base, flags,
-		fOrientation);
-
-	// inset past border
 	rect.InsetBy(1, 1);
 
 	// draw arrows buttons
@@ -518,6 +514,11 @@ BScrollBar::Draw(BRect updateRect)
 	be_control_look->DrawScrollBarThumb(this, rect, updateRect,
 		ui_color(B_SCROLL_BAR_THUMB_COLOR), flags, fOrientation,
 		fPrivateData->fScrollBarInfo.knob);
+
+	// draw border: last, so that on a desktop drawn at a fractional scale it
+	// can keep its width over what is inside
+	be_control_look->DrawScrollBarBorder(this, Bounds(), updateRect, base,
+		flags, fOrientation);
 }
 
 

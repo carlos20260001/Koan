@@ -694,36 +694,41 @@ HaikuControlLook::DrawScrollBarBorder(BView* view, BRect rect,
 
 	// stroke a line around the entire scrollbar
 	// take care of border highlighting, scroll target is focus view
+	// (drawn last, over the inside: at a fractional scale it keeps its width)
+	FrameLines lines(view, rect, B_ALL_BORDERS);
+	lines.SetOverFill();
 	if (isEnabled && isFocused) {
 		rgb_color borderColor = view->HighColor();
 		rgb_color highlightColor = ui_color(B_KEYBOARD_NAVIGATION_COLOR);
 
-		view->BeginLineArray(4);
-
-		view->AddLine(BPoint(rect.left + 1, rect.bottom),
+		lines.AddLine(BPoint(rect.left + 1, rect.bottom),
 			BPoint(rect.right, rect.bottom), borderColor);
-		view->AddLine(BPoint(rect.right, rect.top + 1),
+		lines.AddLine(BPoint(rect.right, rect.top + 1),
 			BPoint(rect.right, rect.bottom - 1), borderColor);
 
 		if (orientation == B_HORIZONTAL) {
-			view->AddLine(BPoint(rect.left, rect.top + 1),
+			lines.AddLine(BPoint(rect.left, rect.top + 1),
 				BPoint(rect.left, rect.bottom), borderColor);
 		} else {
-			view->AddLine(BPoint(rect.left, rect.top),
+			lines.AddLine(BPoint(rect.left, rect.top),
 				BPoint(rect.left, rect.bottom), highlightColor);
 		}
 
 		if (orientation == B_HORIZONTAL) {
-			view->AddLine(BPoint(rect.left, rect.top),
+			lines.AddLine(BPoint(rect.left, rect.top),
 				BPoint(rect.right, rect.top), highlightColor);
 		} else {
-			view->AddLine(BPoint(rect.left + 1, rect.top),
+			lines.AddLine(BPoint(rect.left + 1, rect.top),
 				BPoint(rect.right, rect.top), borderColor);
 		}
-
-		view->EndLineArray();
-	} else
-		view->StrokeRect(rect);
+		lines.EndRing(true);
+	} else {
+		rgb_color borderColor = view->HighColor();
+		BRect ring(rect);
+		_DrawFrame(view, ring, borderColor, borderColor, borderColor,
+			borderColor, B_ALL_BORDERS, &lines, true);
+	}
+	lines.Draw();
 
 	view->PopState();
 }
