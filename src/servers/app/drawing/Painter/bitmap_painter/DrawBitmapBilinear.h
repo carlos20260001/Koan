@@ -10,7 +10,13 @@
 
 #include "Painter.h"
 
+#include <stdlib.h>
+#include <string.h>
 #include <typeinfo>
+
+#ifdef __SSE2__
+#	include <emmintrin.h>
+#endif
 
 
 // Prototypes for assembler routines
@@ -406,6 +412,177 @@ struct BilinearLowFilterRatio :
 };
 
 
+
+// Filters in two passes for each destination row: first its two source rows
+// are blended into one, once per source pixel, then each destination pixel
+// blends two neighbours of that row. Both passes work on whole pixels and
+// their weights add up to 256, so a flat colour stays exact (the per pixel
+// versions darken white to 253). This is what a scaled desktop does to every
+// bitmap drawn with B_FILTER_BITMAP_BILINEAR, a GL view or a video frame for
+// example. With SSE2 (every x86_64), both passes do four pixels at a time.
+struct BilinearSeparable : DrawBitmapBilinearOptimized<BilinearSeparable> {
+	BilinearSeparable()
+		:
+		fRow(NULL),
+		fRowSize(0),
+		fColumns(NULL),
+		fColumnsSize(0)
+	{
+	}
+
+	~BilinearSeparable()
+	{
+		free(fRow);
+		free(fColumns);
+	}
+
+	void DrawToClipRect(int32 xIndexL, int32 xIndexR, int32 y1, int32 y2)
+	{
+		const int32 firstColumn = fWeightsX[xIndexL].index / 4;
+		const int32 lastColumn = min_c(fWeightsX[xIndexR].index / 4 + 1,
+			(int32)fSource->width() - 1);
+		const int32 count = lastColumn - firstColumn + 1;
+		const int32 lastRow = (int32)fSource->height() - 1;
+		const int32 width = xIndexR - xIndexL + 1;
+
+		// the row gets one more pixel, the right neighbour of its last one
+		if (count < 1 || width < 1 || !_Reserve(count + 1, width))
+			return;
+
+		// where each destination pixel finds its left neighbour in the row,
+		// and the weights of that one and the right one
+		for (int32 x = 0; x < width; x++) {
+			const FilterInfo& info = fWeightsX[xIndexL + x];
+			const uint32 left = _Weight(info.weight);
+			fColumns[x].offset = info.index / 4 - firstColumn;
+			fColumns[x].weights = left | (256 - left) << 16;
+		}
+
+		for (int32 y = y1; y <= y2; y++) {
+			const int32 sourceY = fWeightsY[y].index;
+			const uint32 wTop = _Weight(fWeightsY[y].weight);
+			const uint32* top = (const uint32*)fSource->row_ptr(sourceY)
+				+ firstColumn;
+			if (wTop < 256 && sourceY < lastRow) {
+				_BlendRows(top,
+					(const uint32*)fSource->row_ptr(sourceY + 1) + firstColumn,
+					wTop, count);
+			} else
+				memcpy(fRow, top, count * 4);
+			fRow[count] = fRow[count - 1];
+
+			_BlendColumns((uint32*)fDestination, width);
+			fDestination += fDestinationBytesPerRow;
+		}
+	}
+
+private:
+	struct Column {
+		int32	offset;
+		uint32	weights;	// left | right << 16
+	};
+
+	// FilterInfo weights are [0..255] for the left or top pixel, with
+	// 255 - weight for the other one: [0..256] here, adding up to 256.
+	static inline uint32 _Weight(uint16 weight)
+	{
+		return (weight * 257 + 128) >> 8;
+	}
+
+	static inline uint32 _Blend(uint32 a, uint32 b, uint32 wA, uint32 wB)
+	{
+		// two 8 bit channels in each 16 bit lane: 255 * 256 still fits
+		const uint32 blueRed = (((a & 0x00ff00ff) * wA + (b & 0x00ff00ff) * wB)
+			>> 8) & 0x00ff00ff;
+		const uint32 greenAlpha = (((a >> 8) & 0x00ff00ff) * wA
+			+ ((b >> 8) & 0x00ff00ff) * wB) & 0xff00ff00;
+		return blueRed | greenAlpha;
+	}
+
+	void _BlendRows(const uint32* top, const uint32* bottom, uint32 wTop,
+		int32 count)
+	{
+		const uint32 wBottom = 256 - wTop;
+		int32 i = 0;
+#ifdef __SSE2__
+		const __m128i zero = _mm_setzero_si128();
+		const __m128i topWeight = _mm_set1_epi16(wTop);
+		const __m128i bottomWeight = _mm_set1_epi16(wBottom);
+		for (; i + 4 <= count; i += 4) {
+			const __m128i a = _mm_loadu_si128((const __m128i*)(top + i));
+			const __m128i b = _mm_loadu_si128((const __m128i*)(bottom + i));
+			__m128i low = _mm_add_epi16(
+				_mm_mullo_epi16(_mm_unpacklo_epi8(a, zero), topWeight),
+				_mm_mullo_epi16(_mm_unpacklo_epi8(b, zero), bottomWeight));
+			__m128i high = _mm_add_epi16(
+				_mm_mullo_epi16(_mm_unpackhi_epi8(a, zero), topWeight),
+				_mm_mullo_epi16(_mm_unpackhi_epi8(b, zero), bottomWeight));
+			_mm_storeu_si128((__m128i*)(fRow + i), _mm_packus_epi16(
+				_mm_srli_epi16(low, 8), _mm_srli_epi16(high, 8)));
+		}
+#endif
+		for (; i < count; i++)
+			fRow[i] = _Blend(top[i], bottom[i], wTop, wBottom);
+	}
+
+	void _BlendColumns(uint32* destination, int32 width)
+	{
+		int32 x = 0;
+#ifdef __SSE2__
+		const __m128i zero = _mm_setzero_si128();
+		for (; x + 4 <= width; x += 4) {
+			__m128i sums[4];
+			for (int32 i = 0; i < 4; i++) {
+				const Column& column = fColumns[x + i];
+				// a pixel and its right neighbour, channel by channel:
+				// left blue, right blue, left green, ... as 16 bit
+				__m128i pair = _mm_loadl_epi64(
+					(const __m128i*)(fRow + column.offset));
+				pair = _mm_unpacklo_epi8(
+					_mm_unpacklo_epi8(pair, _mm_srli_si128(pair, 4)), zero);
+				sums[i] = _mm_srli_epi32(_mm_madd_epi16(pair,
+					_mm_set1_epi32(column.weights)), 8);
+			}
+			_mm_storeu_si128((__m128i*)(destination + x), _mm_packus_epi16(
+				_mm_packs_epi32(sums[0], sums[1]),
+				_mm_packs_epi32(sums[2], sums[3])));
+		}
+#endif
+		for (; x < width; x++) {
+			const Column& column = fColumns[x];
+			const uint32* s = fRow + column.offset;
+			destination[x] = _Blend(s[0], s[1], column.weights & 0xffff,
+				column.weights >> 16);
+		}
+	}
+
+	bool _Reserve(int32 rowSize, int32 columns)
+	{
+		if (rowSize > fRowSize) {
+			uint32* row = (uint32*)realloc(fRow, rowSize * 4);
+			if (row == NULL)
+				return false;
+			fRow = row;
+			fRowSize = rowSize;
+		}
+		if (columns > fColumnsSize) {
+			Column* list = (Column*)realloc(fColumns,
+				columns * sizeof(Column));
+			if (list == NULL)
+				return false;
+			fColumns = list;
+			fColumnsSize = columns;
+		}
+		return true;
+	}
+
+	uint32*	fRow;
+	int32	fRowSize;
+	Column*	fColumns;
+	int32	fColumnsSize;
+};
+
+
 #ifdef __i386__
 
 struct BilinearSimd : DrawBitmapBilinearOptimized<BilinearSimd> {
@@ -592,22 +769,20 @@ struct DrawBitmapBilinear {
 		enum {
 			kOptimizeForLowFilterRatio = 0,
 			kUseDefaultVersion,
-			kUseSIMDVersion
+			kUseSIMDVersion,
+			kUseSeparableVersion
 		};
 
 		int codeSelect = kUseDefaultVersion;
 
 		if (typeid(ColorType) == typeid(ColorTypeRgb)
 			&& typeid(DrawMode) == typeid(DrawModeCopy)) {
+			codeSelect = kUseSeparableVersion;
+#ifdef __i386__
 			uint32 neededSIMDFlags = APPSERVER_SIMD_MMX | APPSERVER_SIMD_SSE;
 			if ((gSIMDFlags & neededSIMDFlags) == neededSIMDFlags)
 				codeSelect = kUseSIMDVersion;
-			else {
-				if (scaleX == scaleY && (scaleX == 1.5 || scaleX == 2.0
-					|| scaleX == 2.5 || scaleX == 3.0)) {
-					codeSelect = kOptimizeForLowFilterRatio;
-				}
-			}
+#endif
 		}
 
 		switch (codeSelect) {
@@ -622,6 +797,14 @@ struct DrawBitmapBilinear {
 			case kOptimizeForLowFilterRatio:
 			{
 				BilinearLowFilterRatio bilinearPainter;
+				bilinearPainter.Draw(aggInterface, destinationRect,
+					&bitmap, filterData);
+				break;
+			}
+
+			case kUseSeparableVersion:
+			{
+				BilinearSeparable bilinearPainter;
 				bilinearPainter.Draw(aggInterface, destinationRect,
 					&bitmap, filterData);
 				break;
