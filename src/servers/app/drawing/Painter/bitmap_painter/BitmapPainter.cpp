@@ -8,6 +8,7 @@
 #include "BitmapPainter.h"
 
 #include <Bitmap.h>
+#include <StackOrHeapArray.h>
 
 #include <agg_image_accessors.h>
 #include <agg_pixfmt_rgba.h>
@@ -36,7 +37,8 @@ Painter::BitmapPainter::BitmapPainter(const Painter* painter,
 	fPainter(painter),
 	fServerBitmap(bitmap),
 	fStatus(B_NO_INIT),
-	fOptions(options)
+	fOptions(options),
+	fAreaScale(0)
 {
 	if (bitmap == NULL || !bitmap->IsValid())
 		return;
@@ -57,6 +59,14 @@ Painter::BitmapPainter::BitmapPainter(const Painter* painter,
 		bitmap->BytesPerRow());
 
 	fStatus = B_OK;
+}
+
+
+void
+Painter::BitmapPainter::SetAreaSampling(float deviceScale, BPoint origin)
+{
+	fAreaScale = deviceScale;
+	fAreaOrigin = origin;
 }
 
 
@@ -141,6 +151,13 @@ Painter::BitmapPainter::Draw(const BRect& sourceRect,
 					fDestinationRect);
 				return;
 			}
+		}
+
+		// enlarged by the device scale alone, OP_COPY only
+		if (fAreaScale > 1 && fPainter->fDrawingMode == B_OP_COPY
+			&& _HasScale() && !_HasAffineTransform() && !_HasAlphaMask()
+			&& _DrawAreaSampled(sourceRect)) {
+			return;
 		}
 
 		// bilinear and nearest-neighbor scaled, OP_COPY only
@@ -236,6 +253,93 @@ Painter::BitmapPainter::_DetermineTransform(BRect sourceRect,
 	fOffset.x = fDestinationRect.left - sourceRect.left;
 	fOffset.y = fDestinationRect.top - sourceRect.top;
 
+	return true;
+}
+
+
+/*!	Enlarges the bitmap by the device scale with area sampling: each buffer
+	pixel is the average of the bitmap pixels it covers, at their exact
+	fractional positions. The nearest pixel makes every other row and column
+	of a bitmap twice as wide at 150 or 175 percent, so its one pixel lines
+	and the strokes of text drawn into it came out one or two pixels wide;
+	bilinear filtering is even but soft. Here a buffer pixel inside one bitmap
+	pixel takes its colour unchanged and only the pixels on their borders are
+	mixed, so the picture stays as sharp as the scale allows and every bitmap
+	pixel gets the same width. Positions come from the whole desktop's grid,
+	not from the rectangle drawn, so redrawing part of an offscreen bitmap
+	gives the same pixels as drawing all of it.
+*/
+bool
+Painter::BitmapPainter::_DrawAreaSampled(const BRect& sourceRect)
+{
+	using namespace BitmapPainterPrivate;
+
+	// A buffer pixel on the edge of the part drawn also covers the bitmap
+	// pixel next to it: it is mixed in as in a drawing of the whole bitmap,
+	// which an update of part of it has to match. Only the bitmap's own
+	// edges are clamped.
+	if (!sourceRect.Intersects(fBitmapBounds))
+		return false;
+	const int32 firstColumn = (int32)fBitmapBounds.left;
+	const int32 lastColumn = (int32)fBitmapBounds.right;
+	const int32 firstRow = (int32)fBitmapBounds.top;
+	const int32 lastRow = (int32)fBitmapBounds.bottom;
+
+	// only what the clipping leaves of the destination needs weights
+	BRect destination = fDestinationRect;
+	const BRegion& clipping = *fPainter->ClippingRegion();
+	BRect drawn = destination & clipping.Frame();
+	if (!drawn.IsValid())
+		return true;
+	const int32 left = (int32)drawn.left;
+	const int32 top = (int32)drawn.top;
+	const int32 width = (int32)drawn.right - left + 1;
+	const int32 height = (int32)drawn.bottom - top + 1;
+	if (lastColumn * 4 > 65535 || lastRow > 65535)
+		return false;
+
+	BStackOrHeapArray<FilterInfo, 1024> columns(width);
+	BStackOrHeapArray<FilterInfo, 1024> rows(height);
+	if (!columns.IsValid() || !rows.IsValid())
+		return false;
+
+	const float scale = fAreaScale;
+	struct Axis {
+		static void Weights(FilterInfo* infos, int32 count, int32 start,
+			float origin, float scale, int32 first, int32 last, int32 factor)
+		{
+			for (int32 i = 0; i < count; i++) {
+				// the buffer pixel's span in bitmap pixels: above a scale
+				// of one it covers two of them at most
+				const float from = (start + i - origin) / scale;
+				const float to = (start + i + 1 - origin) / scale;
+				int32 index = (int32)floorf(from);
+				float weight = (min_c(index + 1.0f, to) - from) * scale;
+				if (index < first) {
+					index = first;
+					weight = 1;
+				} else if (index >= last) {
+					index = last;
+					weight = 1;
+				}
+				infos[i].index = index * factor;
+				infos[i].weight = (uint16)(min_c(weight, 1.0f) * 255 + 0.5f);
+			}
+		}
+	};
+	Axis::Weights(columns, width, left, fAreaOrigin.x, scale, firstColumn,
+		lastColumn, 4);
+	Axis::Weights(rows, height, top, fAreaOrigin.y, scale, firstRow, lastRow,
+		1);
+
+	FilterData filterData;
+	filterData.fWeightsX = columns;
+	filterData.fWeightsY = rows;
+	filterData.fIndexOffsetX = left - (int32)destination.left;
+	filterData.fIndexOffsetY = top - (int32)destination.top;
+
+	BilinearSeparable painter;
+	painter.Draw(fPainter->fInternal, destination, &fBitmap, filterData);
 	return true;
 }
 

@@ -25,6 +25,12 @@ public:
 			void				Draw(const BRect& sourceRect,
 									const BRect& destinationRect);
 
+			// The bitmap is enlarged to the frame buffer by the device
+			// scale alone: \a origin is the buffer position, in fractions
+			// of a pixel, where the bitmap's pixel 0, 0 starts.
+			void				SetAreaSampling(float deviceScale,
+									BPoint origin);
+
 private:
 			bool				_DetermineTransform(
 									BRect sourceRect,
@@ -33,6 +39,7 @@ private:
 			bool				_HasScale();
 			bool				_HasAffineTransform();
 			bool				_HasAlphaMask();
+			bool				_DrawAreaSampled(const BRect& sourceRect);
 
 			void				_ConvertColorSpace(ObjectDeleter<BBitmap>&
 									convertedBitmapDeleter);
@@ -57,6 +64,9 @@ private:
 			double					fScaleX;
 			double					fScaleY;
 			BPoint					fOffset;
+
+			float					fAreaScale;
+			BPoint					fAreaOrigin;
 };
 
 
