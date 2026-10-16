@@ -965,15 +965,22 @@ BTabView::DrawTabs()
 	be_control_look->DrawTabFrame(this, tabFrame, bounds, base, 0,
 		borders, fBorderStyle, fTabSide);
 
-	// draw the tabs on top of the tab frame
+	// draw the tabs on top of the tab frame, the selected one last: its
+	// neighbours share a column with it, and at a fractional scale their
+	// separator would otherwise cover part of its outline
 	int32 tabCount = CountTabs();
-	for (int32 i = 0; i < tabCount; i++) {
-		BRect tabFrame = TabFrame(i);
+	for (int32 pass = 0; pass < 2; pass++) {
+		for (int32 i = 0; i < tabCount; i++) {
+			if ((i == fSelection) != (pass == 1))
+				continue;
 
-		TabAt(i)->DrawTab(this, tabFrame,
-			i == fSelection ? B_TAB_FRONT
-				: (i == 0) ? B_TAB_FIRST : B_TAB_ANY,
-			i != fSelection - 1);
+			BRect tabFrame = TabFrame(i);
+
+			TabAt(i)->DrawTab(this, tabFrame,
+				i == fSelection ? B_TAB_FRONT
+					: (i == 0) ? B_TAB_FIRST : B_TAB_ANY,
+				i != fSelection - 1);
+		}
 	}
 
 	return fSelection < CountTabs() ? TabFrame(fSelection) : BRect();
