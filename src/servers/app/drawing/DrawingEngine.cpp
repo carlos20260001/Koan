@@ -560,8 +560,6 @@ DrawingEngine::CopyRegion(/*const*/ BRegion* region, int32 xOffset,
 	// NOTE: region is already clipped
 	ASSERT_PARALLEL_LOCKED();
 
-	// pixels move in the buffer, which is finer than the region
-	BRegion scaledRegion;
 	if (fPainter->DeviceScale() != 1) {
 		// A copy is exact only when the translation is an integer number of
 		// device pixels. Rounding each movement accumulates error and changes
@@ -570,12 +568,37 @@ DrawingEngine::CopyRegion(/*const*/ BRegion* region, int32 xOffset,
 		float deviceY = yOffset * fPainter->DeviceScale();
 		if (deviceX != floorf(deviceX) || deviceY != floorf(deviceY))
 			return false;
-		_ScaleRegion(*region, scaledRegion);
-		region = &scaledRegion;
-		xOffset = (int32)deviceX;
-		yOffset = (int32)deviceY;
+		return CopyRegionByDeviceOffset(region, (int32)deviceX,
+			(int32)deviceY);
 	}
+	return _CopyRegion(region, xOffset, yOffset);
+}
 
+
+/*!	Moves the pixels of a logical region by a number of buffer pixels, which
+	is what the caller decided the move is worth at the drawing density.
+	Nothing outside the region scaled to buffer pixels and moved is touched.
+*/
+bool
+DrawingEngine::CopyRegionByDeviceOffset(/*const*/ BRegion* region,
+	int32 deviceX, int32 deviceY)
+{
+	ASSERT_PARALLEL_LOCKED();
+
+	if (fPainter->DeviceScale() == 1)
+		return _CopyRegion(region, deviceX, deviceY);
+
+	// pixels move in the buffer, which is finer than the region
+	BRegion scaledRegion;
+	_ScaleRegion(*region, scaledRegion);
+	return _CopyRegion(&scaledRegion, deviceX, deviceY);
+}
+
+
+bool
+DrawingEngine::_CopyRegion(/*const*/ BRegion* region, int32 xOffset,
+	int32 yOffset)
+{
 	BRect frame = region->Frame();
 	frame = frame | frame.OffsetByCopy(xOffset, yOffset);
 	if (!fGraphicsCard->DrawingBuffer()->Bounds().Contains(frame))

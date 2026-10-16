@@ -215,8 +215,30 @@ struct DefaultWindowBehaviour::DragState : MouseTrackingState {
 		bool activateOnMouseUp, bool minimizeCheckOnMouseUp)
 		:
 		MouseTrackingState(behavior, where, activateOnMouseUp,
-			minimizeCheckOnMouseUp)
+			minimizeCheckOnMouseUp),
+		fDragging(false)
 	{
+	}
+
+	virtual ~DragState()
+	{
+		// the window went away during the drag
+		if (fDragging)
+			fDesktop->EndWindowDrag(false);
+	}
+
+	virtual void EnterState(State* previousState)
+	{
+		MouseTrackingState::EnterState(previousState);
+		fDesktop->BeginWindowDrag();
+		fDragging = true;
+	}
+
+	virtual void ExitState(State* nextState)
+	{
+		MouseTrackingState::ExitState(nextState);
+		fDragging = false;
+		fDesktop->EndWindowDrag();
 	}
 
 	virtual bool MouseDown(BMessage* message, BPoint where, bool& _unhandled)
@@ -247,6 +269,9 @@ struct DefaultWindowBehaviour::DragState : MouseTrackingState {
 		} else
 			delta = BPoint(0, 0);
 	}
+
+private:
+	bool	fDragging;
 };
 
 

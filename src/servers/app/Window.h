@@ -221,6 +221,14 @@ public:
 			void				SetMinimized(bool minimized);
 	inline	bool				IsMinimized() const { return fMinimized; }
 
+			// Set while the content was moved by a whole number of buffer
+			// pixels that is not exactly the scaled move, see
+			// Desktop::MoveWindowBy(); redrawing all of it puts it right.
+			void				SetContentApproximate(bool approximate)
+									{ fContentApproximate = approximate; }
+	inline	bool				IsContentApproximate() const
+									{ return fContentApproximate; }
+
 			void				SetCurrentWorkspace(int32 index)
 									{ fCurrentWorkspace = index; fPriorWorkspace = index; }
 			int32				CurrentWorkspace() const
@@ -428,6 +436,7 @@ protected:
 			int32				fShowLevel;
 			bool				fMinimized : 1;
 			bool				fIsFocus : 1;
+			bool				fContentApproximate : 1;
 
 			window_look			fLook;
 			window_feel			fFeel;

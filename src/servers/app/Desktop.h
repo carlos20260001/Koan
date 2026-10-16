@@ -239,6 +239,8 @@ public:
 
 			void				MoveWindowBy(Window* window, float x, float y,
 									int32 workspace = -1);
+			void				BeginWindowDrag();
+			void				EndWindowDrag(bool redraw = true);
 			void				ResizeWindowBy(Window* window, float x,
 									float y);
 			void				SetWindowOutlinesDelta(Window* window,
@@ -412,6 +414,8 @@ private:
 									const BRect& oldFrame,
 									const BRect& newFrame);
 			void				_SetCurrentWorkspaceConfiguration();
+			bool				_CopyWindowApproximately(Window* window,
+									BRegion& copyRegion, float x, float y);
 			void				_SetWorkspace(int32 index,
 									bool moveFocusWindow = false);
 
@@ -455,6 +459,7 @@ private:
 			team_id				fDirectScreenTeam;
 			int32				fCurrentWorkspace;
 			int32				fPreviousWorkspace;
+			int32				fWindowDrags;
 
 			WindowList			fAllWindows;
 			WindowList			fSubsetWindows;

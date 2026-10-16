@@ -493,6 +493,7 @@ Desktop::Desktop(uid_t userID, const char* targetScreen)
 	fDirectScreenTeam(-1),
 	fCurrentWorkspace(0),
 	fPreviousWorkspace(0),
+	fWindowDrags(0),
 	fAllWindows(kAllWindowList),
 	fSubsetWindows(kSubsetList),
 	fFocusList(kFocusList),
@@ -2123,6 +2124,8 @@ Desktop::MoveWindowBy(Window* window, float x, float y, int32 workspace)
 	if (GetDrawingEngine()->LockParallelAccess()) {
 		bool copied = GetDrawingEngine()->CopyRegion(&copyRegion, (int32)x,
 			(int32)y);
+		if (!copied && fWindowDrags > 0)
+			copied = _CopyWindowApproximately(window, copyRegion, x, y);
 		GetDrawingEngine()->UnlockParallelAccess();
 		if (!copied)
 			copyRegion.MakeEmpty();
@@ -2147,6 +2150,95 @@ Desktop::MoveWindowBy(Window* window, float x, float y, int32 workspace)
 	}
 
 	NotifyWindowMoved(window);
+}
+
+
+/*!	A window dragged on a desktop drawn at a fractional scale mostly moves
+	by a fraction of a buffer pixel: one logical pixel is one and a half at
+	150%. Its pixels can only move by whole ones, so without this it was
+	redrawn for every such step. While the user drags it, its content is
+	moved by the whole number of pixels its frame moves instead, which puts
+	everything inside within a pixel of where it belongs; a band along the
+	edges of what was copied is redrawn, so that the copy meets its
+	surroundings exactly, and EndWindowDrag() redraws the windows moved this
+	way once the drag is over.
+
+	 copyRegion is the region to copy before the move, in logical
+	coordinates; on return it is the part of it that holds valid content.
+*/
+bool
+Desktop::_CopyWindowApproximately(Window* window, BRegion& copyRegion,
+	float x, float y)
+{
+	float scale = GetDrawingEngine()->RenderScale();
+	if (scale == 1 || copyRegion.CountRects() == 0)
+		return false;
+
+	BPoint newLeftTop = window->Frame().LeftTop();
+	BPoint oldLeftTop = newLeftTop - BPoint((int32)x, (int32)y);
+	int32 deviceX = (int32)floorf(newLeftTop.x * scale)
+		- (int32)floorf(oldLeftTop.x * scale);
+	int32 deviceY = (int32)floorf(newLeftTop.y * scale)
+		- (int32)floorf(oldLeftTop.y * scale);
+
+	// The copy is off by up to one buffer pixel from the scaled move: one
+	// logical pixel off the edges keeps it within the window's new area,
+	// and one more is what it surely holds.
+	BRegion source;
+	BRegion valid;
+	for (int32 i = 0; i < copyRegion.CountRects(); i++) {
+		clipping_rect rect = copyRegion.RectAtInt(i);
+		clipping_rect inner = { rect.left + 1, rect.top + 1, rect.right - 1,
+			rect.bottom - 1 };
+		if (inner.left <= inner.right && inner.top <= inner.bottom)
+			source.Include(inner);
+		clipping_rect sure = { rect.left + 2, rect.top + 2, rect.right - 2,
+			rect.bottom - 2 };
+		if (sure.left <= sure.right && sure.top <= sure.bottom)
+			valid.Include(sure);
+	}
+	if (valid.CountRects() == 0
+		|| !GetDrawingEngine()->CopyRegionByDeviceOffset(&source, deviceX,
+			deviceY)) {
+		return false;
+	}
+
+	copyRegion = valid;
+	window->SetContentApproximate(true);
+	return true;
+}
+
+
+void
+Desktop::BeginWindowDrag()
+{
+	fWindowDrags++;
+}
+
+
+/*!	Redraws the windows whose content was moved approximately during the
+	drag, see _CopyWindowApproximately().
+*/
+void
+Desktop::EndWindowDrag(bool redraw)
+{
+	if (fWindowDrags > 0)
+		fWindowDrags--;
+	if (fWindowDrags > 0 || !redraw)
+		return;
+
+	AutoWriteLocker _(fWindowLock);
+
+	BRegion dirty;
+	for (Window* window = CurrentWindows().FirstWindow(); window != NULL;
+			window = window->NextWindow(fCurrentWorkspace)) {
+		if (!window->IsContentApproximate())
+			continue;
+		window->SetContentApproximate(false);
+		if (window->IsVisible())
+			dirty.Include(&window->VisibleRegion());
+	}
+	MarkDirty(dirty);
 }
 
 

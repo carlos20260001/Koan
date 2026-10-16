@@ -96,6 +96,9 @@ public:
 	// Returns false when the destination must be redrawn instead.
 	virtual	bool			CopyRegion(/*const*/ BRegion* region,
 								int32 xOffset, int32 yOffset);
+			bool			CopyRegionByDeviceOffset(
+								/*const*/ BRegion* region,
+								int32 deviceX, int32 deviceY);
 
 	virtual	void			InvertRect(BRect r);
 
@@ -215,6 +218,8 @@ private:
 			HWInterface*	fGraphicsCard;
 			bool			fCopyToFront;
 
+			bool			_CopyRegion(/*const*/ BRegion* region,
+								int32 xOffset, int32 yOffset);
 			void			_ScaleRegion(const BRegion& region,
 								BRegion& scaled) const;
 };

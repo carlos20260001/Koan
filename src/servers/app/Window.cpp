@@ -107,6 +107,7 @@ Window::Window(const BRect& frame, const char *name,
 	fShowLevel(1),
 	fMinimized(false),
 	fIsFocus(false),
+	fContentApproximate(false),
 
 	fLook(look),
 	fFeel(feel),
