@@ -18,6 +18,9 @@ class BView;
 namespace BPrivate {
 
 
+class FrameLines;
+
+
 class HaikuControlLook : public BControlLook {
 public:
 								HaikuControlLook();
@@ -372,8 +375,7 @@ protected:
 
 			// The rings of a frame drawn together, so that on a desktop
 			// drawn at a fractional scale they are as thick on every side
-			// (see FrameLines in HaikuControlLook.cpp)
-			class FrameLines;
+			// (see FrameLines.h)
 			void				_DrawOuterResessedFrame(BView* view,
 									BRect& rect, const rgb_color& base,
 									uint32 flags, uint32 borders,

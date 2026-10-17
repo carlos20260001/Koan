@@ -18,6 +18,7 @@
 #include <GradientLinear.h>
 #include <LayoutUtils.h>
 #include <Region.h>
+#include <ScrollView.h>
 #include <Shape.h>
 #include <String.h>
 #include <TabView.h>
@@ -26,6 +27,7 @@
 #include <WindowPrivate.h>
 #include <ViewPrivate.h>
 #include <ServerProtocolStructs.h>
+#include <FrameLines.h>
 
 
 namespace BPrivate {
@@ -38,75 +40,51 @@ static const rgb_color kBlack = { 0, 0, 0, 255 };
 static const rgb_color kWhite = { 255, 255, 255, 255 };
 
 
-/*!	Collects the one pixel lines of the rings of a frame, nested inwards
-	from the rectangle it starts with, and draws them in one go. At a
-	fractional scale one logical pixel is one frame buffer pixel in some
-	places and two in others, so a ring drawn alone is as thin as one on one
-	side of a control and as thick as two on the other; drawn together,
-	app_server shares out the pixels of the band the rings cover the same
-	way on every side (see ViewFrameLineArrayInfo). The dark outline of a
-	control should be a ring that keeps its width; a faint edge around it
-	can take up what is left.
+/*!	The sides of the scroll bar \a view (\a rect being its bounds) that lie
+	on the frame of the BScrollView it belongs to, when that frame has a
+	fancy border and draws them: BScrollView puts its scroll bars over the
+	frame's dark ring there (the frame's faint edge lies just outside), so
+	the scroll bar draws that ring and has to put it where the frame's band
+	does (see DrawScrollViewFrame()).
 */
-class HaikuControlLook::FrameLines {
-public:
-	FrameLines(BView* view, const BRect& frame, uint32 borders)
-		:
-		fView(view),
-		fFrame(frame),
-		fBorders(borders),
-		fRings(0),
-		fUniformRings(0),
-		fFlags(0),
-		fCount(0)
-	{
+static uint32
+scroll_view_frame_sides(BView* view, const BRect& rect)
+{
+	BScrollView* scrollView = dynamic_cast<BScrollView*>(view->Parent());
+	if (scrollView == NULL || scrollView->Border() != B_FANCY_BORDER
+		|| rect != view->Bounds()) {
+		return 0;
 	}
 
-	//! The rings are drawn over a fill: they keep their widths and the
-	//! fill takes up what the scale leaves.
-	void SetOverFill()
-	{
-		fFlags |= kFrameLinesOverFill;
+	uint32 borders = scrollView->Borders();
+	if (scrollView->ScrollBar(B_HORIZONTAL) != NULL
+		&& scrollView->ScrollBar(B_VERTICAL) != NULL) {
+		// the frame leaves out the sides with the scroll bars and the corner
+		borders &= ~(BControlLook::B_RIGHT_BORDER
+			| BControlLook::B_BOTTOM_BORDER);
 	}
 
-	void AddLine(BPoint start, BPoint end, const rgb_color& color)
-	{
-		if (fCount == kMaxLines)
-			return;
-		fLines[fCount].startPoint = start;
-		fLines[fCount].endPoint = end;
-		fLines[fCount].color = color;
-		fCount++;
+	BRect frame = view->Frame();
+	BRect bounds = scrollView->Bounds();
+	uint32 sides = 0;
+	if ((borders & BControlLook::B_LEFT_BORDER) != 0
+		&& frame.left == bounds.left + 1) {
+		sides |= BControlLook::B_LEFT_BORDER;
 	}
-
-	void EndRing(bool uniform)
-	{
-		if (uniform)
-			fUniformRings |= 1 << fRings;
-		fRings++;
+	if ((borders & BControlLook::B_TOP_BORDER) != 0
+		&& frame.top == bounds.top + 1) {
+		sides |= BControlLook::B_TOP_BORDER;
 	}
-
-	void Draw()
-	{
-		if (fCount == 0)
-			return;
-		BView::Private(fView).StrokeFrameLineArray(fFrame, fRings, fBorders,
-			fUniformRings, fFlags, fLines, fCount);
-		fCount = 0;
+	if ((borders & BControlLook::B_RIGHT_BORDER) != 0
+		&& frame.right == bounds.right - 1) {
+		sides |= BControlLook::B_RIGHT_BORDER;
 	}
-
-private:
-	static const int32 kMaxLines = 48;
-
-	BView*				fView;
-	BRect				fFrame;
-	uint32				fBorders;
-	int32				fRings;
-	uint32				fUniformRings;
-	uint32				fFlags;
-	ViewLineArrayInfo	fLines[kMaxLines];
-	int32				fCount;
-};
+	if ((borders & BControlLook::B_BOTTOM_BORDER) != 0
+		&& frame.bottom == bounds.bottom - 1) {
+		sides |= BControlLook::B_BOTTOM_BORDER;
+	}
+	return sides;
+}
 
 
 HaikuControlLook::HaikuControlLook()
@@ -718,41 +696,74 @@ HaikuControlLook::DrawScrollBarBorder(BView* view, BRect rect,
 
 	// stroke a line around the entire scrollbar
 	// take care of border highlighting, scroll target is focus view
-	// (drawn last, over the inside: at a fractional scale it keeps its width)
-	FrameLines lines(view, rect, B_ALL_BORDERS);
+	// At a fractional scale every side keeps its width: the sides on the
+	// frame of the scroll view are the frame's dark ring, shared out with
+	// the frame's band as the scroll view does it (see
+	// scroll_view_frame_sides()), the others are drawn last, over the
+	// inside.
+	uint32 frameSides = scroll_view_frame_sides(view, rect);
+	BRect frame(rect);
+	if ((frameSides & B_LEFT_BORDER) != 0)
+		frame.left--;
+	if ((frameSides & B_TOP_BORDER) != 0)
+		frame.top--;
+	if ((frameSides & B_RIGHT_BORDER) != 0)
+		frame.right++;
+	if ((frameSides & B_BOTTOM_BORDER) != 0)
+		frame.bottom++;
+	FrameLines frameLines(view, frame, frameSides);
+	frameLines.EndRing(false);
+		// the frame's faint edge, outside the scroll bar
+	FrameLines lines(view, rect, B_ALL_BORDERS & ~frameSides);
 	lines.SetOverFill();
+
+	rgb_color borderColor = view->HighColor();
+	rgb_color highlightColor = ui_color(B_KEYBOARD_NAVIGATION_COLOR);
+	rgb_color leftColor = borderColor;
+	rgb_color topColor = borderColor;
 	if (isEnabled && isFocused) {
-		rgb_color borderColor = view->HighColor();
-		rgb_color highlightColor = ui_color(B_KEYBOARD_NAVIGATION_COLOR);
-
-		lines.AddLine(BPoint(rect.left + 1, rect.bottom),
-			BPoint(rect.right, rect.bottom), borderColor);
-		lines.AddLine(BPoint(rect.right, rect.top + 1),
-			BPoint(rect.right, rect.bottom - 1), borderColor);
-
-		if (orientation == B_HORIZONTAL) {
-			lines.AddLine(BPoint(rect.left, rect.top + 1),
-				BPoint(rect.left, rect.bottom), borderColor);
-		} else {
-			lines.AddLine(BPoint(rect.left, rect.top),
-				BPoint(rect.left, rect.bottom), highlightColor);
-		}
-
-		if (orientation == B_HORIZONTAL) {
-			lines.AddLine(BPoint(rect.left, rect.top),
-				BPoint(rect.right, rect.top), highlightColor);
-		} else {
-			lines.AddLine(BPoint(rect.left + 1, rect.top),
-				BPoint(rect.right, rect.top), borderColor);
-		}
-		lines.EndRing(true);
-	} else {
-		rgb_color borderColor = view->HighColor();
-		BRect ring(rect);
-		_DrawFrame(view, ring, borderColor, borderColor, borderColor,
-			borderColor, B_ALL_BORDERS, &lines, true);
+		if (orientation == B_HORIZONTAL)
+			topColor = highlightColor;
+		else
+			leftColor = highlightColor;
 	}
+
+	FrameLines& bottom = (frameSides & B_BOTTOM_BORDER) != 0
+		? frameLines : lines;
+	FrameLines& right = (frameSides & B_RIGHT_BORDER) != 0
+		? frameLines : lines;
+	FrameLines& left = (frameSides & B_LEFT_BORDER) != 0 ? frameLines : lines;
+	FrameLines& top = (frameSides & B_TOP_BORDER) != 0 ? frameLines : lines;
+	if (isEnabled && isFocused) {
+		bottom.AddLine(BPoint(rect.left + 1, rect.bottom),
+			BPoint(rect.right, rect.bottom), borderColor);
+		right.AddLine(BPoint(rect.right, rect.top + 1),
+			BPoint(rect.right, rect.bottom - 1), borderColor);
+		if (orientation == B_HORIZONTAL) {
+			left.AddLine(BPoint(rect.left, rect.top + 1),
+				BPoint(rect.left, rect.bottom), leftColor);
+			top.AddLine(BPoint(rect.left, rect.top),
+				BPoint(rect.right, rect.top), topColor);
+		} else {
+			left.AddLine(BPoint(rect.left, rect.top),
+				BPoint(rect.left, rect.bottom), leftColor);
+			top.AddLine(BPoint(rect.left + 1, rect.top),
+				BPoint(rect.right, rect.top), topColor);
+		}
+	} else {
+		left.AddLine(BPoint(rect.left, rect.bottom),
+			BPoint(rect.left, rect.top), leftColor);
+		top.AddLine(BPoint(rect.left + 1, rect.top),
+			BPoint(rect.right, rect.top), topColor);
+		right.AddLine(BPoint(rect.right, rect.top + 1),
+			BPoint(rect.right, rect.bottom), borderColor);
+		bottom.AddLine(BPoint(rect.left + 1, rect.bottom),
+			BPoint(rect.right - 1, rect.bottom), borderColor);
+	}
+	frameLines.EndRing(true);
+	lines.EndRing(true);
 	lines.Draw();
+	frameLines.Draw();
 
 	view->PopState();
 }
@@ -836,6 +847,45 @@ HaikuControlLook::DrawScrollBarBackground(BView* view, BRect& rect,
 	rgb_color darkEdge1 = tint_color(base, darkEdge1Tint);
 	rgb_color darkEdge2 = tint_color(base, darkEdge2Tint);
 	rgb_color shadow = tint_color(base, shadowTint);
+
+	float length = orientation == B_HORIZONTAL ? rect.Width() : rect.Height();
+	if (length >= 3) {
+		// The fill goes under the edges, which are drawn over it: at a
+		// fractional scale the dark edges keep their width at both ends
+		// of the track and next to the thumb.
+		_FillGradient(view, rect, base, gradient1Tint, gradient2Tint,
+			orientation);
+
+		uint32 ends = orientation == B_HORIZONTAL
+			? B_LEFT_BORDER | B_RIGHT_BORDER : B_TOP_BORDER | B_BOTTOM_BORDER;
+		FrameLines lines(view, rect, ends);
+		lines.SetOverFill();
+		if (orientation == B_HORIZONTAL) {
+			lines.AddLine(rect.LeftTop(), rect.LeftBottom(), darkEdge1);
+			lines.AddLine(rect.RightTop(), rect.RightBottom(), darkEdge2);
+			lines.EndRing(true);
+			lines.AddLine(BPoint(rect.left + 1, rect.top),
+				BPoint(rect.left + 1, rect.bottom), shadow);
+		} else {
+			lines.AddLine(rect.LeftTop(), rect.RightTop(), darkEdge1);
+			lines.AddLine(rect.LeftBottom(), rect.RightBottom(), darkEdge2);
+			lines.EndRing(true);
+			lines.AddLine(BPoint(rect.left, rect.top + 1),
+				BPoint(rect.right, rect.top + 1), shadow);
+		}
+		lines.EndRing(false);
+		lines.Draw();
+
+		if (orientation == B_HORIZONTAL) {
+			rect.left += 2;
+			rect.right--;
+		} else {
+			rect.top += 2;
+			rect.bottom--;
+		}
+		view->PopState();
+		return;
+	}
 
 	if (orientation == B_HORIZONTAL) {
 		// dark vertical line on left edge
@@ -934,22 +984,25 @@ HaikuControlLook::DrawScrollBarThumb(BView* view, BRect& rect,
 		DrawButtonBackground(view, rect, updateRect, thumbColor, 0,
 			B_ALL_BORDERS, orientation);
 	} else {
-		// thumb bevel
-		view->BeginLineArray(4);
-		view->AddLine(BPoint(rect.left, rect.bottom),
-			BPoint(rect.left, rect.top), light);
-		view->AddLine(BPoint(rect.left + 1, rect.top),
-			BPoint(rect.right, rect.top), light);
-		view->AddLine(BPoint(rect.right, rect.top + 1),
-			BPoint(rect.right, rect.bottom), dark2);
-		view->AddLine(BPoint(rect.right - 1, rect.bottom),
-			BPoint(rect.left + 1, rect.bottom), dark2);
-		view->EndLineArray();
-
-		// thumb fill
-		rect.InsetBy(1, 1);
+		// thumb fill, and the bevel over it: at a fractional scale the bevel
+		// keeps its width
 		view->SetHighColor(dark1);
 		view->FillRect(rect);
+
+		FrameLines lines(view, rect, B_ALL_BORDERS);
+		lines.SetOverFill();
+		lines.AddLine(BPoint(rect.left, rect.bottom),
+			BPoint(rect.left, rect.top), light);
+		lines.AddLine(BPoint(rect.left + 1, rect.top),
+			BPoint(rect.right, rect.top), light);
+		lines.AddLine(BPoint(rect.right, rect.top + 1),
+			BPoint(rect.right, rect.bottom), dark2);
+		lines.AddLine(BPoint(rect.right - 1, rect.bottom),
+			BPoint(rect.left + 1, rect.bottom), dark2);
+		lines.EndRing(true);
+		lines.Draw();
+
+		rect.InsetBy(1, 1);
 	}
 
 	// draw knob style
@@ -1421,31 +1474,38 @@ HaikuControlLook::DrawSliderBar(BView* view, BRect rect, const BRect& updateRect
 	if ((flags & B_BLEND_FRAME) != 0)
 		view->SetDrawingMode(B_OP_ALPHA);
 
-	view->BeginLineArray(4);
+	// the edge and the frame are the rings of a band: at a fractional scale
+	// the frame keeps its width and the edge takes up what is left
+	FrameLines lines(view, barRect, orientation == B_HORIZONTAL
+		? B_TOP_BORDER | B_BOTTOM_BORDER : B_LEFT_BORDER | B_RIGHT_BORDER);
 	if (orientation == B_HORIZONTAL) {
-		view->AddLine(barRect.LeftTop(), barRect.RightTop(),
+		lines.AddLine(barRect.LeftTop(), barRect.RightTop(),
 			edgeShadowColor);
-		view->AddLine(barRect.LeftBottom(), barRect.RightBottom(),
+		lines.AddLine(barRect.LeftBottom(), barRect.RightBottom(),
 			edgeLightColor);
+		lines.EndRing(false);
 		barRect.InsetBy(0, 1);
-		view->AddLine(barRect.LeftTop(), barRect.RightTop(),
+		lines.AddLine(barRect.LeftTop(), barRect.RightTop(),
 			frameShadowColor);
-		view->AddLine(barRect.LeftBottom(), barRect.RightBottom(),
+		lines.AddLine(barRect.LeftBottom(), barRect.RightBottom(),
 			frameLightColor);
+		lines.EndRing(true);
 		barRect.InsetBy(0, 1);
 	} else {
-		view->AddLine(barRect.LeftTop(), barRect.LeftBottom(),
+		lines.AddLine(barRect.LeftTop(), barRect.LeftBottom(),
 			edgeShadowColor);
-		view->AddLine(barRect.RightTop(), barRect.RightBottom(),
+		lines.AddLine(barRect.RightTop(), barRect.RightBottom(),
 			edgeLightColor);
+		lines.EndRing(false);
 		barRect.InsetBy(1, 0);
-		view->AddLine(barRect.LeftTop(), barRect.LeftBottom(),
+		lines.AddLine(barRect.LeftTop(), barRect.LeftBottom(),
 			frameShadowColor);
-		view->AddLine(barRect.RightTop(), barRect.RightBottom(),
+		lines.AddLine(barRect.RightTop(), barRect.RightBottom(),
 			frameLightColor);
+		lines.EndRing(true);
 		barRect.InsetBy(1, 0);
 	}
-	view->EndLineArray();
+	lines.Draw();
 
 	view->SetDrawingMode(oldMode);
 
@@ -1491,6 +1551,7 @@ HaikuControlLook::DrawSliderThumb(BView* view, BRect& rect, const BRect& updateR
 	BRect originalRect(rect);
 	rect.right--;
 	rect.bottom--;
+	BRect frameRect(rect);
 
 	view->PushState();
 
@@ -1499,6 +1560,14 @@ HaikuControlLook::DrawSliderThumb(BView* view, BRect& rect, const BRect& updateR
 
 	flags &= ~B_ACTIVATED;
 	DrawButtonBackground(view, rect, updateRect, base, flags);
+
+	// the frame again, over the button: at a fractional scale it then keeps
+	// its width
+	FrameLines frame(view, frameRect, B_ALL_BORDERS);
+	frame.SetOverFillCoveringPixels();
+	_DrawFrame(view, frameRect, frameLightColor, frameLightColor,
+		frameShadowColor, frameShadowColor, B_ALL_BORDERS, &frame, true);
+	frame.Draw();
 
 	// thumb shadow
 	view->SetDrawingMode(B_OP_ALPHA);
@@ -2231,6 +2300,8 @@ HaikuControlLook::DrawBorder(BView* view, BRect& rect, const BRect& updateRect,
 
 	// the frame keeps its width at any scale
 	FrameLines lines(view, rect, borders);
+	if ((flags & kControlLookBorderOverFill) != 0)
+		lines.SetOverFillCoveringPixels();
 	if (borderStyle == B_FANCY_BORDER)
 		_DrawOuterResessedFrame(view, rect, base, flags, borders, lines);
 

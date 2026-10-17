@@ -133,7 +133,11 @@ struct ViewFrameLineArrayInfo {
 enum {
 	// The rings are drawn over a fill that reaches under them: every ring
 	// gets its width from the outside in, and the band ends where they do.
-	kFrameLinesOverFill			= 0x01
+	kFrameLinesOverFill			= 0x01,
+	// With kFrameLinesOverFill: every ring also covers at least the pixels
+	// of the logical pixel it is drawn on, for lines over something that
+	// does not reach under them everywhere (a transparent view).
+	kFrameLinesCoverPixels		= 0x02
 };
 
 
