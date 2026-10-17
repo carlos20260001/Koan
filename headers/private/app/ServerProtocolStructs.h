@@ -137,7 +137,12 @@ enum {
 	// With kFrameLinesOverFill: every ring also covers at least the pixels
 	// of the logical pixel it is drawn on, for lines over something that
 	// does not reach under them everywhere (a transparent view).
-	kFrameLinesCoverPixels		= 0x02
+	kFrameLinesCoverPixels		= 0x02,
+	// Without kFrameLinesOverFill: every ring gets the whole part of the
+	// scale, the rings lie against the band's inner edge, and the pixels
+	// the scale leaves at its outer edge are not drawn. A single ring
+	// around other views (a plain frame) is then as thin on every side.
+	kFrameLinesHugInside		= 0x04
 };
 
 

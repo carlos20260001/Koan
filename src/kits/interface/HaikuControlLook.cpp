@@ -41,46 +41,49 @@ static const rgb_color kWhite = { 255, 255, 255, 255 };
 
 
 /*!	The sides of the scroll bar \a view (\a rect being its bounds) that lie
-	on the frame of the BScrollView it belongs to, when that frame has a
-	fancy border and draws them: BScrollView puts its scroll bars over the
-	frame's dark ring there (the frame's faint edge lies just outside), so
-	the scroll bar draws that ring and has to put it where the frame's band
-	does (see DrawScrollViewFrame()).
+	on the frame of the BScrollView it belongs to, and that frame's border
+	style: BScrollView puts its scroll bars over the frame's dark ring there
+	(a fancy frame's faint edge lies just outside), so the scroll bar draws
+	that ring and has to put it where the frame's band does (see
+	DrawScrollViewFrame()).
 */
 static uint32
-scroll_view_frame_sides(BView* view, const BRect& rect)
+scroll_view_frame_sides(BView* view, const BRect& rect, border_style& style)
 {
 	BScrollView* scrollView = dynamic_cast<BScrollView*>(view->Parent());
-	if (scrollView == NULL || scrollView->Border() != B_FANCY_BORDER
-		|| rect != view->Bounds()) {
+	if (scrollView == NULL || rect != view->Bounds())
 		return 0;
-	}
+	style = scrollView->Border();
+	if (style != B_FANCY_BORDER && style != B_PLAIN_BORDER)
+		return 0;
 
 	uint32 borders = scrollView->Borders();
-	if (scrollView->ScrollBar(B_HORIZONTAL) != NULL
+	if (style == B_FANCY_BORDER && scrollView->ScrollBar(B_HORIZONTAL) != NULL
 		&& scrollView->ScrollBar(B_VERTICAL) != NULL) {
 		// the frame leaves out the sides with the scroll bars and the corner
 		borders &= ~(BControlLook::B_RIGHT_BORDER
 			| BControlLook::B_BOTTOM_BORDER);
 	}
 
+	// the dark ring is the outermost one of a plain frame
+	float inset = style == B_FANCY_BORDER ? 1 : 0;
 	BRect frame = view->Frame();
 	BRect bounds = scrollView->Bounds();
 	uint32 sides = 0;
 	if ((borders & BControlLook::B_LEFT_BORDER) != 0
-		&& frame.left == bounds.left + 1) {
+		&& frame.left == bounds.left + inset) {
 		sides |= BControlLook::B_LEFT_BORDER;
 	}
 	if ((borders & BControlLook::B_TOP_BORDER) != 0
-		&& frame.top == bounds.top + 1) {
+		&& frame.top == bounds.top + inset) {
 		sides |= BControlLook::B_TOP_BORDER;
 	}
 	if ((borders & BControlLook::B_RIGHT_BORDER) != 0
-		&& frame.right == bounds.right - 1) {
+		&& frame.right == bounds.right - inset) {
 		sides |= BControlLook::B_RIGHT_BORDER;
 	}
 	if ((borders & BControlLook::B_BOTTOM_BORDER) != 0
-		&& frame.bottom == bounds.bottom - 1) {
+		&& frame.bottom == bounds.bottom - inset) {
 		sides |= BControlLook::B_BOTTOM_BORDER;
 	}
 	return sides;
@@ -701,19 +704,29 @@ HaikuControlLook::DrawScrollBarBorder(BView* view, BRect rect,
 	// the frame's band as the scroll view does it (see
 	// scroll_view_frame_sides()), the others are drawn last, over the
 	// inside.
-	uint32 frameSides = scroll_view_frame_sides(view, rect);
+	border_style frameStyle = B_NO_BORDER;
+	uint32 frameSides = scroll_view_frame_sides(view, rect, frameStyle);
 	BRect frame(rect);
-	if ((frameSides & B_LEFT_BORDER) != 0)
-		frame.left--;
-	if ((frameSides & B_TOP_BORDER) != 0)
-		frame.top--;
-	if ((frameSides & B_RIGHT_BORDER) != 0)
-		frame.right++;
-	if ((frameSides & B_BOTTOM_BORDER) != 0)
-		frame.bottom++;
+	if (frameStyle == B_FANCY_BORDER) {
+		if ((frameSides & B_LEFT_BORDER) != 0)
+			frame.left--;
+		if ((frameSides & B_TOP_BORDER) != 0)
+			frame.top--;
+		if ((frameSides & B_RIGHT_BORDER) != 0)
+			frame.right++;
+		if ((frameSides & B_BOTTOM_BORDER) != 0)
+			frame.bottom++;
+	}
 	FrameLines frameLines(view, frame, frameSides);
-	frameLines.EndRing(false);
-		// the frame's faint edge, outside the scroll bar
+	if (frameStyle == B_FANCY_BORDER) {
+		frameLines.EndRing(false);
+			// the frame's faint edge, outside the scroll bar
+	} else if (frameSides != 0) {
+		// the plain frame's ring, as thin as on its other sides
+		BRect ring(rect);
+		_DrawFrame(view, ring, base, base, base, base, frameSides);
+		frameLines.SetHugInside();
+	}
 	FrameLines lines(view, rect, B_ALL_BORDERS & ~frameSides);
 	lines.SetOverFill();
 
@@ -1174,6 +1187,15 @@ HaikuControlLook::DrawScrollViewFrame(BView* view, BRect& rect,
 	FrameLines lines(view, rect, borders);
 	if (borderStyle == B_FANCY_BORDER)
 		_DrawOuterResessedFrame(view, rect, base, flags, borders, lines);
+	else if ((flags & B_BLEND_FRAME) == 0) {
+		// A plain frame is one ring around the target, which leaves it no
+		// room to grow: at a fractional scale it gets the whole part of the
+		// scale on every side, against the target, and what its pixel
+		// leaves outside it is the background.
+		BRect ring(rect);
+		_DrawFrame(view, ring, base, base, base, base, borders);
+		lines.SetHugInside();
+	}
 
 	if ((flags & B_FOCUSED) != 0) {
 		rgb_color focusColor = ui_color(B_KEYBOARD_NAVIGATION_COLOR);

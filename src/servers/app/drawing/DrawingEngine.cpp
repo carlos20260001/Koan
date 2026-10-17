@@ -1325,7 +1325,8 @@ namespace {
 class FrameAxis {
 public:
 	FrameAxis(int32 low, int32 high, int32 rings, bool hasLow, bool hasHigh,
-		uint32 uniformRings, bool overFill, bool coverPixels, float scale)
+		uint32 uniformRings, bool overFill, bool coverPixels, bool hugInside,
+		float scale)
 		:
 		fLow(low),
 		fHigh(high),
@@ -1335,6 +1336,17 @@ public:
 		fScale(scale)
 	{
 		int32 widths[kMaxRings];
+		if (!overFill && hugInside) {
+			int32 base = max_c(1, (int32)floorf(fScale));
+			fLowEdges[rings] = _Edge(low + rings);
+			fHighEdges[rings] = _Edge(high + 1 - rings);
+			for (int32 i = rings - 1; i >= 0; i--) {
+				fLowEdges[i] = fLowEdges[i + 1] - base;
+				fHighEdges[i] = fHighEdges[i + 1] + base;
+			}
+			return;
+		}
+
 		fLowEdges[0] = _Edge(low);
 		if (overFill)
 			_Fixed(uniformRings, widths);
@@ -1467,14 +1479,15 @@ DrawingEngine::StrokeFrameLineArray(const ViewFrameLineArrayInfo& info,
 
 	bool overFill = (info.flags & kFrameLinesOverFill) != 0;
 	bool coverPixels = (info.flags & kFrameLinesCoverPixels) != 0;
+	bool hugInside = (info.flags & kFrameLinesHugInside) != 0;
 	FrameAxis horizontal((int32)frame.left, (int32)frame.right, rings,
 		(info.borders & BControlLook::B_LEFT_BORDER) != 0,
 		(info.borders & BControlLook::B_RIGHT_BORDER) != 0,
-		info.uniformRings, overFill, coverPixels, scale);
+		info.uniformRings, overFill, coverPixels, hugInside, scale);
 	FrameAxis vertical((int32)frame.top, (int32)frame.bottom, rings,
 		(info.borders & BControlLook::B_TOP_BORDER) != 0,
 		(info.borders & BControlLook::B_BOTTOM_BORDER) != 0,
-		info.uniformRings, overFill, coverPixels, scale);
+		info.uniformRings, overFill, coverPixels, hugInside, scale);
 
 	BStackOrHeapArray<BRect, 64> deviceRects(info.lineCount);
 	if (!deviceRects.IsValid())

@@ -60,6 +60,15 @@ public:
 		fFlags |= kFrameLinesOverFill | kFrameLinesCoverPixels;
 	}
 
+	//! The rings get the whole part of the scale (1 pixel at 125 to 175
+	//! percent) and lie against the inner edge of the band; the pixels the
+	//! scale leaves at its outer edge are not drawn (fill them first). For
+	//! a single ring around other views, which cannot grow inwards.
+	void SetHugInside()
+	{
+		fFlags |= kFrameLinesHugInside;
+	}
+
 	void AddLine(BPoint start, BPoint end, const rgb_color& color)
 	{
 		if (fCount == kMaxLines)
