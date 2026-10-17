@@ -149,6 +149,25 @@ stroke_line_over_fill(BView* view, const BRect& rect, uint32 side,
 }
 
 
+/*!	A one pixel rectangle like BView::StrokeRect(), drawn over what is inside
+	\a rect: at a fractional scale every side has the scale's rounded width
+	and covers at least its logical pixel, wherever the view is.
+*/
+static inline void
+stroke_rect_over_fill(BView* view, const BRect& rect, const rgb_color& color)
+{
+	FrameLines frame(view, rect, BControlLook::B_ALL_BORDERS);
+	frame.SetOverFillCoveringPixels();
+	frame.AddLine(rect.LeftBottom(), rect.LeftTop(), color);
+	frame.AddLine(BPoint(rect.left + 1, rect.top), rect.RightTop(), color);
+	frame.AddLine(BPoint(rect.right, rect.top + 1), rect.RightBottom(), color);
+	frame.AddLine(BPoint(rect.left + 1, rect.bottom),
+		BPoint(rect.right - 1, rect.bottom), color);
+	frame.EndRing(true);
+	frame.Draw();
+}
+
+
 /*!	A flag for BControlLook::DrawBorder() that HaikuControlLook knows (other
 	control looks ignore it): the border is drawn over what is inside it,
 	see FrameLines::SetOverFillCoveringPixels(). A view that draws its
@@ -163,6 +182,7 @@ static const uint32 kControlLookBorderOverFill = 1 << 15;
 using BPrivate::FrameLines;
 using BPrivate::kControlLookBorderOverFill;
 using BPrivate::stroke_line_over_fill;
+using BPrivate::stroke_rect_over_fill;
 
 
 #endif	// _FRAME_LINES_H

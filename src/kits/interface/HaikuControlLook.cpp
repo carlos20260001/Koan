@@ -50,16 +50,21 @@ static const rgb_color kWhite = { 255, 255, 255, 255 };
 static uint32
 scroll_view_frame_sides(BView* view, const BRect& rect, border_style& style)
 {
-	BScrollView* scrollView = dynamic_cast<BScrollView*>(view->Parent());
-	if (scrollView == NULL || rect != view->Bounds())
+	BView* parent = view->Parent();
+	if (parent == NULL || rect != view->Bounds())
+		return 0;
+
+	BScrollView* scrollView = dynamic_cast<BScrollView*>(parent);
+	if (scrollView == NULL)
 		return 0;
 	style = scrollView->Border();
 	if (style != B_FANCY_BORDER && style != B_PLAIN_BORDER)
 		return 0;
-
 	uint32 borders = scrollView->Borders();
-	if (style == B_FANCY_BORDER && scrollView->ScrollBar(B_HORIZONTAL) != NULL
-		&& scrollView->ScrollBar(B_VERTICAL) != NULL) {
+	bool bothScrollBars = scrollView->ScrollBar(B_HORIZONTAL) != NULL
+		&& scrollView->ScrollBar(B_VERTICAL) != NULL;
+
+	if (style == B_FANCY_BORDER && bothScrollBars) {
 		// the frame leaves out the sides with the scroll bars and the corner
 		borders &= ~(BControlLook::B_RIGHT_BORDER
 			| BControlLook::B_BOTTOM_BORDER);
@@ -68,7 +73,7 @@ scroll_view_frame_sides(BView* view, const BRect& rect, border_style& style)
 	// the dark ring is the outermost one of a plain frame
 	float inset = style == B_FANCY_BORDER ? 1 : 0;
 	BRect frame = view->Frame();
-	BRect bounds = scrollView->Bounds();
+	BRect bounds = parent->Bounds();
 	uint32 sides = 0;
 	if ((borders & BControlLook::B_LEFT_BORDER) != 0
 		&& frame.left == bounds.left + inset) {
@@ -1591,14 +1596,21 @@ HaikuControlLook::DrawSliderThumb(BView* view, BRect& rect, const BRect& updateR
 		frameShadowColor, frameShadowColor, B_ALL_BORDERS, &frame, true);
 	frame.Draw();
 
-	// thumb shadow
+	// thumb shadow, against the thumb: at a fractional scale it gets the
+	// whole part of the scale wherever the thumb is
 	view->SetDrawingMode(B_OP_ALPHA);
 	view->SetHighColor(shadowColor);
 	originalRect.left++;
 	originalRect.top++;
-	view->StrokeLine(originalRect.LeftBottom(), originalRect.RightBottom());
+	FrameLines shadow(view, originalRect, B_RIGHT_BORDER | B_BOTTOM_BORDER);
+	shadow.SetHugInside();
+	shadow.AddLine(originalRect.LeftBottom(), originalRect.RightBottom(),
+		shadowColor);
+	shadow.AddLine(originalRect.RightTop(),
+		BPoint(originalRect.right, originalRect.bottom - 1), shadowColor);
+	shadow.EndRing(false);
+	shadow.Draw();
 	originalRect.bottom--;
-	view->StrokeLine(originalRect.RightTop(), originalRect.RightBottom());
 
 	// thumb edge
 	if (orientation == B_HORIZONTAL) {
@@ -2168,13 +2180,17 @@ HaikuControlLook::DrawInactiveTab(BView* view, BRect& rect,
 	lines.Draw();
 
 	if (rect.IsValid()) {
-		if (isVertical) {
-			_DrawFrame(view, rect, bevelShadowColor, bevelShadowColor,
-				bevelLightColor, bevelLightColor, B_TOP_BORDER & ~borders);
-		} else {
-			_DrawFrame(view, rect, bevelShadowColor, bevelShadowColor,
-				bevelLightColor, bevelLightColor, B_LEFT_BORDER & ~borders);
-		}
+		// the fill goes under the bevel, which is drawn over it with the
+		// whole part of the scale: as thin on every tab
+		view->FillRect(rect, fillGradient);
+		uint32 bevelBorders = (isVertical ? B_TOP_BORDER : B_LEFT_BORDER)
+			& ~borders;
+		FrameLines bevel(view, rect, bevelBorders);
+		bevel.SetOverFill();
+		_DrawFrame(view, rect, bevelShadowColor, bevelShadowColor,
+			bevelLightColor, bevelLightColor, bevelBorders, &bevel, false);
+		bevel.Draw();
+		return;
 	} else {
 		if (isVertical) {
 			if ((B_LEFT_BORDER & ~borders) != 0)
@@ -2324,6 +2340,15 @@ HaikuControlLook::DrawBorder(BView* view, BRect& rect, const BRect& updateRect,
 	FrameLines lines(view, rect, borders);
 	if ((flags & kControlLookBorderOverFill) != 0)
 		lines.SetOverFillCoveringPixels();
+	else if (borderStyle == B_PLAIN_BORDER && (flags & B_BLEND_FRAME) == 0) {
+		// A plain border (a separator, the frame of a box) is one ring: at a
+		// fractional scale it gets the whole part of the scale on every
+		// side, against what is inside, and the background takes what its
+		// pixel leaves (see DrawScrollViewFrame()).
+		BRect ring(rect);
+		_DrawFrame(view, ring, base, base, base, base, borders);
+		lines.SetHugInside();
+	}
 	if (borderStyle == B_FANCY_BORDER)
 		_DrawOuterResessedFrame(view, rect, base, flags, borders, lines);
 

@@ -12,6 +12,7 @@
 #include <stdlib.h>
 
 #include <DateFormat.h>
+#include <FrameLines.h>
 #include <LayoutUtils.h>
 #include <Window.h>
 
@@ -203,9 +204,10 @@ BCalendarView::Draw(BRect updateRect)
 		_DrawDayHeader();
 		_DrawWeekHeader();
 
+		// over the days: at a fractional scale the frame keeps its width
 		rgb_color background = ui_color(B_PANEL_BACKGROUND_COLOR);
 		SetHighColor(tint_color(background, B_DARKEN_3_TINT));
-		StrokeRect(Bounds());
+		stroke_rect_over_fill(this, Bounds(), HighColor());
 
 		UnlockLooper();
 	}
