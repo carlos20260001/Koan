@@ -18,6 +18,7 @@
 #include <string.h>
 
 #include <ControlLook.h>
+#include <FrameLines.h>
 #include <Layout.h>
 #include <LayoutUtils.h>
 #include <Message.h>
@@ -686,27 +687,47 @@ BBox::_DrawPlain(BRect labelBox)
 	lightTint = B_LIGHTEN_1_TINT;
 	shadowTint = B_DARKEN_1_TINT;
 
+	// A plain frame is one ring: at a fractional scale it gets the whole part
+	// of the scale against what is inside, wherever the box is, and the
+	// background takes what its pixels leave.
+	rgb_color background = ViewColor();
+	if (background == B_TRANSPARENT_COLOR)
+		background = ui_color(B_PANEL_BACKGROUND_COLOR);
+
 	if (rect.Height() == 0.0 || rect.Width() == 0.0) {
 		// used as separator
 		rgb_color shadow = tint_color(ViewColor(), B_DARKEN_2_TINT);
 
+		SetHighColor(background);
+		StrokeLine(rect.LeftTop(), rect.RightBottom());
+		FrameLines line(this, rect, rect.Height() == 0.0
+			? BControlLook::B_TOP_BORDER : BControlLook::B_LEFT_BORDER);
+		line.SetHugInside();
+		line.AddLine(rect.LeftTop(), rect.RightBottom(), shadow);
+		line.EndRing(false);
+		line.Draw();
 		SetHighColor(shadow);
-		StrokeLine(rect.LeftTop(),rect.RightBottom());
 	} else {
 		// used as box
 		rgb_color light = tint_color(ViewColor(), lightTint);
 		rgb_color shadow = tint_color(ViewColor(), shadowTint);
+		rgb_color highColor = HighColor();
 
-		BeginLineArray(4);
-			AddLine(BPoint(rect.left, rect.bottom),
-					BPoint(rect.left, rect.top), light);
-			AddLine(BPoint(rect.left + 1.0f, rect.top),
-					BPoint(rect.right, rect.top), light);
-			AddLine(BPoint(rect.left + 1.0f, rect.bottom),
-					BPoint(rect.right, rect.bottom), shadow);
-			AddLine(BPoint(rect.right, rect.bottom - 1.0f),
-					BPoint(rect.right, rect.top + 1.0f), shadow);
-		EndLineArray();
+		SetHighColor(background);
+		StrokeRect(rect);
+		FrameLines lines(this, rect, BControlLook::B_ALL_BORDERS);
+		lines.SetHugInside();
+		lines.AddLine(BPoint(rect.left, rect.bottom),
+			BPoint(rect.left, rect.top), light);
+		lines.AddLine(BPoint(rect.left + 1.0f, rect.top),
+			BPoint(rect.right, rect.top), light);
+		lines.AddLine(BPoint(rect.left + 1.0f, rect.bottom),
+			BPoint(rect.right, rect.bottom), shadow);
+		lines.AddLine(BPoint(rect.right, rect.bottom - 1.0f),
+			BPoint(rect.right, rect.top + 1.0f), shadow);
+		lines.EndRing(false);
+		lines.Draw();
+		SetHighColor(highColor);
 	}
 }
 

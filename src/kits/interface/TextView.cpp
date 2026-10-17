@@ -37,6 +37,7 @@
 #include <Bitmap.h>
 #include <Clipboard.h>
 #include <ControlLook.h>
+#include <FrameLines.h>
 #include <Debug.h>
 #include <Entry.h>
 #include <Input.h>
@@ -4717,9 +4718,20 @@ BTextView::_DrawCaret(int32 offset, bool visible)
 	caretRect.top = caretPoint.y;
 	caretRect.bottom = caretPoint.y + lineHeight - 1;
 
-	if (visible)
-		InvertRect(caretRect);
-	else
+	if (visible) {
+		// Inverted as a band with the whole part of the scale: at a
+		// fractional scale the caret is as thin wherever it is in the text
+		// (inverting its logical pixel made it one or two pixels wide).
+		drawing_mode mode = DrawingMode();
+		SetDrawingMode(B_OP_INVERT);
+		FrameLines caret(this, caretRect, BControlLook::B_LEFT_BORDER);
+		caret.SetHugInside();
+		caret.AddLine(caretRect.LeftTop(), caretRect.LeftBottom(),
+			HighColor());
+		caret.EndRing(false);
+		caret.Draw();
+		SetDrawingMode(mode);
+	} else
 		Invalidate(caretRect);
 }
 

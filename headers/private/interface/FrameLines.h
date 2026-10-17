@@ -69,6 +69,13 @@ public:
 		fFlags |= kFrameLinesHugInside;
 	}
 
+	//! The outermost ring (the background) takes what the others leave of
+	//! the band; they keep fixed widths.
+	void SetOuterSlack()
+	{
+		fFlags |= kFrameLinesOuterSlack;
+	}
+
 	void AddLine(BPoint start, BPoint end, const rgb_color& color)
 	{
 		if (fCount == kMaxLines)

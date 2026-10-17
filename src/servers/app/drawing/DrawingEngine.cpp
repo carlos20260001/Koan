@@ -1326,7 +1326,7 @@ class FrameAxis {
 public:
 	FrameAxis(int32 low, int32 high, int32 rings, bool hasLow, bool hasHigh,
 		uint32 uniformRings, bool overFill, bool coverPixels, bool hugInside,
-		float scale)
+		bool outerSlack, float scale)
 		:
 		fLow(low),
 		fHigh(high),
@@ -1350,6 +1350,8 @@ public:
 		fLowEdges[0] = _Edge(low);
 		if (overFill)
 			_Fixed(uniformRings, widths);
+		else if (outerSlack)
+			_Slack(_Edge(low + rings) - fLowEdges[0], uniformRings, widths);
 		else {
 			_Distribute(_Edge(low + rings) - fLowEdges[0], uniformRings,
 				widths);
@@ -1360,7 +1362,10 @@ public:
 				fLowEdges[i + 1] = max_c(fLowEdges[i + 1], _Edge(low + i + 1));
 		}
 		fHighEdges[0] = _Edge(high + 1);
-		if (!overFill) {
+		if (!overFill && outerSlack) {
+			_Slack(fHighEdges[0] - _Edge(high + 1 - rings), uniformRings,
+				widths);
+		} else if (!overFill) {
 			_Distribute(fHighEdges[0] - _Edge(high + 1 - rings), uniformRings,
 				widths);
 		}
@@ -1403,6 +1408,22 @@ private:
 		int32 rounded = max_c(1, (int32)floorf(fScale + 0.5f));
 		for (int32 i = 0; i < fRings; i++)
 			widths[i] = (uniformRings & (1 << i)) != 0 ? rounded : base;
+	}
+
+	/*!	The rings get fixed widths (see _Fixed()) and the outermost one what
+		they leave of \a total; when they do not fit, as _Distribute().
+	*/
+	void _Slack(int32 total, uint32 uniformRings, int32* widths) const
+	{
+		_Fixed(uniformRings, widths);
+		int32 fixed = 0;
+		for (int32 i = 1; i < fRings; i++)
+			fixed += widths[i];
+		if (fRings < 2 || total - fixed < 1) {
+			_Distribute(total, uniformRings, widths);
+			return;
+		}
+		widths[0] = total - fixed;
 	}
 
 	/*!	Every ring gets the whole part of the scale; of the pixels left over,
@@ -1470,9 +1491,17 @@ DrawingEngine::StrokeFrameLineArray(const ViewFrameLineArrayInfo& info,
 	float scale = fPainter->DeviceScale();
 	BRect frame = info.frame;
 	int32 rings = info.rings;
+	// the bands at opposite sides must not overlap
+	int32 horizontalBands
+		= ((info.borders & BControlLook::B_LEFT_BORDER) != 0 ? 1 : 0)
+		+ ((info.borders & BControlLook::B_RIGHT_BORDER) != 0 ? 1 : 0);
+	int32 verticalBands
+		= ((info.borders & BControlLook::B_TOP_BORDER) != 0 ? 1 : 0)
+		+ ((info.borders & BControlLook::B_BOTTOM_BORDER) != 0 ? 1 : 0);
 	if (scale == floorf(scale) || !fPainter->HasIdentityViewTransform()
 		|| rings < 1 || rings > FrameAxis::kMaxRings
-		|| frame.Width() + 1 < 2 * rings || frame.Height() + 1 < 2 * rings) {
+		|| frame.Width() + 1 < horizontalBands * rings
+		|| frame.Height() + 1 < verticalBands * rings) {
 		StrokeLineArray(info.lineCount, lines);
 		return;
 	}
@@ -1480,14 +1509,15 @@ DrawingEngine::StrokeFrameLineArray(const ViewFrameLineArrayInfo& info,
 	bool overFill = (info.flags & kFrameLinesOverFill) != 0;
 	bool coverPixels = (info.flags & kFrameLinesCoverPixels) != 0;
 	bool hugInside = (info.flags & kFrameLinesHugInside) != 0;
+	bool outerSlack = (info.flags & kFrameLinesOuterSlack) != 0;
 	FrameAxis horizontal((int32)frame.left, (int32)frame.right, rings,
 		(info.borders & BControlLook::B_LEFT_BORDER) != 0,
 		(info.borders & BControlLook::B_RIGHT_BORDER) != 0,
-		info.uniformRings, overFill, coverPixels, hugInside, scale);
+		info.uniformRings, overFill, coverPixels, hugInside, outerSlack, scale);
 	FrameAxis vertical((int32)frame.top, (int32)frame.bottom, rings,
 		(info.borders & BControlLook::B_TOP_BORDER) != 0,
 		(info.borders & BControlLook::B_BOTTOM_BORDER) != 0,
-		info.uniformRings, overFill, coverPixels, hugInside, scale);
+		info.uniformRings, overFill, coverPixels, hugInside, outerSlack, scale);
 
 	BStackOrHeapArray<BRect, 64> deviceRects(info.lineCount);
 	if (!deviceRects.IsValid())

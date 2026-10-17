@@ -142,7 +142,12 @@ enum {
 	// scale, the rings lie against the band's inner edge, and the pixels
 	// the scale leaves at its outer edge are not drawn. A single ring
 	// around other views (a plain frame) is then as thin on every side.
-	kFrameLinesHugInside		= 0x04
+	kFrameLinesHugInside		= 0x04,
+	// Without kFrameLinesOverFill: the outermost ring takes whatever the
+	// others leave of the band (it is the background, so the others can keep
+	// fixed widths: the scale rounded for those in uniformRings, its whole
+	// part for the others).
+	kFrameLinesOuterSlack		= 0x08
 };
 
 

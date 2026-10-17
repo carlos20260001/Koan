@@ -1958,12 +1958,25 @@ BColumnListView::Draw(BRect updateRect)
 		// The scrollbars cannot be displayed without frame and
 		// it looks bad to have no frame only along the left/top
 		// side.
+		// At a fractional scale they get the whole part of the scale against
+		// the views inside, as a plain frame does, and the background takes
+		// what their pixels leave.
 		rgb_color borderColor = tint_color(base, B_DARKEN_2_TINT);
-		SetHighColor(borderColor);
+		SetHighColor(base);
 		StrokeLine(BPoint(rect.left, rect.bottom),
 			BPoint(rect.left, rect.top));
 		StrokeLine(BPoint(rect.left + 1, rect.top),
 			BPoint(rect.right, rect.top));
+		FrameLines lines(this, rect,
+			BControlLook::B_LEFT_BORDER | BControlLook::B_TOP_BORDER);
+		lines.SetHugInside();
+		lines.AddLine(BPoint(rect.left, rect.bottom),
+			BPoint(rect.left, rect.top), borderColor);
+		lines.AddLine(BPoint(rect.left + 1, rect.top),
+			BPoint(rect.right, rect.top), borderColor);
+		lines.EndRing(false);
+		lines.Draw();
+		SetHighColor(borderColor);
 	}
 
 	be_control_look->DrawScrollViewFrame(this, rect, updateRect,
