@@ -11,7 +11,9 @@
 
 #include <SeparatorItem.h>
 
+#include <ControlLook.h>
 #include <Font.h>
+#include <FrameLines.h>
 
 
 BSeparatorItem::BSeparatorItem()
@@ -92,27 +94,36 @@ BSeparatorItem::Draw()
 		return;
 
 	BRect bounds = Frame();
-	rgb_color oldColor = menu->HighColor();
 	rgb_color lowColor = menu->LowColor();
+	rgb_color dark = tint_color(lowColor, B_DARKEN_1_TINT);
+	rgb_color light = tint_color(lowColor, B_LIGHTEN_2_TINT);
 
+	// The two lines are the rings of a band: at a fractional scale the dark
+	// one keeps its width and the light one takes what is left, the same in
+	// every separator.
 	if (menu->Layout() == B_ITEMS_IN_ROW) {
 		const float startLeft = bounds.left + (floor(bounds.Width())) / 2;
-		menu->SetHighColor(tint_color(lowColor, B_DARKEN_1_TINT));
-		menu->StrokeLine(BPoint(startLeft, bounds.top + 1.0f),
-			BPoint(startLeft, bounds.bottom - 1.0f));
-		menu->SetHighColor(tint_color(lowColor, B_LIGHTEN_2_TINT));
-		menu->StrokeLine(BPoint(startLeft + 1.0f, bounds.top + 1.0f),
-			BPoint(startLeft + 1.0f, bounds.bottom - 1.0f));
+		FrameLines lines(menu, BRect(startLeft, bounds.top + 1.0f,
+			startLeft + 3.0f, bounds.bottom - 1.0f), BControlLook::B_LEFT_BORDER);
+		lines.AddLine(BPoint(startLeft, bounds.top + 1.0f),
+			BPoint(startLeft, bounds.bottom - 1.0f), dark);
+		lines.EndRing(true);
+		lines.AddLine(BPoint(startLeft + 1.0f, bounds.top + 1.0f),
+			BPoint(startLeft + 1.0f, bounds.bottom - 1.0f), light);
+		lines.EndRing(false);
+		lines.Draw();
 	} else {
 		const float startTop = bounds.top + (floor(bounds.Height())) / 2;
-		menu->SetHighColor(tint_color(lowColor, B_DARKEN_1_TINT));
-		menu->StrokeLine(BPoint(bounds.left + 1.0f, startTop),
-			BPoint(bounds.right - 1.0f, startTop));
-		menu->SetHighColor(tint_color(lowColor, B_LIGHTEN_2_TINT));
-		menu->StrokeLine(BPoint(bounds.left + 1.0f, startTop + 1.0f),
-			BPoint(bounds.right - 1.0f, startTop + 1.0f));
+		FrameLines lines(menu, BRect(bounds.left + 1.0f, startTop,
+			bounds.right - 1.0f, startTop + 3.0f), BControlLook::B_TOP_BORDER);
+		lines.AddLine(BPoint(bounds.left + 1.0f, startTop),
+			BPoint(bounds.right - 1.0f, startTop), dark);
+		lines.EndRing(true);
+		lines.AddLine(BPoint(bounds.left + 1.0f, startTop + 1.0f),
+			BPoint(bounds.right - 1.0f, startTop + 1.0f), light);
+		lines.EndRing(false);
+		lines.Draw();
 	}
-	menu->SetHighColor(oldColor);
 }
 
 

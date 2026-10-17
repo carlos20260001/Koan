@@ -56,6 +56,7 @@ All rights reserved.
 #include <ControlLook.h>
 #include <Cursor.h>
 #include <Debug.h>
+#include <FrameLines.h>
 #include <GraphicsDefs.h>
 #include <LayoutUtils.h>
 #include <MenuItem.h>
@@ -2691,9 +2692,15 @@ TitleView::DrawTitle(BView* view, BRect rect, BColumn* column, bool depressed)
 	be_control_look->DrawButtonBackground(view, bgRect, rect, base, 0,
 		BControlLook::B_TOP_BORDER | BControlLook::B_BOTTOM_BORDER);
 
-	view->SetHighColor(tint_color(ui_color(B_PANEL_BACKGROUND_COLOR),
-		B_DARKEN_2_TINT));
-	view->StrokeLine(rect.RightTop(), rect.RightBottom());
+	// the bottom line again and the separator, over the background: at a
+	// fractional scale they then keep their width
+	rgb_color lineColor = tint_color(ui_color(B_PANEL_BACKGROUND_COLOR),
+		B_DARKEN_2_TINT);
+	stroke_line_over_fill(view, rect, BControlLook::B_BOTTOM_BORDER,
+		lineColor);
+	stroke_line_over_fill(view, rect, BControlLook::B_RIGHT_BORDER,
+		lineColor);
+	view->SetHighColor(lineColor);
 
 	// If no column given, nothing else to draw.
 	if (column == NULL)

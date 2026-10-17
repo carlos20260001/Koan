@@ -22,6 +22,7 @@
 
 #include <AppMisc.h>
 #include <binary_compatibility/Interface.h>
+#include <FrameLines.h>
 #include <MenuPrivate.h>
 #include <TokenSpace.h>
 #include <InterfaceDefs.h>
@@ -287,6 +288,13 @@ BMenuBar::Draw(BRect updateRect)
 
 	be_control_look->DrawMenuBarBackground(this, rect, updateRect, base,
 		0, fBorders);
+
+	// The bottom border again, over the background: at a fractional scale
+	// it then keeps its width (other control looks draw the same line).
+	BRect border(Bounds());
+	be_control_look->DrawBorder(this, border, updateRect, base,
+		B_PLAIN_BORDER, flags | kControlLookBorderOverFill,
+		BControlLook::B_BOTTOM_BORDER);
 
 	DrawItems(updateRect);
 }

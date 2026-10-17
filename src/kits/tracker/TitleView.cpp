@@ -42,6 +42,7 @@ All rights reserved.
 #include <Application.h>
 #include <ControlLook.h>
 #include <Debug.h>
+#include <FrameLines.h>
 #include <PopUpMenu.h>
 #include <Window.h>
 
@@ -250,6 +251,11 @@ BTitleView::Draw(BRect /*updateRect*/, bool useOffscreen, bool updateOnly,
 	be_control_look->DrawButtonBackground(view, bounds, bounds, baseColor, 0,
 		BControlLook::B_TOP_BORDER | BControlLook::B_BOTTOM_BORDER);
 
+	// the bottom line again, over the background: at a fractional scale it
+	// then keeps its width
+	stroke_line_over_fill(view, Bounds(), BControlLook::B_BOTTOM_BORDER,
+		tint_color(ui_color(B_PANEL_BACKGROUND_COLOR), B_DARKEN_2_TINT));
+
 	int32 count = fTitleList.CountItems();
 	float minx = bounds.right;
 	float maxx = bounds.left;
@@ -265,9 +271,10 @@ BTitleView::Draw(BRect /*updateRect*/, bool useOffscreen, bool updateOnly,
 
 	bounds = Bounds();
 	minx--;
-	view->SetHighUIColor(B_PANEL_BACKGROUND_COLOR, B_DARKEN_1_TINT);
-	view->StrokeLine(BPoint(minx, bounds.top),
-		BPoint(minx, bounds.bottom - 1));
+	stroke_line_over_fill(view,
+		BRect(bounds.left, bounds.top, minx, bounds.bottom - 1),
+		BControlLook::B_RIGHT_BORDER,
+		tint_color(ui_color(B_PANEL_BACKGROUND_COLOR), B_DARKEN_1_TINT));
 
 #if !(APP_SERVER_CLEARS_BACKGROUND)
 	FillRect(BRect(bounds.left, bounds.top + 1, minx - 1, bounds.bottom - 1),
@@ -562,8 +569,8 @@ BColumnTitle::Draw(BView* view, bool pressed)
 		view->SetFlags(flags);
 	}
 
-	view->SetHighUIColor(B_PANEL_BACKGROUND_COLOR, B_DARKEN_1_TINT);
-	view->StrokeLine(bounds.RightTop(), bounds.RightBottom());
+	stroke_line_over_fill(view, bounds, BControlLook::B_RIGHT_BORDER,
+		tint_color(ui_color(B_PANEL_BACKGROUND_COLOR), B_DARKEN_1_TINT));
 }
 
 
