@@ -32,6 +32,7 @@
 #include <ObjectListPrivate.h>
 #include <PicturePlayer.h>
 #include <PictureProtocol.h>
+#include <utf8_functions.h>
 #include <Shape.h>
 #include <StackOrHeapArray.h>
 
@@ -895,7 +896,59 @@ void
 BoundingBoxCallbacks::DrawStringLocations(const char* string, size_t length,
 	const BPoint locations[], size_t locationCount)
 {
-	// TODO
+	TRACE_BB("%p string locations '%s'\n", fState, string);
+
+	// Without this, text drawn glyph by glyph (as web engines do) was left
+	// out of a layer, which then cut it off or was not drawn at all.
+	const int32 charCount = UTF8CountChars(string, length);
+	if (charCount <= 0 || locationCount == 0)
+		return;
+
+	ServerFont font = fState->GetDrawState()->Font();
+	BStackOrHeapArray<BRect, 200> rects(charCount);
+	if (!rects.IsValid())
+		return;
+	escapement_delta delta = { 0, 0 };
+	if (font.GetBoundingBoxes(string, length, charCount, rects, false,
+			B_SCREEN_METRIC, delta, false) != B_OK) {
+		return;
+	}
+
+	// Each glyph's box is relative to its own origin, which is its location;
+	// glyphs beyond the last location follow it as a string.
+	const SimpleTransform transform = fState->PenToLocalTransform();
+	const char* glyph = string;
+	const char* end = string + length;
+	BPoint pen;
+	for (int32 i = 0; i < charCount && glyph < end; i++) {
+		const int32 glyphLength = UTF8NextCharLen(glyph, end - glyph);
+		if (glyphLength <= 0)
+			break;
+
+		if ((size_t)i >= locationCount) {
+			BRect rect;
+			size_t restLength = end - glyph;
+			font.GetBoundingBoxesForStrings((char**)&glyph, &restLength, 1,
+				&rect, B_SCREEN_METRIC, &delta);
+			rect.OffsetBy(pen);
+			transform.Apply(&rect);
+			fState->IncludeRect(rect);
+			pen.x += font.StringWidth(glyph, restLength);
+			break;
+		}
+
+		BRect rect = rects[i].OffsetByCopy(locations[i]);
+		transform.Apply(&rect);
+		fState->IncludeRect(rect);
+
+		pen = locations[i];
+		pen.x += font.StringWidth(glyph, glyphLength);
+		glyph += glyphLength;
+	}
+
+	// as the drawing does, the pen ends after the last glyph
+	transform.Apply(&pen);
+	fState->GetDrawState()->SetPenLocation(pen);
 }
 
 

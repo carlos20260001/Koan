@@ -4129,13 +4129,17 @@ ServerWindow::_DispatchPictureMessage(int32 code, BPrivate::LinkReceiver& link)
 			// Terminate the string
 			string[stringLength] = '\0';
 
+			// The picture keeps the locations in view coordinates, like the
+			// pen location of other strings: playing it back converts them
+			// (converted here too, located text in a layer or picture was
+			// drawn off by the view's screen position).
+			picture->WriteDrawString(string, stringLength, locations,
+				glyphCount);
+
 			const SimpleTransform transform =
 				fCurrentView->PenToScreenTransform();
 			for (int32 i = 0; i < glyphCount; i++)
 				transform.Apply(&locations[i]);
-
-			picture->WriteDrawString(string, stringLength, locations,
-				glyphCount);
 
 			DrawingEngine* drawingEngine = fWindow->GetDrawingEngine();
 			if (drawingEngine->LockParallelAccess()) {
