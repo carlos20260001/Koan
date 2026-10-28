@@ -415,6 +415,10 @@ enum {
 	// The lines of a frame's rings, see ViewFrameLineArrayInfo
 	AS_STROKE_FRAME_LINEARRAY,
 
+	// Parts of the drawing buffer a direct window wrote only into the frame
+	// buffer (BDirectWindow::MarkDrawingBitsStale())
+	AS_DIRECT_WINDOW_MARK_STALE,
+
 	AS_LAST_CODE
 };
 

@@ -1116,6 +1116,28 @@ ServerWindow::_DispatchMessage(int32 code, BPrivate::LinkReceiver& link)
 			fLink.Flush();
 			break;
 		}
+		case AS_DIRECT_WINDOW_MARK_STALE:
+		{
+			int32 count = 0;
+			if (link.Read<int32>(&count) != B_OK || count < 0 || count > 4096)
+				break;
+			BRegion stale;
+			for (int32 i = 0; i < count; i++) {
+				clipping_rect rect;
+				if (link.Read<clipping_rect>(&rect) != B_OK)
+					break;
+				stale.Include(rect);
+			}
+			// only where the window may draw into the frame buffer now
+			if (fDirectWindowInfo.IsSet()) {
+				BRegion clipping;
+				fDirectWindowInfo->GetClipping(clipping);
+				stale.IntersectWith(&clipping);
+				fDesktop->HWInterface()->MarkStale(stale);
+			}
+			break;
+		}
+
 		case AS_DIRECT_WINDOW_SET_FULLSCREEN:
 		{
 			// Has the all-window look

@@ -608,6 +608,10 @@ DrawingEngine::_CopyRegion(/*const*/ BRegion* region, int32 xOffset,
 
 	AutoFloatingOverlaysHider _(fGraphicsCard, frame);
 
+	// what moves is the screen's contents, also where a direct window left
+	// the drawing buffer out of date
+	fGraphicsCard->RefreshStale(*region);
+
 	int32 count = region->CountRects();
 
 	// TODO: make this step unnecessary
@@ -1735,6 +1739,8 @@ DrawingEngine::ReadBitmap(ServerBitmap* bitmap, bool drawCursor, BRect bounds)
 		deviceBounds = deviceBounds
 			& BRect(0, 0, buffer->Width() - 1, buffer->Height() - 1);
 		AutoFloatingOverlaysHider _(fGraphicsCard, deviceBounds);
+		// direct windows that write the frame buffer only (and say so)
+		fGraphicsCard->RefreshStale(BRegion(deviceBounds));
 
 		int32 width = bounds.IntegerWidth() + 1;
 		int32 height = bounds.IntegerHeight() + 1;

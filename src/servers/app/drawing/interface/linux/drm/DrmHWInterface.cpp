@@ -1359,6 +1359,7 @@ status_t
 DrmHWInterface::SetMode(const display_mode& mode)
 {
 	CALLED();
+	ForgetStale();
 
 	if (fFd < 0)
 		return B_ERROR;

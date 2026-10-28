@@ -513,6 +513,7 @@ status_t
 FBDevHWInterface::SetMode(const display_mode& mode)
 {
 	CALLED();
+	ForgetStale();
 
 	// Depth switching is out of scope; the 32 bpp fixup at Init is the
 	// only move this backend makes.

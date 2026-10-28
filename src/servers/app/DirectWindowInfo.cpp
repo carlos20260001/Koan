@@ -256,6 +256,18 @@ DirectWindowInfo::SetState(direct_buffer_state bufferState,
 
 
 void
+DirectWindowInfo::GetClipping(BRegion& region) const
+{
+	region.MakeEmpty();
+	if (fBufferInfo == NULL
+		|| (fBufferInfo->buffer_state & B_DIRECT_MODE_MASK) == B_DIRECT_STOP)
+		return;
+	for (uint32 i = 0; i < fBufferInfo->clip_list_count; i++)
+		region.Include(fBufferInfo->clip_list[i]);
+}
+
+
+void
 DirectWindowInfo::EnableFullScreen(const BRect& frame, window_feel feel)
 {
 	fOriginalFrame = frame;

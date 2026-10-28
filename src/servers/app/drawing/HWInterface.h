@@ -218,6 +218,14 @@ public:
 	virtual	RenderingBuffer*	BackBuffer() const = 0;
 	virtual	bool				IsDoubleBuffered() const = 0;
 
+	// Parts of the drawing buffer a direct window left out of date: it wrote
+	// only the frame buffer there (BDirectWindow::MarkDrawingBitsStale()).
+	// Drawing there makes them current again; reading the drawing buffer as
+	// the screen's contents takes them from the frame buffer first.
+			void				MarkStale(const BRegion& region);
+			void				RefreshStale(const BRegion& region);
+			void				ForgetStale();
+
 	// Invalidate is used for scheduling an area for updating
 	virtual	status_t			InvalidateRegion(const BRegion& region);
 	virtual	status_t			Invalidate(const BRect& frame);
@@ -318,6 +326,10 @@ protected:
 			ObjectDeleter<buffer_clip>
 								fCursorAreaBackup;
 	mutable	BLocker				fFloatingOverlaysLock;
+
+			BLocker				fStaleLock;
+			BRegion				fStaleRegion;
+			int32				fHasStale;
 
 			ServerCursorReference
 								fSourceCursor;

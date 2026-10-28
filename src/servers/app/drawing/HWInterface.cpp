@@ -11,6 +11,7 @@
 #include "HWInterface.h"
 
 #include <new>
+#include <Autolock.h>
 #include <math.h>
 #include <stdio.h>
 #include <string.h>
@@ -46,6 +47,8 @@ HWInterface::HWInterface()
 	:
 	BRWLocker("hw interface lock"),
 	fFloatingOverlaysLock("floating overlays lock"),
+	fStaleLock("stale drawing buffer"),
+	fHasStale(0),
 	fCursor(NULL),
 	fDragBitmap(NULL),
 	fDragBitmapOffset(0, 0),
@@ -445,11 +448,89 @@ HWInterface::InvalidateRegion(const BRegion& region)
 }
 
 
+/*!	The drawing buffer is out of date in \a region (frame buffer pixels):
+	a direct window put newer pixels only into the frame buffer there. Only
+	where the drawing buffer is a copy of the screen of its own (double
+	buffered).
+*/
+void
+HWInterface::MarkStale(const BRegion& region)
+{
+	if (!IsDoubleBuffered() || region.CountRects() == 0)
+		return;
+	BAutolock _(fStaleLock);
+	fStaleRegion.Include(&region);
+	if (BackBuffer() != NULL) {
+		BRegion bounds((BRect)BackBuffer()->Bounds());
+		fStaleRegion.IntersectWith(&bounds);
+	}
+	atomic_set(&fHasStale, fStaleRegion.CountRects() > 0 ? 1 : 0);
+}
+
+
+/*!	Before the drawing buffer is read as the screen's contents in \a region
+	(moved, read back): its out of date parts there are taken from the frame
+	buffer, and are current from then on. Read locked.
+*/
+void
+HWInterface::RefreshStale(const BRegion& region)
+{
+	if (atomic_get(&fHasStale) == 0)
+		return;
+	RenderingBuffer* front = FrontBuffer();
+	RenderingBuffer* back = BackBuffer();
+	if (front == NULL || back == NULL || front == back)
+		return;
+
+	BAutolock _(fStaleLock);
+	BRegion refresh(fStaleRegion);
+	refresh.IntersectWith(&region);
+	BRegion bounds((BRect)front->Bounds());
+	refresh.IntersectWith(&bounds);
+	int32 count = refresh.CountRects();
+	if (count == 0)
+		return;
+
+	uint32 frontBPR = front->BytesPerRow();
+	uint32 backBPR = back->BytesPerRow();
+	for (int32 i = 0; i < count; i++) {
+		clipping_rect r = refresh.RectAtInt(i);
+		size_t bytes = (r.right - r.left + 1) * 4;
+		const uint8* src = (const uint8*)front->Bits() + r.top * frontBPR
+			+ r.left * 4;
+		uint8* dst = (uint8*)back->Bits() + r.top * backBPR + r.left * 4;
+		for (int32 y = r.top; y <= r.bottom; y++) {
+			memcpy(dst, src, bytes);
+			src += frontBPR;
+			dst += backBPR;
+		}
+	}
+	fStaleRegion.Exclude(&refresh);
+	atomic_set(&fHasStale, fStaleRegion.CountRects() > 0 ? 1 : 0);
+}
+
+
+//!	The buffers change (a mode change): nothing in them is out of date.
+void
+HWInterface::ForgetStale()
+{
+	BAutolock _(fStaleLock);
+	fStaleRegion.MakeEmpty();
+	atomic_set(&fHasStale, 0);
+}
+
+
 /*! The object needs to be already locked!
 */
 status_t
 HWInterface::Invalidate(const BRect& frame)
 {
+	if (atomic_get(&fHasStale) != 0) {
+		// drawn into: the drawing buffer is the current one there
+		BAutolock _(fStaleLock);
+		fStaleRegion.Exclude(frame);
+		atomic_set(&fHasStale, fStaleRegion.CountRects() > 0 ? 1 : 0);
+	}
 	_NotifyFrameCommitted(frame);
 
 	if (IsDoubleBuffered())

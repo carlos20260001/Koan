@@ -123,6 +123,14 @@ public:
 									BPoint* origin = NULL) const;
 
 			status_t			SetFullScreen(bool enable);
+
+			void				MarkDrawingBitsStale(
+									const clipping_rect* rects,
+									uint32 count);
+									// app_server's copy of these frame
+									// buffer rectangles (drawing_bits_area)
+									// is out of date: only the frame buffer
+									// was written
 			bool				IsFullScreen() const;
 
 	static	bool				SupportsWindowMode(

@@ -428,6 +428,29 @@ BDirectWindow::SetFullScreen(bool enable)
 }
 
 
+/*!	The window put newer pixels into these rectangles of the frame buffer
+	(frame buffer pixels, as the clip list) without writing them into
+	app_server's copy of the screen as well (drawing_bits_area, with
+	B_DIRECT_DEVICE_PIXELS). app_server then takes them from the frame buffer
+	when it needs its copy there: when it moves the window's pixels, or reads
+	the screen back. Drawing there through app_server makes its copy current
+	again. Rectangles outside what the window may draw into are ignored.
+*/
+void
+BDirectWindow::MarkDrawingBitsStale(const clipping_rect* rects, uint32 count)
+{
+	if (rects == NULL || count == 0)
+		return;
+	if (Lock()) {
+		fLink->StartMessage(AS_DIRECT_WINDOW_MARK_STALE);
+		fLink->Attach<int32>((int32)count);
+		fLink->Attach(rects, sizeof(clipping_rect) * count);
+		fLink->Flush();
+		Unlock();
+	}
+}
+
+
 bool
 BDirectWindow::IsFullScreen() const
 {

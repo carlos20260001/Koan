@@ -12,6 +12,7 @@
 
 #include <Autolock.h>
 #include <DirectWindow.h>
+#include <Region.h>
 #include <SharedEvent.h>
 
 #include <DirectWindowPrivate.h>
@@ -42,6 +43,9 @@ public:
 			void				DisableFullScreen();
 
 			bool				IsFullScreen() const { return fFullScreen; }
+			void				GetClipping(BRegion& region) const;
+									// what the window was last told it may
+									// draw into, in its buffer's pixels
 			const BRect&		OriginalFrame() const { return fOriginalFrame; }
 			window_feel			OriginalFeel() const { return fOriginalFeel; }
 
