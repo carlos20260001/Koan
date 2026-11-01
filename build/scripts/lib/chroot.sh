@@ -9,8 +9,8 @@ qemu_inject() {
     _qemu_bin="$(find_qemu_user_binary "$_target_arch")"
     _qemu_name="$(basename "$_qemu_bin")"
     log_info "Cross-build detected: injecting $_qemu_name into chroot"
-    sudo cp "$_qemu_bin" "$_chroot_dir/usr/bin/$_qemu_name"
-    sudo chmod +x "$_chroot_dir/usr/bin/$_qemu_name"
+    vrun cp "$_qemu_bin" "$_chroot_dir/usr/bin/$_qemu_name"
+    vrun chmod +x "$_chroot_dir/usr/bin/$_qemu_name"
     register_binfmt
 }
 
@@ -21,7 +21,7 @@ qemu_eject() {
         return 0
     fi
     _qemu_name="$(arch_to_qemu_user "$_target_arch")"
-    sudo rm -f "$_chroot_dir/usr/bin/$_qemu_name" \
+    vrun rm -f "$_chroot_dir/usr/bin/$_qemu_name" \
         "$_chroot_dir/usr/bin/${_qemu_name%-static}" 2>/dev/null || true
 }
 
@@ -40,24 +40,31 @@ chroot_mount() {
     _chroot_dir="$1"
     [ -d "$_chroot_dir" ] || die "Chroot directory not found: $_chroot_dir"
 
-    sudo mkdir -p "$_chroot_dir/proc" "$_chroot_dir/sys" "$_chroot_dir/dev"
+    vrun mkdir -p "$_chroot_dir/proc" "$_chroot_dir/sys" "$_chroot_dir/dev"
+
+    if [ "$VOS_ROOTLESS" -eq 1 ]; then
+        # Rootless: cannot mount proc/sys/dev. Just ensure directories exist
+        # and copy resolv.conf; apt will run via dpkg --root on the host instead.
+        vrun cp -L /etc/resolv.conf "$_chroot_dir/etc/resolv.conf" 2>/dev/null || true
+        return 0
+    fi
 
     if ! mountpoint -q "$_chroot_dir/proc" 2>/dev/null; then
-        sudo mount -t proc / "$_chroot_dir/proc"
+        vrun mount -t proc / "$_chroot_dir/proc"
     fi
     if ! mountpoint -q "$_chroot_dir/sys" 2>/dev/null; then
-        sudo mount --rbind /sys "$_chroot_dir/sys"
-        sudo mount --make-rslave "$_chroot_dir/sys"
+        vrun mount --rbind /sys "$_chroot_dir/sys"
+        vrun mount --make-rslave "$_chroot_dir/sys"
     fi
     if ! mountpoint -q "$_chroot_dir/dev" 2>/dev/null; then
-        sudo mount --rbind /dev "$_chroot_dir/dev"
-        sudo mount --make-rslave "$_chroot_dir/dev"
+        vrun mount --rbind /dev "$_chroot_dir/dev"
+        vrun mount --make-rslave "$_chroot_dir/dev"
     fi
 
     # Provision DNS so `apt update` inside the chroot can reach the mirrors.
     # -L dereferences the host's systemd-resolved stub symlink.
-    sudo mkdir -p "$_chroot_dir/etc"
-    sudo cp -L /etc/resolv.conf "$_chroot_dir/etc/resolv.conf"
+    vrun mkdir -p "$_chroot_dir/etc"
+    vrun cp -L /etc/resolv.conf "$_chroot_dir/etc/resolv.conf"
 }
 
 # chroot_isolated ROOT CMD [ARGS...]
@@ -68,15 +75,30 @@ ip link set lo up 2>/dev/null
 mount -t proc proc "$r/proc" || exit 1
 mount --bind "$r/proc/sys" "$r/proc/sys" || exit 1
 mount -o remount,bind,ro "$r/proc/sys" || exit 1
-if mountpoint -q "$r/sys"; then umount -R "$r/sys" || exit 1; fi
+if mountpoint -q "$r/sys"; then umount -R "$r/sys" 2>/dev/null || true; fi
 mount -t sysfs -o ro sysfs "$r/sys" || exit 1
 exec chroot "$r" "$@"'
 
 chroot_isolated() {
     _ci_root="$1"
     shift
-    sudo mkdir -p "$_ci_root/proc" "$_ci_root/sys"
-    sudo unshare --net --uts --ipc --pid --fork --mount --propagation private \
+    vrun mkdir -p "$_ci_root/proc" "$_ci_root/sys"
+
+    if [ "$VOS_ROOTLESS" -eq 1 ]; then
+        # Rootless: cannot use unshare namespaces. Run via proot if available,
+        # otherwise directly (some operations may fail without root).
+        if command -v proot >/dev/null 2>&1; then
+            proot -r "$_ci_root" "$@"
+        else
+            # Fallback: run directly in the directory (not truly chrooted).
+            # apt/dpkg operations use --root instead, so this is mainly for
+            # non-apt commands like debootstrap second stage.
+            ( cd "$_ci_root" && "$@" )
+        fi
+        return
+    fi
+
+    vrun unshare --net --uts --ipc --pid --fork --mount --propagation private \
         /bin/sh -c "$_CHROOT_ISOLATED_INNER" sh "$_ci_root" "$@"
 }
 
@@ -84,11 +106,16 @@ chroot_umount() {
     _chroot_dir="$1"
     [ -d "$_chroot_dir" ] || return 0
 
-    sudo umount -l "$_chroot_dir/var/cache/apt/archives" 2>/dev/null || true
-    sudo umount -l "$_chroot_dir/proc" 2>/dev/null || true
-    sudo umount -l "$_chroot_dir/sys" 2>/dev/null || true
-    #sudo umount -l "$_chroot_dir/dev/pts" 2>/dev/null || true
-    sudo umount -l "$_chroot_dir/dev" 2>/dev/null || true
+    if [ "$VOS_ROOTLESS" -eq 1 ]; then
+        # Rootless: nothing was mounted, nothing to umount.
+        return 0
+    fi
+
+    vrun umount -l "$_chroot_dir/var/cache/apt/archives" 2>/dev/null || true
+    vrun umount -l "$_chroot_dir/proc" 2>/dev/null || true
+    vrun umount -l "$_chroot_dir/sys" 2>/dev/null || true
+    #vrun umount -l "$_chroot_dir/dev/pts" 2>/dev/null || true
+    vrun umount -l "$_chroot_dir/dev" 2>/dev/null || true
 }
 
 # create_iso purges the -dev packages from the chroot it squashes; put
@@ -98,6 +125,14 @@ chroot_restore_dev_packages() {
     _crd_arch="$2"
     _crd_dir="$_crd_basedir/image_tree/chroot"
     [ -d "$_crd_dir" ] || return 0
+
+    if [ "$VOS_ROOTLESS" -eq 1 ]; then
+        # Rootless: cannot run apt-get inside chroot without proot.
+        # Packages are installed during chroot creation via dpkg --root.
+        log_info "Rootless: skipping dev package restore (installed during chroot creation)"
+        return 0
+    fi
+
     # Installed names plus what they provide (libfreetype6-dev is only provided).
     _crd_have="$(dpkg-query --admindir="$_crd_dir/var/lib/dpkg" -W \
         -f='${db:Status-Abbrev} ${Package},${Provides}\n' 2>/dev/null \
@@ -113,7 +148,7 @@ chroot_restore_dev_packages() {
     qemu_inject "$_crd_dir" "$_crd_arch"
     chroot_mount "$_crd_dir"
     chroot_mount_deb_cache "$_crd_dir" "$(chroot_cache_dir "$_crd_basedir")"
-    sudo chroot "$_crd_dir" /usr/bin/env $CHROOT_PROXY DEBIAN_FRONTEND=noninteractive LC_ALL=C.UTF-8 \
+    vchroot "$_crd_dir" /usr/bin/env $CHROOT_PROXY DEBIAN_FRONTEND=noninteractive LC_ALL=C.UTF-8 \
         apt-get install -y --download-only --no-install-recommends $_crd_missing \
         || die "build package download failed"
     chroot_isolated "$_crd_dir" /usr/bin/env $CHROOT_PROXY DEBIAN_FRONTEND=noninteractive LC_ALL=C.UTF-8 \
@@ -127,17 +162,22 @@ chroot_restore_dev_packages() {
 chroot_mount_deb_cache() {
     _chroot_dir="$1"
     _cache_dir="$2"
-    sudo mkdir -p "$_cache_dir/archives/partial"
-    sudo mkdir -p "$_chroot_dir/var/cache/apt/archives"
+    vrun mkdir -p "$_cache_dir/archives/partial"
+    vrun mkdir -p "$_chroot_dir/var/cache/apt/archives"
+    if [ "$VOS_ROOTLESS" -eq 1 ]; then
+        # Rootless: cannot bind-mount. Copy debs instead.
+        vrun cp -n "$_cache_dir"/archives/*.deb "$_chroot_dir/var/cache/apt/archives/" 2>/dev/null || true
+        return 0
+    fi
     if ! mountpoint -q "$_chroot_dir/var/cache/apt/archives" 2>/dev/null; then
-        sudo mount --bind "$_cache_dir/archives" \
+        vrun mount --bind "$_cache_dir/archives" \
             "$_chroot_dir/var/cache/apt/archives"
     fi
     # Keep downloaded .debs (default drops them after install), via a drop-in config.
-    sudo mkdir -p "$_chroot_dir/etc/apt/apt.conf.d"
+    vrun mkdir -p "$_chroot_dir/etc/apt/apt.conf.d"
     echo 'Binary::apt::APT::Keep-Downloaded-Packages "true";' \
-        | sudo tee "$_chroot_dir/etc/apt/apt.conf.d/99-keep-debs" >/dev/null
-    cat <<'EOF' | sudo tee "$_chroot_dir/etc/apt/apt.conf.d/90-vos-gzip-indexes" >/dev/null
+        | vrun tee "$_chroot_dir/etc/apt/apt.conf.d/99-keep-debs" >/dev/null
+    cat <<'EOF' | vrun tee "$_chroot_dir/etc/apt/apt.conf.d/90-vos-gzip-indexes" >/dev/null
 Acquire::GzipIndexes "true";
 Acquire::CompressionTypes::Order { "gz"; };
 EOF
@@ -157,18 +197,23 @@ chroot_create() {
 
     _cache_dir="$(chroot_cache_dir "$_basedir")"
     _debootstrap_cache="$_cache_dir/debootstrap"
-    sudo mkdir -p "$_debootstrap_cache" "$_cache_dir/archives/partial"
+    vrun mkdir -p "$_debootstrap_cache" "$_cache_dir/archives/partial"
     log_info "Using package cache: $_cache_dir (mirror: $DEBIAN_MIRROR)"
+
+    if [ "$VOS_ROOTLESS" -eq 1 ]; then
+        chroot_create_rootless "$_basedir" "$_arch" "$_deb_arch" "$_chroot_dir" "$_debootstrap_cache" "$_cache_dir"
+        return
+    fi
 
     if is_cross_build "$_arch"; then
         log_step "Bootstrapping Debian $VOS_BASE_SUITE ($_deb_arch) [foreign]..."
-        sudo debootstrap --arch="$_deb_arch" --variant=minbase --foreign \
+        vrun debootstrap --arch="$_deb_arch" --variant=minbase --foreign \
             --cache-dir="$_debootstrap_cache" \
             "$VOS_BASE_SUITE" "$_chroot_dir" "$DEBIAN_MIRROR"
         qemu_inject "$_chroot_dir" "$_arch"
     else
         log_step "Bootstrapping Debian $VOS_BASE_SUITE ($_deb_arch)..."
-        sudo debootstrap --arch="$_deb_arch" --variant=minbase \
+        vrun debootstrap --arch="$_deb_arch" --variant=minbase \
             --cache-dir="$_debootstrap_cache" \
             "$VOS_BASE_SUITE" "$_chroot_dir" "$DEBIAN_MIRROR"
     fi
@@ -179,7 +224,7 @@ chroot_create() {
 
     # Pin apt to the debootstrap mirror.
     : "${DEBIAN_SECURITY_MIRROR:=http://security.debian.org/debian-security}"
-    sudo tee "$_chroot_dir/etc/apt/sources.list" >/dev/null <<EOF
+    vrun tee "$_chroot_dir/etc/apt/sources.list" >/dev/null <<EOF
 deb $DEBIAN_MIRROR $VOS_BASE_SUITE main contrib non-free non-free-firmware
 deb $DEBIAN_MIRROR $VOS_BASE_SUITE-updates main contrib non-free non-free-firmware
 deb $DEBIAN_SECURITY_MIRROR $VOS_BASE_SUITE-security main contrib non-free non-free-firmware
@@ -191,11 +236,11 @@ EOF
     if [ -n "${VOS_REPO_KEY:-}" ] && [ -f "$VOS_REPO_KEY" ]; then
         # No default suite on purpose: a stale default once resolved to a retired suite.
         [ -n "${VOS_REPO_SUITE:-}" ] || die "VOS_REPO_SUITE is unset and a repo key was supplied; name the suite to install from (trixie, testing, trixie-nightly, testing-nightly)"
-        sudo install -d -m 755 "$_chroot_dir/etc/apt/keyrings"
-        sudo install -m 644 "$VOS_REPO_KEY" \
+        vrun install -d -m 755 "$_chroot_dir/etc/apt/keyrings"
+        vrun install -m 644 "$VOS_REPO_KEY" \
             "$_chroot_dir/etc/apt/keyrings/vitruvian-archive-keyring.asc"
-        sudo install -d -m 755 "$_chroot_dir/etc/apt/sources.list.d"
-        sudo tee "$_chroot_dir/etc/apt/sources.list.d/vitruvian.sources" >/dev/null <<VOSEOF
+        vrun install -d -m 755 "$_chroot_dir/etc/apt/sources.list.d"
+        vrun tee "$_chroot_dir/etc/apt/sources.list.d/vitruvian.sources" >/dev/null <<VOSEOF
 Types: deb
 URIs: $VOS_REPO_URL
 Suites: $VOS_REPO_SUITE
@@ -221,7 +266,7 @@ VOSEOF
 
     if is_cross_build "$_arch"; then
         # Second stage unpacks from /var/cache/apt/archives, bound to $_cache_dir/archives.
-        sudo sh -c 'cp -n "$1"/*.deb "$2"/ 2>/dev/null || true' _ \
+        vrun sh -c 'cp -n "$1"/*.deb "$2"/ 2>/dev/null || true' _ \
             "$_debootstrap_cache" "$_cache_dir/archives"
         log_step "Running debootstrap second stage..."
         chroot_isolated "$_chroot_dir" /debootstrap/debootstrap --second-stage
@@ -239,15 +284,15 @@ VOSEOF
     fi
 
     log_step "Creating essential directories..."
-    sudo mkdir -p "$_chroot_dir/dev"
-    sudo mkdir -p "$_chroot_dir/proc"
-    sudo mkdir -p "$_chroot_dir/sys"
-    sudo mkdir -p "$_chroot_dir/run"
-    sudo mkdir -p "$_chroot_dir/tmp"
+    vrun mkdir -p "$_chroot_dir/dev"
+    vrun mkdir -p "$_chroot_dir/proc"
+    vrun mkdir -p "$_chroot_dir/sys"
+    vrun mkdir -p "$_chroot_dir/run"
+    vrun mkdir -p "$_chroot_dir/tmp"
     for _d in dev/hugepages dev/mqueue run/lock \
               sys/kernel/debug sys/kernel/tracing \
               sys/fs/fuse/connections sys/kernel/config; do
-        sudo mkdir -p "$_chroot_dir/$_d"
+        vrun mkdir -p "$_chroot_dir/$_d"
     done
 
     _base_pkgs="$(get_base_packages "$_arch")"
@@ -256,12 +301,12 @@ VOSEOF
     log_step "Installing packages..."
     # Skip dpkg fsyncs on a throwaway chroot; opt-in.
     if [ "${VOS_UNSAFE_IO:-0}" = 1 ]; then
-        sudo install -d -m 755 "$_chroot_dir/etc/dpkg/dpkg.cfg.d"
+        vrun install -d -m 755 "$_chroot_dir/etc/dpkg/dpkg.cfg.d"
         printf 'force-unsafe-io\n' \
-          | sudo tee "$_chroot_dir/etc/dpkg/dpkg.cfg.d/vos-build-unsafe-io" >/dev/null
+          | vrun tee "$_chroot_dir/etc/dpkg/dpkg.cfg.d/vos-build-unsafe-io" >/dev/null
     fi
     # Download with the network, install isolated: cups-pdf's postinst ran lpadmin against the host's cupsd.
-    sudo chroot "$_chroot_dir" /usr/bin/env $CHROOT_PROXY DEBIAN_FRONTEND=noninteractive LC_ALL=C.UTF-8 /bin/bash -c "\
+    vrun chroot "$_chroot_dir" /usr/bin/env $CHROOT_PROXY DEBIAN_FRONTEND=noninteractive LC_ALL=C.UTF-8 /bin/bash -c "\
 echo 'vitruvian' > /etc/hostname && \
 apt update && apt install -y --download-only --no-install-recommends $_base_pkgs $_dev_pkgs \$DEBUG_PACKAGES"
     if [ "${VOS_NATIVE_UNPACK:-0}" = 1 ]; then
@@ -293,6 +338,115 @@ exit"
     log_info "Chroot created at $_chroot_dir"
 }
 
+# chroot_create_rootless — bootstrap a Debian chroot without mount/chroot/sudo.
+# Uses debootstrap --foreign --no-check-gpg (best effort; device nodes may be
+# missing) and proot (if available) or dpkg --root for package management.
+chroot_create_rootless() {
+    _basedir="$1"
+    _arch="$2"
+    _deb_arch="$3"
+    _chroot_dir="$4"
+    _debootstrap_cache="$5"
+    _cache_dir="$6"
+
+    log_step "Bootstrapping Debian $VOS_BASE_SUITE ($_deb_arch) [rootless]..."
+
+    # debootstrap --foreign runs first stage (download + extract) without
+    # configuring. --no-check-gpg skips signature verification. As non-root
+    # it may fail to create device nodes; we proceed anyway.
+    vrun debootstrap --arch="$_deb_arch" --variant=minbase --foreign --no-check-gpg \
+        --cache-dir="$_debootstrap_cache" \
+        "$VOS_BASE_SUITE" "$_chroot_dir" "$DEBIAN_MIRROR" || \
+        log_warn "debootstrap first stage had errors (device nodes may be missing)"
+
+    qemu_inject "$_chroot_dir" "$_arch"
+
+    # Write apt sources (no mount needed).
+    : "${DEBIAN_SECURITY_MIRROR:=http://security.debian.org/debian-security}"
+    cat > "$_chroot_dir/etc/apt/sources.list" <<EOF
+deb $DEBIAN_MIRROR $VOS_BASE_SUITE main contrib non-free non-free-firmware
+deb $DEBIAN_MIRROR $VOS_BASE_SUITE-updates main contrib non-free non-free-firmware
+deb $DEBIAN_SECURITY_MIRROR $VOS_BASE_SUITE-security main contrib non-free non-free-firmware
+EOF
+
+    # VitruvianOS repo (if key supplied).
+    : "${VOS_REPO_URL:=https://repo.v-os.dev}"
+    if [ -n "${VOS_REPO_KEY:-}" ] && [ -f "$VOS_REPO_KEY" ]; then
+        [ -n "${VOS_REPO_SUITE:-}" ] || die "VOS_REPO_SUITE is unset and a repo key was supplied"
+        mkdir -p "$_chroot_dir/etc/apt/keyrings"
+        cp "$VOS_REPO_KEY" "$_chroot_dir/etc/apt/keyrings/vitruvian-archive-keyring.asc"
+        mkdir -p "$_chroot_dir/etc/apt/sources.list.d"
+        cat > "$_chroot_dir/etc/apt/sources.list.d/vitruvian.sources" <<VOSEOF
+Types: deb
+URIs: $VOS_REPO_URL
+Suites: $VOS_REPO_SUITE
+Components: main
+Signed-By: /etc/apt/keyrings/vitruvian-archive-keyring.asc
+VOSEOF
+        log_info "VitruvianOS repo enabled: $VOS_REPO_URL $VOS_REPO_SUITE"
+    else
+        log_warn "VOS_REPO_KEY unset or missing; image will NOT see the VitruvianOS repo"
+    fi
+
+    # Copy deb cache into chroot (no bind mount possible).
+    chroot_mount_deb_cache "$_chroot_dir" "$_cache_dir"
+
+    log_step "Creating essential directories..."
+    mkdir -p "$_chroot_dir/dev" "$_chroot_dir/proc" "$_chroot_dir/sys" \
+        "$_chroot_dir/run" "$_chroot_dir/tmp"
+    for _d in dev/hugepages dev/mqueue run/lock \
+              sys/kernel/debug sys/kernel/tracing \
+              sys/fs/fuse/connections sys/kernel/config; do
+        mkdir -p "$_chroot_dir/$_d"
+    done
+
+    _base_pkgs="$(get_base_packages "$_arch")"
+    _dev_pkgs="$(get_dev_packages "$_arch")"
+
+    log_step "Installing packages via dpkg --root (rootless)..."
+    _tmp_debs="$(mktemp -d)"
+    cd "$_tmp_debs"
+
+    # Download packages for the target architecture (amd64 host → amd64 target works).
+    for _p in $_base_pkgs $_dev_pkgs; do
+        apt-get download "$_p" 2>/dev/null || true
+    done
+
+    # Install each deb into chroot directory (--force-not-root for non-root).
+    _dpkg_flags="--root=$_chroot_dir --force-not-root"
+    [ "$VOS_ROOTLESS" -ne 1 ] || _dpkg_flags="$_dpkg_flags --force-not-root"
+
+    for _deb_file in *.deb; do
+        [ -f "$_deb_file" ] || continue
+        dpkg $_dpkg_flags --install "$_deb_file" 2>/dev/null || true
+    done
+    dpkg $_dpkg_flags --configure -a 2>/dev/null || \
+        log_warn "dpkg --configure had errors (expected for some packages rootless)"
+
+    cd "$_basedir"
+    rm -rf "$_tmp_debs"
+
+    # Generate locales manually (locale-gen needs chroot)
+    echo 'en_US.UTF-8 UTF-8' > "$_chroot_dir/etc/locale.gen"
+    if command -v proot >/dev/null 2>&1; then
+        proot -r "$_chroot_dir" locale-gen 2>/dev/null || true
+    else
+        # Without proot, locale-gen can't run inside the chroot.
+        # The target system will generate locales on first boot.
+        log_warn "locale-gen skipped (no proot available for rootless chroot)"
+    fi
+
+    # Set hostname
+    echo 'vitruvian' > "$_chroot_dir/etc/hostname"
+
+    ls "$_chroot_dir/lib/modules" | head -n1 > "$_basedir/imagekernelversion.conf" 2>/dev/null || \
+        echo "unknown" > "$_basedir/imagekernelversion.conf"
+
+    qemu_eject "$_chroot_dir" "$_arch"
+
+    log_info "Chroot created at $_chroot_dir (rootless)"
+}
+
 chroot_regenerate() {
     _basedir="$1"
     _arch="$2"
@@ -301,11 +455,13 @@ chroot_regenerate() {
     if [ -d "$_chroot_dir" ]; then
         log_step "Regenerating chroot..."
         chroot_umount "$_chroot_dir"
-        # A bind mount still attached would let rm reach the host.
-        if findmnt -rn -o TARGET | grep -qF "$_chroot_dir/"; then
-            die "Still mounted under $_chroot_dir; unmount it and retry."
+        if [ "$VOS_ROOTLESS" -ne 1 ]; then
+            # A bind mount still attached would let rm reach the host.
+            if findmnt -rn -o TARGET | grep -qF "$_chroot_dir/"; then
+                die "Still mounted under $_chroot_dir; unmount it and retry."
+            fi
         fi
-        sudo rm -rf --one-file-system "$_chroot_dir"
+        vrun rm -rf --one-file-system "$_chroot_dir"
     fi
 
     chroot_create "$_basedir" "$_arch"

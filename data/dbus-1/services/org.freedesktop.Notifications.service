@@ -1,0 +1,6 @@
+# Copyright 2026, Koan contributors
+# SPDX-License-Identifier: Apache-2.0
+
+[D-BUS Service]
+Name=org.freedesktop.Notifications
+Exec=/system/servers/janus_launch notification_server

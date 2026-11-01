@@ -42,12 +42,15 @@ All rights reserved.
 #include <Debug.h>
 #include <Bitmap.h>
 #include <Catalog.h>
+#include <DesktopEntry.h>
+#include <DesktopEntryScanner.h>
 #include <Dragger.h>
 #include <Locale.h>
 #include <Menu.h>
 #include <MenuItem.h>
 #include <Roster.h>
 #include <RosterPrivate.h>
+#include <stdio.h>
 
 #include "BarApp.h"
 #include "BarView.h"
@@ -277,6 +280,38 @@ TDeskbarMenu::AddStandardDeskbarMenuItems()
 	mountMenu->SetEnabled(!dragging);
 	AddItem(mountMenu);
 #endif
+
+	DesktopEntryScanner scanner;
+	status_t scanStatus = scanner.Scan();
+	if (scanStatus == B_OK && scanner.CountEntries() > 0) {
+		BMenu* applicationsMenu
+			= new BMenu(B_TRANSLATE("Installed applications"));
+		for (int32 i = 0; i < scanner.CountEntries(); i++) {
+			DesktopEntry* entry = scanner.EntryAt(i);
+			if (entry == NULL || entry->Type() != DesktopEntryTypeApplication)
+				continue;
+			BMessage* launchMessage = new BMessage(kLaunchDesktopEntry);
+			if (launchMessage == NULL)
+				continue;
+			if (launchMessage->AddString("path", entry->Path()) != B_OK) {
+				delete launchMessage;
+				continue;
+			}
+			BMenuItem* appItem = new BMenuItem(entry->Name(), launchMessage);
+			if (appItem == NULL)
+				continue;
+			applicationsMenu->AddItem(appItem);
+			appItem->SetEnabled(!dragging);
+			appItem->SetTarget(be_app);
+		}
+		if (applicationsMenu->CountItems() > 0)
+			AddItem(applicationsMenu);
+		else
+			delete applicationsMenu;
+	} else if (scanStatus != B_OK) {
+		fprintf(stderr, "Deskbar: desktop-entry discovery failed (%"
+			B_PRId32 ")\n", scanStatus);
+	}
 
 	BString menuLabel(B_TRANSLATE("%appname% preferences" B_UTF8_ELLIPSIS));
 	menuLabel.ReplaceFirst("%appname%", B_TRANSLATE_SYSTEM_NAME("Deskbar"));

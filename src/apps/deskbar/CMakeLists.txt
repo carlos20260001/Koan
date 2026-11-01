@@ -40,3 +40,19 @@ target_compile_definitions(Deskbar PRIVATE
 
 UsePrivateHeaders(Deskbar app interface tracker kernel)
 DoCatalogs("x-vnd.Be-TSKB" apps/deskbar)
+
+RunnableAddOn(MPRISReplicant
+	SOURCES
+		MPRISReplicant.cpp
+		MPRISReplicantApp.cpp
+	RDEF MPRISReplicant.rdef
+)
+UsePrivateHeaders(MPRISReplicant app interface)
+
+RunnableAddOn(NotificationReplicant
+	SOURCES
+		NotificationReplicant.cpp
+		NotificationReplicantApp.cpp
+	RDEF NotificationReplicant.rdef
+)
+UsePrivateHeaders(NotificationReplicant app interface notification)

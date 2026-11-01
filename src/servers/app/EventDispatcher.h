@@ -114,6 +114,7 @@ class EventDispatcher : public BLocker {
 		status_t _Run();
 		void _Unset();
 
+		BPoint _LogicalCursorPosition() const;
 		void _SendFakeMouseMoved(BMessage* message);
 		bool _SendMessage(BMessenger& messenger, BMessage* message,
 				float importance);

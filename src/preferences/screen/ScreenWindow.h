@@ -9,6 +9,8 @@
  *		Thomas Kurschel
  *		Rafael Romo
  *		John Scipione, jscipione@gmail.com
+ *
+ * Part of Koan, a VitruvianOS fork
  */
 #ifndef SCREEN_WINDOW_H
 #define SCREEN_WINDOW_H
@@ -119,6 +121,15 @@ private:
 			BMenuField*		fTVStandardField;
 
 			BSlider*		fBrightnessSlider;
+
+			// Per-output fractional scaling control (1.0x - 2.0x)
+			BSlider*		fScaleSlider;
+			float			fOriginalScale;
+			bool			fScaleSupported;
+
+			// Wayland server toggle
+			BCheckBox*		fWaylandCheckBox;
+			bool			fWaylandEnabled;
 
 			BMenuField*		fTemperatureField;
 			BPopUpMenu*		fTemperatureMenu;

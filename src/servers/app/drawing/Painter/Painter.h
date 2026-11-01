@@ -26,6 +26,7 @@
 #include <AffineTransform.h>
 #include <Font.h>
 #include <Rect.h>
+#include <Region.h>
 
 
 class BBitmap;
@@ -65,6 +66,12 @@ public:
 			void				ConstrainClipping(const BRegion* region);
 			const BRegion*		ClippingRegion() const
 									{ return fClippingRegion; }
+			void				SetScale(float scale);
+			float				Scale() const { return fScale; }
+			BPoint				ScalePoint(const BPoint& point) const;
+			BRect				ScaleRect(const BRect& rect) const;
+			void				ScaleRegion(const BRegion& source,
+									BRegion& destination) const;
 
 								// object settings
 			void				SetTransform(BAffineTransform transform,
@@ -245,6 +252,8 @@ public:
 			BRect				DrawBitmap(ServerBitmap* bitmap,
 									BRect bitmapRect, BRect viewRect,
 									uint32 options) const;
+			void				StrokeLineNoTransform(const BPoint& start,
+									const BPoint& end);
 
 								// some convenience stuff
 			BRect				FillRegion(const BRegion* region) const;
@@ -276,6 +285,8 @@ private:
 			void				_UpdateFont() const;
 			void				_UpdateLineWidth();
 			void				_UpdateDrawingMode();
+			void				_UpdateClipping();
+			void				_UpdateTransform();
 			void				_SetRendererColor(const rgb_color& color) const;
 
 								// drawing functions stroke/fill
@@ -355,8 +366,14 @@ private:
 			bool				fIdentityTransform : 1;
 
 			Transformable		fTransform;
+			BAffineTransform	fUserTransform;
+			int32				fTransformOffsetX;
+			int32				fTransformOffsetY;
+			float				fScale;
 			float				fPenSize;
+			const BRegion*		fOriginalClippingRegion;
 			const BRegion*		fClippingRegion;
+			BRegion				fScaledClippingRegion;
 			drawing_mode		fDrawingMode;
 			source_alpha		fAlphaSrcMode;
 			alpha_function		fAlphaFncMode;

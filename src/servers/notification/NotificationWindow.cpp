@@ -23,6 +23,7 @@
 #include <File.h>
 #include <FindDirectory.h>
 #include <GroupLayout.h>
+#include <Messenger.h>
 #include <NodeMonitor.h>
 #include <Notifications.h>
 #include <Path.h>
@@ -173,7 +174,13 @@ NotificationWindow::MessageReceived(BMessage* message)
 
 			if (notification->InitCheck() == B_OK) {
 				bigtime_t timeout;
+				bool disableTimeout = false;
 				if (message->FindInt64("timeout", &timeout) != B_OK)
+					timeout = fTimeout;
+				else if (timeout < 0) {
+					timeout = fTimeout;
+					disableTimeout = true;
+				} else if (timeout == 0)
 					timeout = fTimeout;
 				BString sourceSignature(notification->SourceSignature());
 				BString sourceName(notification->SourceName());
@@ -209,7 +216,8 @@ NotificationWindow::MessageReceived(BMessage* message)
 					} else
 						group = aIt->second;
 
-					NotificationView* view = new NotificationView(notification, timeout);
+					NotificationView* view = new NotificationView(notification,
+						timeout, disableTimeout);
 
 					group->AddInfo(view);
 
@@ -227,6 +235,28 @@ NotificationWindow::MessageReceived(BMessage* message)
 			message->SendReply(&reply);
 			break;
 		}
+		case kNotificationClose:
+		{
+			const char* messageID = NULL;
+			bool removed = false;
+			if (message->FindString("message_id", &messageID) == B_OK) {
+				for (appview_t::iterator it = fAppViews.begin();
+					it != fAppViews.end(); ++it) {
+					if (it->second->RemoveNotification(messageID, 3)) {
+						removed = true;
+						break;
+					}
+				}
+			}
+
+			BMessage reply(B_REPLY);
+			reply.AddInt32("error", removed ? B_OK : B_ENTRY_NOT_FOUND);
+			message->SendReply(&reply);
+			break;
+		}
+		case kNotificationClosed:
+			BMessenger(kNotificationServerSignature).SendMessage(message);
+			break;
 		case kRemoveGroupView:
 		{
 			AppGroupView* view = NULL;

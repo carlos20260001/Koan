@@ -15,6 +15,8 @@
  *		Tri-Edge AI
  *		Jacob Secunda, secundja@gmail.com
  *		Dario Casalinuovo
+
+ * Part of Koan, a VitruvianOS fork
  */
 
 
@@ -24,10 +26,13 @@
 #include "Desktop.h"
 #include "PowerManager.h"
 
+#include <errno.h>
 #include <math.h>
 #include <stdio.h>
 #include <string.h>
+#include <sys/stat.h>
 #include <syslog.h>
+#include <pwd.h>
 
 #include <Debug.h>
 #include <debugger.h>
@@ -61,6 +66,13 @@
 #include "Screen.h"
 #include "ScreenManager.h"
 #include "ScreenRelayout.h"
+#include "ScreenScaleTransform.h"
+
+#ifdef VOS_WAYLAND
+#include "ServerApp.h"
+#include "ServerWindow.h"
+#include "wayland/WaylandServer.h"
+#endif
 #include "ServerApp.h"
 #include "ServerConfig.h"
 #include "ServerCursor.h"
@@ -278,6 +290,14 @@ KeyboardFilter::Filter(BMessage* message, EventTarget** _target,
 		|| message->what == B_INPUT_METHOD_EVENT)
 		_UpdateFocus(key, modifiers, _target);
 
+	// Forward to Wayland server
+	if (message->what == B_KEY_DOWN || message->what == B_UNMAPPED_KEY_DOWN)
+		fDesktop->NotifyWaylandKeyboardKey(key, 1,
+			message->FindInt32("when"), modifiers);
+	else if (message->what == B_KEY_UP)
+		fDesktop->NotifyWaylandKeyboardKey(key, 0,
+			message->FindInt32("when"), modifiers);
+
 	return fDesktop->KeyEvent(message->what, key, modifiers);
 }
 
@@ -312,6 +332,11 @@ MouseFilter::Filter(BMessage* message, EventTarget** _target, int32* _viewToken,
 	BPoint where;
 	if (message->FindPoint("where", &where) != B_OK)
 		return B_DISPATCH_MESSAGE;
+
+	// Inverse-transform physical input coordinates to logical space so
+	// window hit-testing and positioning work correctly with fractional
+	// display scaling.
+	where = fDesktop->PhysicalToLogical(where);
 
 	int32 buttons;
 	if (message->FindInt32("buttons", &buttons) != B_OK)
@@ -396,6 +421,12 @@ MouseFilter::Filter(BMessage* message, EventTarget** _target, int32* _viewToken,
 
 				// notify desktop listeners
 				fDesktop->NotifyMouseDown(window, message, where);
+
+				// Forward to Wayland server
+				int32 button = 0;
+				message->FindInt32("buttons", &button);
+				fDesktop->NotifyWaylandPointerButton(button, 1,
+					message->FindInt32("when"));
 				break;
 			}
 
@@ -404,6 +435,14 @@ MouseFilter::Filter(BMessage* message, EventTarget** _target, int32* _viewToken,
 				if (buttons == 0)
 					fDesktop->SetMouseEventWindow(NULL);
 				fDesktop->NotifyMouseUp(window, message, where);
+
+				// Forward to Wayland server
+				{
+					int32 buttonUp = 0;
+					message->FindInt32("buttons", &buttonUp);
+					fDesktop->NotifyWaylandPointerButton(buttonUp, 0,
+						message->FindInt32("when"));
+				}
 				break;
 
 			case B_MOUSE_MOVED:
@@ -411,6 +450,11 @@ MouseFilter::Filter(BMessage* message, EventTarget** _target, int32* _viewToken,
 					latestMouseMoved == NULL || latestMouseMoved == message,
 					false);
 				fDesktop->NotifyMouseMoved(window, message, where);
+
+				// Forward to Wayland server
+				fDesktop->NotifyWaylandPointerMotion(
+					(int32)where.x, (int32)where.y,
+					message->FindInt32("when"));
 				break;
 		}
 
@@ -501,13 +545,20 @@ Desktop::Desktop(uid_t userID, const char* targetScreen)
 	fLastMousePosition(B_ORIGIN),
 	fLastMouseButtons(0),
 
+	fPointerX(0),
+	fPointerY(0),
+
 	fFocus(NULL),
 	fFront(NULL),
 	fBack(NULL),
 
 	fScreenChangeTimer(-1),
 	fScreenChangeWakeup(-1),
-	fScreenChangeStoreDeferred(false)
+	fScreenChangeStoreDeferred(false),
+
+	fWaylandServer(NULL),
+	fWaylandEnabled(false),
+	fWaylandApp(NULL)
 {
 	memset(fLastWorkspaceFocus, 0, sizeof(fLastWorkspaceFocus));
 	memset(&fScreenChangeSnapshot, 0, sizeof(fScreenChangeSnapshot));
@@ -550,6 +601,8 @@ Desktop::~Desktop()
 	}
 
 	delete fPowerManager;
+	delete fWaylandServer;
+	delete fWaylandApp;
 	delete_area(fSharedReadOnlyArea);
 	delete_port(fMessagePort);
 
@@ -706,9 +759,13 @@ Desktop::Init()
 
 	fCursorManager.InitializeCursors(fSettings->DefaultBoldFont().Size() / 12.0f);
 
+	Screen* primaryScreen = fVirtualScreen.ScreenAt(0);
+	if (primaryScreen == NULL)
+		return B_ERROR;
+
+	BRect primaryFrame = primaryScreen->Frame();
 	fVirtualScreen.HWInterface()->MoveCursorTo(
-		fVirtualScreen.Frame().Width() / 2,
-		fVirtualScreen.Frame().Height() / 2);
+		primaryFrame.Width() / 2, primaryFrame.Height() / 2);
 
 #if TEST_MODE
 	gInputManager->AddStream(new InputServerStream);
@@ -738,7 +795,7 @@ Desktop::Init()
 
 	// _ScreenChanged() normally does this, but nothing calls it at cold
 	// boot, only on later mode changes.
-	gInputManager->UpdateScreenBounds(fVirtualScreen.Frame(),
+	gInputManager->UpdateScreenBounds(primaryScreen->Frame(),
 		HWInterface()->PanelScanoutOrientation(),
 		HWInterface()->PanelReflection());
 
@@ -962,9 +1019,13 @@ Desktop::SetScreenMode(int32 workspace, int32 id, const display_mode& mode,
 
 	fWorkspaces[workspace].CurrentScreenConfiguration().Set(id,
 		hasInfo ? &info : NULL, screen->Frame(), mode);
+	fWorkspaces[workspace].CurrentScreenConfiguration().SetScale(id,
+		screen->Scale());
 	if (makeDefault && !_ScreenChangeStoreDeferred()) {
 		fWorkspaces[workspace].StoredScreenConfiguration().Set(id,
 			hasInfo ? &info : NULL, screen->Frame(), mode);
+		fWorkspaces[workspace].StoredScreenConfiguration().SetScale(id,
+			screen->Scale());
 		StoreWorkspaceConfiguration(workspace);
 	}
 
@@ -1025,7 +1086,7 @@ Desktop::GetScreenFrame(int32 workspace, int32 id, BRect& frame)
 		if (screen == NULL)
 			return B_NAME_NOT_FOUND;
 
-		frame = screen->Frame();
+		frame = screen->LogicalFrame();
 		return B_OK;
 	}
 
@@ -1035,7 +1096,8 @@ Desktop::GetScreenFrame(int32 workspace, int32 id, BRect& frame)
 	if (configuration == NULL)
 		return B_NAME_NOT_FOUND;
 
-	frame = configuration->frame;
+	frame = ScreenScaleTransform::ToLogicalFrame(configuration->frame,
+		configuration->scale);
 	return B_OK;
 }
 
@@ -1370,6 +1432,7 @@ Desktop::_StoreScreenChange()
 		ScreenConfigurations& stored
 			= fWorkspaces[workspace].StoredScreenConfiguration();
 		stored.Set(id, hasInfo ? &info : NULL, screen->Frame(), mode);
+		stored.SetScale(id, screen->Scale());
 		stored.SetRotation(id, HWInterface()->PanelOrientation());
 		stored.SetReflection(id, HWInterface()->PanelReflection());
 
@@ -1477,6 +1540,414 @@ Desktop::Temperature(int32 id) const
 	float temp = 6500.0f;
 	HWInterface()->GetTemperature(&temp);
 	return temp;
+}
+
+
+status_t
+Desktop::SetScreenScale(int32 id, float scale)
+{
+	scale = ScreenScaleTransform::Normalize(scale);
+
+	AutoWriteLocker windowLocker(fWindowLock);
+
+	Screen* screen = fVirtualScreen.ScreenByID(id);
+	if (screen == NULL)
+		return B_NAME_NOT_FOUND;
+
+	BRect oldLogicalFrame = screen->LogicalFrame();
+
+	ScreenConfigurations& stored
+		= fWorkspaces[0].StoredScreenConfiguration();
+	screen_configuration* current
+		= fWorkspaces[0].CurrentScreenConfiguration().CurrentByID(id);
+	if (stored.CurrentByID(id) == NULL && current != NULL) {
+		status_t status = stored.Set(id,
+			current->has_info ? &current->info : NULL,
+			current->frame, current->mode);
+		if (status != B_OK)
+			return status;
+	}
+
+	{
+		AutoWriteLocker screenLocker(fScreenLock);
+		status_t status = screen->SetScale(scale);
+		if (status != B_OK)
+			return status;
+	}
+
+	stored.SetScale(id, scale);
+	fWorkspaces[0].CurrentScreenConfiguration().SetScale(id, scale);
+	StoreWorkspaceConfiguration(0);
+
+	fVirtualScreen.UpdateFrame();
+	_ScreenChanged(screen, &oldLogicalFrame);
+
+	return B_OK;
+}
+
+
+float
+Desktop::ScreenScale(int32 id) const
+{
+	// Prefer the live screen scale.
+	Screen* screen = fVirtualScreen.ScreenByID(id);
+	if (screen != NULL)
+		return screen->Scale();
+
+	// Fall back to the stored configuration.
+	screen_configuration* configuration
+		= fWorkspaces[0].CurrentScreenConfiguration().CurrentByID(id);
+	if (configuration != NULL)
+		return configuration->scale;
+
+	return 1.0f;
+}
+
+
+BPoint
+Desktop::PhysicalToLogical(const BPoint& physical) const
+{
+	// Find the screen containing the physical point and divide by its
+	// scale factor. Input events arrive in physical pixels; window
+	// hit-testing and positioning happen in logical space.
+	for (int32 i = 0; i < fVirtualScreen.CountScreens(); i++) {
+		Screen* screen = fVirtualScreen.ScreenAt(i);
+		if (screen == NULL)
+			continue;
+
+		BRect screenFrame = fVirtualScreen.ScreenFrameAt(i);
+		if (screenFrame.Contains(physical)) {
+			BRect logicalFrame = fVirtualScreen.ScreenLogicalFrameAt(i);
+			return ScreenScaleTransform::ToLogical(physical, screenFrame,
+				logicalFrame, screen->Scale());
+		}
+	}
+
+	// Fallback: use the primary screen's scale.
+	Screen* screen = fVirtualScreen.ScreenAt(0);
+	if (screen != NULL) {
+		return ScreenScaleTransform::ToLogical(physical, screen->Frame(),
+			screen->LogicalFrame(), screen->Scale());
+	}
+
+	return physical;
+}
+
+
+BPoint
+Desktop::LogicalToPhysical(const BPoint& logical) const
+{
+	for (int32 i = 0; i < fVirtualScreen.CountScreens(); i++) {
+		Screen* screen = fVirtualScreen.ScreenAt(i);
+		if (screen == NULL)
+			continue;
+
+		BRect screenFrame = fVirtualScreen.ScreenFrameAt(i);
+		BRect logicalFrame = fVirtualScreen.ScreenLogicalFrameAt(i);
+		if (logicalFrame.Contains(logical)) {
+			return ScreenScaleTransform::ToPhysical(logical, screenFrame,
+				logicalFrame, screen->Scale());
+		}
+	}
+
+	Screen* screen = fVirtualScreen.ScreenAt(0);
+	if (screen != NULL) {
+		return ScreenScaleTransform::ToPhysical(logical, screen->Frame(),
+			screen->LogicalFrame(), screen->Scale());
+	}
+
+	return logical;
+}
+
+
+void
+Desktop::SetWaylandServer(WaylandServer* server)
+{
+	fWaylandServer = server;
+}
+
+
+void
+Desktop::NotifyWaylandPointerMotion(int32 x, int32 y, uint32 time)
+{
+#ifdef VOS_WAYLAND
+	if (fWaylandServer != NULL)
+		fWaylandServer->SendPointerMotion(x, y, time);
+#endif
+}
+
+
+void
+Desktop::NotifyWaylandPointerButton(uint32 button, uint32 state, uint32 time)
+{
+#ifdef VOS_WAYLAND
+	if (fWaylandServer != NULL)
+		fWaylandServer->SendPointerButton(button, state, time);
+#endif
+}
+
+
+void
+Desktop::NotifyWaylandKeyboardKey(uint32 key, uint32 state, uint32 time,
+								  uint32 modifiers)
+{
+#ifdef VOS_WAYLAND
+	if (fWaylandServer != NULL)
+		fWaylandServer->SendKeyboardKey(key, state, time, modifiers);
+#endif
+}
+
+
+	status_t
+Desktop::SetWaylandEnabled(bool enabled)
+{
+#ifdef VOS_WAYLAND
+	AutoWriteLocker _(fWindowLock);
+
+	if (enabled == fWaylandEnabled)
+		return B_OK;
+
+	if (enabled) {
+		// XDG Base Directory spec: libwayland creates the socket inside
+		// XDG_RUNTIME_DIR, so it must be set before the server is built.
+		// Smart user support: use the session user's uid (from janus's
+		// VOS_DEFAULT_USER) so clients running as that user can access the
+		// socket in the same runtime directory.
+		uid_t sessionUid = getuid();
+		const char* defaultUser = getenv("VOS_DEFAULT_USER");
+		if (defaultUser != NULL) {
+			struct passwd* pw = getpwnam(defaultUser);
+			if (pw != NULL) {
+				sessionUid = pw->pw_uid;
+			} else {
+				syslog(LOG_WARNING, "Wayland: unknown VOS_DEFAULT_USER '%s'; "
+					"using server uid %d", defaultUser,
+					(int)getuid());
+			}
+		}
+
+		const char* xdgRuntime = getenv("XDG_RUNTIME_DIR");
+		if (xdgRuntime == NULL || xdgRuntime[0] == '\0') {
+			char xdgPath[512];
+			snprintf(xdgPath, sizeof(xdgPath), "/run/user/%d",
+				(int)sessionUid);
+			if (mkdir(xdgPath, 0755) != 0 && errno != EEXIST) {
+				syslog(LOG_ERR, "Wayland: cannot create %s: %s\n",
+					xdgPath, strerror(errno));
+				return B_ERROR;
+			}
+			setenv("XDG_RUNTIME_DIR", xdgPath, 1);
+		}
+
+		// Create a ServerApp for Wayland windows
+		if (fWaylandApp == NULL) {
+			port_id replyPort = create_port(10, "wayland reply");
+			port_id looperPort = create_port(10, "wayland looper");
+			if (replyPort < B_OK || looperPort < B_OK) {
+				if (replyPort >= B_OK)
+					delete_port(replyPort);
+				if (looperPort >= B_OK)
+					delete_port(looperPort);
+				return B_NO_MEMORY;
+			}
+
+			fWaylandApp = new (std::nothrow) ServerApp(this, replyPort, looperPort,
+				B_CURRENT_TEAM, 0, "application/x-vnd.wayland");
+			if (fWaylandApp == NULL) {
+				delete_port(replyPort);
+				delete_port(looperPort);
+				return B_NO_MEMORY;
+			}
+		}
+
+		// Start the Wayland server
+		if (fWaylandServer == NULL) {
+			fWaylandServer = new (std::nothrow) WaylandServer(this);
+			if (fWaylandServer == NULL)
+				return B_NO_MEMORY;
+
+			if (fWaylandServer->InitCheck() != B_OK) {
+				delete fWaylandServer;
+				fWaylandServer = NULL;
+				return B_ERROR;
+			}
+
+			if (!fWaylandServer->Run()) {
+				delete fWaylandServer;
+				fWaylandServer = NULL;
+				return B_ERROR;
+			}
+
+			SetWaylandServer(fWaylandServer);
+
+			// Publish the socket name for clients. WAYLAND_DISPLAY is the
+			// socket's name relative to XDG_RUNTIME_DIR, not an absolute
+			// path; the session scripts default it to "wayland-0" as well.
+			const char* socketName
+				= fWaylandServer->SocketName().String();
+			if (socketName != NULL && socketName[0] != '\0') {
+				setenv("WAYLAND_DISPLAY", socketName, 1);
+
+				// Make the socket accessible to clients running as the
+				// session user (e.g. vos-live, uid 1000). The directory
+				// is 0755; the socket itself needs 0666.
+				const char* runtimeDir = getenv("XDG_RUNTIME_DIR");
+				if (runtimeDir != NULL && socketName != NULL
+						&& socketName[0] != '\0') {
+					char socketPath[1024];
+					snprintf(socketPath, sizeof(socketPath),
+						"%s/%s", runtimeDir, socketName);
+					chmod(socketPath, 0666);
+				}
+			}
+		}
+
+		fWaylandEnabled = true;
+	} else {
+		// Stop the Wayland server
+		if (fWaylandServer != NULL) {
+			fWaylandServer->Stop();
+			delete fWaylandServer;
+			fWaylandServer = NULL;
+		}
+
+		// Destroy the Wayland ServerApp
+		if (fWaylandApp != NULL) {
+			delete fWaylandApp;
+			fWaylandApp = NULL;
+		}
+
+		fWaylandEnabled = false;
+		fWaylandSocket = "";
+	}
+
+	return B_OK;
+#else
+	return B_ERROR;
+#endif
+}
+
+
+Window*
+Desktop::CreateWaylandWindow(const BRect& frame, const char* title,
+	ServerWindow** serverWindowOut)
+{
+#ifdef VOS_WAYLAND
+	if (fWaylandApp == NULL) {
+		if (serverWindowOut != NULL)
+			*serverWindowOut = NULL;
+		return NULL;
+	}
+
+	// Create dummy ports for the ServerWindow
+	port_id replyPort = create_port(10, "wayland window reply");
+	port_id looperPort = create_port(10, "wayland window looper");
+	if (replyPort < B_OK || looperPort < B_OK) {
+		if (replyPort >= B_OK)
+			delete_port(replyPort);
+		if (looperPort >= B_OK)
+			delete_port(looperPort);
+		if (serverWindowOut != NULL)
+			*serverWindowOut = NULL;
+		return NULL;
+	}
+
+	// Create ServerWindow for this Wayland surface
+	ServerWindow* serverWindow = new (std::nothrow) ServerWindow(title,
+		fWaylandApp, replyPort, looperPort, 0);
+	if (serverWindow == NULL) {
+		delete_port(replyPort);
+		delete_port(looperPort);
+		if (serverWindowOut != NULL)
+			*serverWindowOut = NULL;
+		return NULL;
+	}
+
+	if (serverWindowOut != NULL)
+		*serverWindowOut = serverWindow;
+
+	// Init creates the Window and adds it to Desktop
+	status_t status = serverWindow->Init(frame, B_TITLED_WINDOW_LOOK,
+		B_NORMAL_WINDOW_FEEL, B_NOT_RESIZABLE | B_NOT_ZOOMABLE,
+		CurrentWorkspace());
+	if (status != B_OK) {
+		delete serverWindow;
+		if (serverWindowOut != NULL)
+			*serverWindowOut = NULL;
+		return NULL;
+	}
+
+	return serverWindow->Window();
+#else
+	if (serverWindowOut != NULL)
+		*serverWindowOut = NULL;
+	return NULL;
+#endif
+}
+
+
+void
+Desktop::DestroyWaylandWindow(Window* window)
+{
+#ifdef VOS_WAYLAND
+	if (window == NULL)
+		return;
+
+	// Window removal is handled by the ServerWindow destructor when
+	// WaylandServer deletes the associated ServerWindow.
+	(void)window;
+#else
+	(void)window;
+#endif
+}
+
+
+void
+Desktop::SetWaylandWindowTitle(Window* window, const char* title)
+{
+#ifdef VOS_WAYLAND
+	if (window == NULL || title == NULL)
+		return;
+
+	BRegion dirty;
+	window->SetTitle(title, dirty);
+#endif
+}
+
+
+void
+Desktop::SetWaylandWindowMinimized(Window* window, bool minimized)
+{
+#ifdef VOS_WAYLAND
+	if (window == NULL)
+		return;
+
+	window->SetMinimized(minimized);
+#endif
+}
+
+
+bool
+Desktop::WaylandEnabled() const
+{
+#ifdef VOS_WAYLAND
+	return fWaylandEnabled;
+#else
+	return false;
+#endif
+}
+
+
+BString
+Desktop::WaylandSocket() const
+{
+#ifdef VOS_WAYLAND
+	if (fWaylandServer != NULL)
+		return fWaylandServer->SocketName();
+	return "";
+#else
+	return "";
+#endif
 }
 
 
@@ -2877,6 +3348,15 @@ Desktop::MarkDirty(BRegion& dirtyRegion, BRegion& exposeRegion)
 	if (LockAllWindows()) {
 		// send redraw messages to all windows intersecting the dirty region
 		_TriggerWindowRedrawing(dirtyRegion, exposeRegion);
+
+		// Paint Wayland surfaces onto the screen after native windows
+#ifdef VOS_WAYLAND
+		if (fWaylandServer != NULL && fWaylandServer->InitCheck() == B_OK) {
+			DrawingEngine* engine = GetDrawingEngine();
+			if (engine != NULL)
+				fWaylandServer->PaintSurfaces(engine, dirtyRegion);
+		}
+#endif
 
 		UnlockAllWindows();
 	}
@@ -4371,18 +4851,21 @@ Desktop::_RelayoutWindowsForScreen(Screen* screen, const BRect& oldFrame,
 
 
 void
-Desktop::_ScreenChanged(Screen* screen)
+Desktop::_ScreenChanged(Screen* screen, const BRect* oldLogicalFrame)
 {
 	ASSERT_MULTI_WRITE_LOCKED(fWindowLock);
 
 	// item->frame is still the old size; Screen::Frame() is already the new.
 	const int32 screenIndex = fVirtualScreen.ScreenIndex(screen);
-	const BRect newFrame = screen->Frame();
+	const BRect physicalFrame = screen->Frame();
+	const BRect newFrame = screen->LogicalFrame();
 
 	if (screenIndex >= 0) {
-		const BRect oldFrame = fVirtualScreen.ScreenFrameAt(screenIndex);
+		const BRect oldFrame = oldLogicalFrame != NULL
+			? *oldLogicalFrame
+			: fVirtualScreen.ScreenLogicalFrameAt(screenIndex);
 		_RelayoutWindowsForScreen(screen, oldFrame, newFrame);
-		fVirtualScreen.SetScreenFrame(screenIndex, newFrame);
+		fVirtualScreen.SetScreenFrame(screenIndex, physicalFrame);
 	}
 
 	// the entire screen is dirty, because we're actually
@@ -4391,7 +4874,7 @@ Desktop::_ScreenChanged(Screen* screen)
 
 	// update our cached screen region
 	fScreenRegion.Set(newFrame);
-	gInputManager->UpdateScreenBounds(newFrame,
+	gInputManager->UpdateScreenBounds(physicalFrame,
 		screen->HWInterface()->PanelScanoutOrientation(),
 		screen->HWInterface()->PanelReflection());
 
@@ -4416,8 +4899,10 @@ Desktop::_ScreenChanged(Screen* screen)
 
 	for (Window* window = fAllWindows.FirstWindow(); window != NULL;
 			window = window->NextWindow(kAllWindowList)) {
-		if (window->Screen() == screen)
+		if (window->Screen() == screen) {
+			window->SetScreen(screen);
 			window->ServerWindow()->ScreenChanged(&update);
+		}
 	}
 }
 
@@ -4466,6 +4951,10 @@ Desktop::_SetCurrentWorkspaceConfiguration()
 {
 	ASSERT_MULTI_WRITE_LOCKED(fWindowLock);
 
+	Screen* primaryScreen = fVirtualScreen.ScreenAt(0);
+	BRect oldPrimaryFrame = primaryScreen != NULL
+		? primaryScreen->LogicalFrame() : BRect();
+
 	status_t status = fDirectScreenLock.LockWithTimeout(1000000L);
 	if (status != B_OK) {
 		// The application having the direct screen lock didn't give it up in
@@ -4487,8 +4976,13 @@ Desktop::_SetCurrentWorkspaceConfiguration()
 		&changedScreens);
 
 	for (int32 i = 0; changedScreens != 0; i++, changedScreens /= 2) {
-		if ((changedScreens & (1 << i)) != 0)
-			_ScreenChanged(fVirtualScreen.ScreenAt(i));
+		if ((changedScreens & (1 << i)) != 0) {
+			Screen* screen = fVirtualScreen.ScreenAt(i);
+			if (i == 0 && oldPrimaryFrame.IsValid())
+				_ScreenChanged(screen, &oldPrimaryFrame);
+			else
+				_ScreenChanged(screen);
+		}
 	}
 }
 

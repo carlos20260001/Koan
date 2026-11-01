@@ -116,6 +116,7 @@ set(DECORATORS
 	BeDecorator
 	FlatDecorator
 	MacDecorator
+	ModernDecorator
 	WinDecorator
 )
 ImageInclude("/system/add-ons/decorators" ${DECORATORS})

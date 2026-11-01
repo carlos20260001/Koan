@@ -275,10 +275,10 @@ cmd_build() {
         _has_chroot=1
     fi
 
-    if ! sudo -v; then
-        die "sudo authentication required for image creation."
+    if ! vsudo_auth; then
+        die "authentication required for image creation."
     fi
-    ( while true; do sleep 60; sudo -n true 2>/dev/null || exit; kill -0 "$$" 2>/dev/null || exit; done ) &
+    ( vsudo_keepalive ) &
     _sudo_keepalive_pid=$!
     trap 'kill "$_sudo_keepalive_pid" 2>/dev/null || true' EXIT INT TERM
 

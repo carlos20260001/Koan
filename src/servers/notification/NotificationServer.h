@@ -7,7 +7,13 @@
 
 
 #include <Server.h>
+#include <systemd/sd-bus.h>
 
+#include <atomic>
+#include <map>
+#include <OS.h>
+#include <String.h>
+#include <Locker.h>
 
 class NotificationWindow;
 
@@ -26,7 +32,25 @@ public:
 									const char* prop);
 
 private:
+	static	int32				_DBUSWorker(void* data);
+			int32				_RunDBus();
+	static	int					_Notify(sd_bus_message* message, void* data,
+									sd_bus_error* error);
+	static	int					_CloseNotification(sd_bus_message* message,
+									void* data, sd_bus_error* error);
+	static	int					_GetCapabilities(sd_bus_message* message,
+									void* data, sd_bus_error* error);
+	static	int					_GetServerInformation(sd_bus_message* message,
+									void* data, sd_bus_error* error);
+
 			NotificationWindow*	fWindow;
+			std::atomic<bool>	fRunning;
+			thread_id			fBusThread;
+			sd_bus*				fBus;
+			port_id				fClosedEventPort;
+			BLocker				fNotificationLock;
+			std::map<uint32, BString> fNotificationMessages;
+			uint32				fNextNotificationID;
 };
 
 

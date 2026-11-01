@@ -1,8 +1,25 @@
 #!/bin/sh
-# Fires the graphical chain after janus is up in user mode. Mirrors what
-# graphical.target does in system mode by starting the per-server units.
-# Each janus_launch call sends B_LAUNCH_JOB to janus; janus's daemon_loop
-# picks it up and forks the server as the current uid.
+# Fires the graphical chain after janus is up in user mode.
+# Implements XDG Base Directory spec (basedir-spec) environment.
+
+# Verify the login manager's runtime directory before using its sockets.
+if [ -z "${XDG_RUNTIME_DIR}" ]; then
+    XDG_RUNTIME_DIR="/run/user/$(id -u)"
+    export XDG_RUNTIME_DIR
+fi
+if [ -L "$XDG_RUNTIME_DIR" ] || [ ! -d "$XDG_RUNTIME_DIR" ]; then
+    echo "vos-session-boot: XDG_RUNTIME_DIR is not a directory: $XDG_RUNTIME_DIR" >&2
+    exit 1
+fi
+runtime_owner=$(stat -c '%u' "$XDG_RUNTIME_DIR") || exit 1
+runtime_mode=$(stat -c '%a' "$XDG_RUNTIME_DIR") || exit 1
+if [ "$runtime_owner" != "$(id -u)" ] || [ "$runtime_mode" != "700" ]; then
+    echo "vos-session-boot: XDG_RUNTIME_DIR must be owned by the session user with mode 0700" >&2
+    exit 1
+fi
+
+# app_server publishes its Wayland compatibility socket under this name.
+export WAYLAND_DISPLAY="${WAYLAND_DISPLAY:-wayland-0}"
 
 set -e
 

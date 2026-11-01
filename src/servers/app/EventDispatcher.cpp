@@ -512,6 +512,17 @@ EventDispatcher::GetMouse(BPoint& where, int32& buttons)
 }
 
 
+BPoint
+EventDispatcher::_LogicalCursorPosition() const
+{
+	// Keep fLastCursorPosition in physical pixels for hardware cursor APIs;
+	// BeAPI screen coordinates follow the logical screen frame.
+	return fDesktop != NULL
+		? fDesktop->PhysicalToLogical(fLastCursorPosition)
+		: fLastCursorPosition;
+}
+
+
 void
 EventDispatcher::SendFakeMouseMoved(EventTarget& target, int32 viewToken)
 {
@@ -555,7 +566,7 @@ EventDispatcher::_SendFakeMouseMoved(BMessage* message)
 		return;
 
 	BMessage moved(B_MOUSE_MOVED);
-	moved.AddPoint("screen_where", fLastCursorPosition);
+	moved.AddPoint("screen_where", _LogicalCursorPosition());
 	moved.AddInt32("buttons", fLastButtons);
 
 	if (fDraggingMessage)
@@ -771,7 +782,7 @@ EventDispatcher::_DeliverDragMessage()
 		BMessage::Private(fDragMessage).SetWasDropped(true);
 		fDragMessage.RemoveName("_original_what");
 		fDragMessage.AddInt32("_original_what", fDragMessage.what);
-		fDragMessage.AddPoint("_drop_point_", fLastCursorPosition);
+		fDragMessage.AddPoint("_drop_point_", _LogicalCursorPosition());
 		fDragMessage.AddPoint("_drop_offset_", fDragOffset);
 		fDragMessage.what = _MESSAGE_DROPPED_;
 
@@ -886,7 +897,7 @@ EventDispatcher::_EventLoop()
 				// The "where" field will be filled in by the receiver
 				// (it's supposed to be expressed in local window coordinates)
 				event->RemoveName("where");
-				event->AddPoint("screen_where", fLastCursorPosition);
+				event->AddPoint("screen_where", _LogicalCursorPosition());
 
 				if (event->what == B_MOUSE_MOVED
 					&& fPreviousMouseTarget != NULL

@@ -91,6 +91,7 @@ const uint32 kUpdatePreferences = 'Pref';
 
 // realign replicants message constant
 const uint32 kRealignReplicants = 'Algn';
+const uint32 kLaunchDesktopEntry = 'xdla';
 
 /* --------------------------------------------- */
 

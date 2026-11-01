@@ -15,6 +15,9 @@
 
 // Messages
 const uint32 kNotificationMessage = 'nssm';
+const uint32 kNotificationCenterToggle = 'nsct';
+const uint32 kNotificationClose = 'nscl';
+const uint32 kNotificationClosed = 'nscc';
 
 // Settings constants
 extern const char* kSettingsFile;

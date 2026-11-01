@@ -43,6 +43,6 @@ Docs live in the [vos-wiki](https://github.com/VitruvianOS/vos-wiki) repo. Typos
 
 ## License
 
-By contributing to Vitruvian, you agree that your contributions will be licensed under the same license as the component you are modifying (GPL or MIT, depending on the subsystem).
+By contributing to Vitruvian, you agree that your contributions will be licensed under the same license as the component you are modifying (GPL, MIT, or Apache-2.0, depending on the subsystem).
 
 Additionally, by contributing to Vitruvian you accept that your work may be relicensed under either the GPL or MIT license at the project's discretion. This covers situations such as cross-project contributions, licensing opportunities, compatibility with other open-source projects, and similar needs. No individual developer may relicense another developer's contribution without that developer's explicit consent. You retain copyright to your own contributions; this clause simply gives the project the flexibility to relicense as circumstances require.

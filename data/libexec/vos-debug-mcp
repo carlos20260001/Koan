@@ -1,0 +1,531 @@
+#!/usr/bin/python3
+
+import argparse
+import ipaddress
+import json
+import os
+import platform
+import shutil
+import subprocess
+import sys
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from urllib.parse import urlsplit
+
+
+ENDPOINT_PATH = "/mcp"
+MAX_REQUEST_BYTES = 1024 * 1024
+MAX_OUTPUT_CHARS = 20000
+MAX_LOG_LINES = 200
+MAX_PROCESS_COUNT = 200
+ALLOWED_UNITS = (
+    "NetworkManager.service",
+    "app_server.service",
+    "input_server.service",
+    "janus.service",
+    "ssh.service",
+    "systemd-logind.service",
+    "vos-debug-mcp.service",
+    "vos-session.service",
+    "vos-sshdebug.service",
+)
+
+DIAGNOSTIC_COMMANDS = {
+    "uname": ("/usr/bin/uname", "-a"),
+    "uptime": ("/usr/bin/uptime",),
+    "memory": ("/usr/bin/free", "-h"),
+    "disk": ("/usr/bin/df", "-h"),
+    "ip-addresses": ("/usr/sbin/ip", "-brief", "address"),
+    "ip-routes": ("/usr/sbin/ip", "route"),
+}
+
+
+def _require_object_keys(value, required, optional=()):
+    if not isinstance(value, dict):
+        raise ValueError("tool arguments must be an object")
+    missing = set(required) - set(value)
+    extra = set(value) - set(required) - set(optional)
+    if missing:
+        raise ValueError("missing arguments: " + ", ".join(sorted(missing)))
+    if extra:
+        raise ValueError("unsupported arguments: " + ", ".join(sorted(extra)))
+
+
+def _read_text(path):
+    try:
+        with open(path, "r", encoding="utf-8", errors="replace") as source:
+            return source.read()
+    except OSError as error:
+        raise RuntimeError("could not read " + path + ": " + str(error)) from error
+
+
+def _bounded_output(text, line_limit=None):
+    lines = text.splitlines()
+    truncated = False
+    if line_limit is not None and len(lines) > line_limit:
+        lines = lines[-line_limit:]
+        truncated = True
+    result = "\n".join(lines)
+    if len(result) > MAX_OUTPUT_CHARS:
+        result = result[-MAX_OUTPUT_CHARS:]
+        truncated = True
+    if truncated:
+        result = "[output truncated]\n" + result
+    return result
+
+
+def _run_command(arguments, line_limit=None):
+    try:
+        result = subprocess.run(
+            arguments,
+            check=False,
+            close_fds=True,
+            env={"LANG": "C.UTF-8", "PATH": "/usr/bin:/usr/sbin:/bin:/sbin"},
+            shell=False,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            errors="replace",
+            timeout=10,
+        )
+    except FileNotFoundError as error:
+        raise RuntimeError("diagnostic command is unavailable: " + arguments[0]) from error
+    except PermissionError as error:
+        raise RuntimeError("diagnostic command could not be started: " + str(error)) from error
+    except subprocess.TimeoutExpired as error:
+        raise RuntimeError("diagnostic command timed out") from error
+    if result.returncode != 0:
+        detail = _bounded_output(result.stdout).strip()
+        raise RuntimeError(
+            "diagnostic command exited with status "
+            + str(result.returncode)
+            + (": " + detail if detail else "")
+        )
+    return _bounded_output(result.stdout, line_limit)
+
+
+def _system_info():
+    release = {}
+    for line in _read_text("/etc/os-release").splitlines():
+        if "=" in line:
+            key, value = line.split("=", 1)
+            if key == "PRETTY_NAME":
+                release[key] = value.strip().strip('"')
+                break
+
+    uptime = _read_text("/proc/uptime").split()
+    if not uptime:
+        raise RuntimeError("/proc/uptime did not contain an uptime value")
+
+    memory = {}
+    for line in _read_text("/proc/meminfo").splitlines():
+        key, separator, value = line.partition(":")
+        if separator and key in ("MemTotal", "MemAvailable"):
+            memory[key] = value.strip()
+
+    try:
+        disk = shutil.disk_usage("/")
+        load_average = os.getloadavg()
+    except OSError as error:
+        raise RuntimeError("could not inspect system resources: " + str(error)) from error
+
+    return {
+        "os": release.get("PRETTY_NAME", "unknown"),
+        "kernel": platform.release(),
+        "architecture": platform.machine(),
+        "uptime_seconds": round(float(uptime[0]), 1),
+        "load_average": list(load_average),
+        "memory": memory,
+        "root_filesystem_bytes": {
+            "total": disk.total,
+            "used": disk.used,
+            "available": disk.free,
+        },
+    }
+
+
+def _processes(limit):
+    if type(limit) is not int or not 1 <= limit <= MAX_PROCESS_COUNT:
+        raise ValueError("limit must be an integer from 1 to 200")
+
+    processes = []
+    try:
+        entries = os.listdir("/proc")
+    except OSError as error:
+        raise RuntimeError("could not list /proc: " + str(error)) from error
+
+    for entry in entries:
+        if not entry.isdecimal():
+            continue
+        try:
+            name = _read_text("/proc/" + entry + "/comm").strip()
+            status = _read_text("/proc/" + entry + "/status")
+        except RuntimeError as error:
+            if isinstance(error.__cause__, FileNotFoundError):
+                continue
+            raise
+
+        state = "?"
+        uid = None
+        for line in status.splitlines():
+            if line.startswith("State:"):
+                state_values = line.partition(":")[2].strip().split()
+                if state_values:
+                    state = state_values[0]
+            elif line.startswith("Uid:"):
+                uid_values = line.partition(":")[2].split()
+                if uid_values:
+                    uid = int(uid_values[0])
+        processes.append(
+            {
+                "pid": int(entry),
+                "name": name,
+                "state": state,
+                "uid": uid,
+            }
+        )
+
+    processes.sort(key=lambda process: process["pid"])
+    truncated = len(processes) > limit
+    return {
+        "processes": processes[-limit:],
+        "count": len(processes),
+        "truncated": truncated,
+    }
+
+
+def _read_logs(arguments):
+    _require_object_keys(arguments, ("source",), ("unit", "lines"))
+    source = arguments["source"]
+    if source not in ("system", "kernel"):
+        raise ValueError("source must be 'system' or 'kernel'")
+
+    lines = arguments.get("lines", 100)
+    if type(lines) is not int or not 1 <= lines <= MAX_LOG_LINES:
+        raise ValueError("lines must be an integer from 1 to 200")
+
+    command = ["/usr/bin/journalctl", "--no-pager", "--output=short-iso", "-b"]
+    if source == "kernel":
+        command.append("-k")
+    if "unit" in arguments:
+        if arguments["unit"] not in ALLOWED_UNITS:
+            raise ValueError("unit is not in the supported service list")
+        if source == "kernel":
+            raise ValueError("unit cannot be combined with kernel logs")
+        command.extend(("-u", arguments["unit"]))
+    command.extend(("-n", str(lines)))
+    return _run_command(command, line_limit=lines)
+
+
+def _service_status(service):
+    if service not in ALLOWED_UNITS:
+        raise ValueError("service is not in the supported service list")
+    return _run_command(
+        (
+            "/usr/bin/systemctl",
+            "show",
+            "--no-pager",
+            "--property=Id,LoadState,ActiveState,SubState,MainPID,Result,ExecMainStatus",
+            service,
+        )
+    )
+
+
+def diagnostic_arguments(command):
+    if command not in DIAGNOSTIC_COMMANDS:
+        raise ValueError("command is not in the read-only diagnostic allowlist")
+    return DIAGNOSTIC_COMMANDS[command]
+
+
+def run_tool(name, arguments):
+    if name == "get_system_info":
+        _require_object_keys(arguments, ())
+        return json.dumps(_system_info(), indent=2, sort_keys=True)
+    if name == "list_processes":
+        _require_object_keys(arguments, (), ("limit",))
+        return json.dumps(_processes(arguments.get("limit", 100)), indent=2)
+    if name == "read_logs":
+        return _read_logs(arguments)
+    if name == "get_service_status":
+        _require_object_keys(arguments, ("service",))
+        return _service_status(arguments["service"])
+    if name == "run_diagnostic_command":
+        _require_object_keys(arguments, ("command",))
+        return _run_command(diagnostic_arguments(arguments["command"]), line_limit=100)
+    raise ValueError("unknown tool: " + str(name))
+
+
+TOOLS = [
+    {
+        "name": "get_system_info",
+        "description": "Read OS, kernel, uptime, load, memory, and root filesystem information.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {},
+            "additionalProperties": False,
+        },
+        "annotations": {"readOnlyHint": True, "destructiveHint": False},
+    },
+    {
+        "name": "list_processes",
+        "description": "List process IDs, names, states, and UIDs without exposing command-line arguments.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "limit": {"type": "integer", "minimum": 1, "maximum": MAX_PROCESS_COUNT}
+            },
+            "additionalProperties": False,
+        },
+        "annotations": {"readOnlyHint": True, "destructiveHint": False},
+    },
+    {
+        "name": "read_logs",
+        "description": "Read a bounded number of current-boot system or kernel journal lines.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "source": {"type": "string", "enum": ["system", "kernel"]},
+                "unit": {"type": "string", "enum": list(ALLOWED_UNITS)},
+                "lines": {"type": "integer", "minimum": 1, "maximum": MAX_LOG_LINES},
+            },
+            "required": ["source"],
+            "additionalProperties": False,
+        },
+        "annotations": {"readOnlyHint": True, "destructiveHint": False},
+    },
+    {
+        "name": "get_service_status",
+        "description": "Read status for a supported system service.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {"service": {"type": "string", "enum": list(ALLOWED_UNITS)}},
+            "required": ["service"],
+            "additionalProperties": False,
+        },
+        "annotations": {"readOnlyHint": True, "destructiveHint": False},
+    },
+    {
+        "name": "run_diagnostic_command",
+        "description": "Run one predefined read-only system diagnostic; arbitrary shell commands are not accepted.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "command": {
+                    "type": "string",
+                    "enum": sorted(DIAGNOSTIC_COMMANDS),
+                }
+            },
+            "required": ["command"],
+            "additionalProperties": False,
+        },
+        "annotations": {"readOnlyHint": True, "destructiveHint": False},
+    },
+]
+
+
+def _is_loopback_host(host):
+    if not host:
+        return False
+    try:
+        hostname = urlsplit("//" + host).hostname
+    except ValueError:
+        return False
+    if hostname == "localhost":
+        return True
+    try:
+        return ipaddress.ip_address(hostname).is_loopback
+    except (ValueError, TypeError):
+        return False
+
+
+def _json_response(request_id, result=None, error=None):
+    response = {"jsonrpc": "2.0", "id": request_id}
+    if error is not None:
+        response["error"] = error
+    else:
+        response["result"] = result
+    return response
+
+
+def _dispatch(request):
+    if not isinstance(request, dict) or request.get("jsonrpc") != "2.0":
+        return _json_response(
+            request.get("id") if isinstance(request, dict) else None,
+            error={"code": -32600, "message": "Invalid Request"},
+        )
+
+    request_id = request.get("id")
+    method = request.get("method")
+    if not isinstance(method, str):
+        return _json_response(
+            request_id,
+            error={"code": -32600, "message": "Invalid Request"},
+        )
+    params = request.get("params", {})
+    if not isinstance(params, dict):
+        return _json_response(
+            request_id,
+            error={"code": -32602, "message": "params must be an object"},
+        )
+
+    if method == "initialize":
+        requested_version = params.get("protocolVersion")
+        version = (
+            requested_version
+            if requested_version in ("2025-03-26", "2024-11-05")
+            else "2025-03-26"
+        )
+        return _json_response(
+            request_id,
+            {
+                "protocolVersion": version,
+                "capabilities": {"tools": {}},
+                "serverInfo": {
+                    "name": "vitruvian-ssh-debug",
+                    "version": "1.0.0",
+                },
+                "instructions": "This endpoint provides read-only guest diagnostics.",
+            },
+        )
+    if method == "ping":
+        return _json_response(request_id, {})
+    if method == "tools/list":
+        return _json_response(request_id, {"tools": TOOLS})
+    if method == "tools/call":
+        name = params.get("name")
+        arguments = params.get("arguments", {})
+        try:
+            text = run_tool(name, arguments)
+        except (RuntimeError, ValueError) as error:
+            return _json_response(
+                request_id,
+                {
+                    "content": [{"type": "text", "text": str(error)}],
+                    "isError": True,
+                },
+            )
+        return _json_response(
+            request_id,
+            {
+                "content": [{"type": "text", "text": text}],
+                "isError": False,
+            },
+        )
+    if method.startswith("notifications/"):
+        if "id" not in request:
+            return None
+        return _json_response(
+            request_id,
+            error={"code": -32600, "message": "Notifications must not include an id"},
+        )
+    return _json_response(
+        request_id,
+        error={"code": -32601, "message": "Method not found"},
+    )
+
+
+class MCPRequestHandler(BaseHTTPRequestHandler):
+    server_version = "VitruvianDebugMCP/1.0"
+    sys_version = ""
+
+    def log_message(self, format_string, *args):
+        sys.stderr.write(
+            "vos-debug-mcp: " + (format_string % args) + "\n"
+        )
+
+    def _send_json(self, status, response):
+        payload = json.dumps(response, separators=(",", ":")).encode("utf-8")
+        self.send_response(status)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(payload)))
+        self.send_header("Cache-Control", "no-store")
+        self.end_headers()
+        self.wfile.write(payload)
+
+    def do_GET(self):
+        self.send_error(405, "MCP GET/SSE is not supported")
+
+    def do_POST(self):
+        if self.path != ENDPOINT_PATH:
+            self.send_error(404)
+            return
+        content_type = self.headers.get("Content-Type", "").split(";", 1)[0].strip()
+        if content_type.lower() != "application/json":
+            self.send_error(415, "Content-Type must be application/json")
+            return
+        if not _is_loopback_host(self.headers.get("Host", "")):
+            self.send_error(421, "Only loopback Host values are accepted")
+            return
+        origin = self.headers.get("Origin")
+        if origin is not None:
+            parsed_origin = urlsplit(origin)
+            if parsed_origin.scheme != "http" or not _is_loopback_host(
+                parsed_origin.netloc
+            ):
+                self.send_error(403, "Only loopback origins are accepted")
+                return
+
+        try:
+            content_length = int(self.headers.get("Content-Length", ""))
+        except ValueError:
+            self.send_error(411, "Content-Length is required")
+            return
+        if content_length < 0 or content_length > MAX_REQUEST_BYTES:
+            self.send_error(413, "Request body exceeds the allowed size")
+            return
+
+        try:
+            body = self.rfile.read(content_length)
+            request = json.loads(body.decode("utf-8"))
+        except (UnicodeDecodeError, json.JSONDecodeError, RecursionError):
+            self._send_json(
+                200,
+                _json_response(
+                    None,
+                    error={"code": -32700, "message": "Parse error"},
+                ),
+            )
+            return
+
+        response = _dispatch(request)
+        if response is None:
+            self.send_response(202)
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+            return
+        self._send_json(200, response)
+
+
+class MCPHTTPServer(ThreadingHTTPServer):
+    daemon_threads = True
+    allow_reuse_address = True
+
+
+def create_server(port=8765):
+    if type(port) is not int or not 0 <= port <= 65535:
+        raise ValueError("port must be an integer from 0 to 65535")
+    return MCPHTTPServer(("127.0.0.1", port), MCPRequestHandler)
+
+
+def main():
+    parser = argparse.ArgumentParser(description="Vitruvian SSH-debug MCP server")
+    parser.add_argument("--port", type=int, default=8765)
+    options = parser.parse_args()
+    try:
+        server = create_server(options.port)
+    except (OSError, ValueError) as error:
+        parser.error(str(error))
+    print(
+        "vos-debug-mcp listening on 127.0.0.1:%d%s"
+        % (server.server_address[1], ENDPOINT_PATH),
+        file=sys.stderr,
+    )
+    try:
+        server.serve_forever()
+    except KeyboardInterrupt:
+        pass
+    finally:
+        server.server_close()
+
+
+if __name__ == "__main__":
+    main()

@@ -1,0 +1,14 @@
+[Unit]
+Description=Vitruvian shared folder mount (9p)
+After=local-fs.target
+Before=graphical.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStartPre=/bin/mkdir -p /home/vos-live/shared /root/shared
+ExecStart=/bin/sh -c 'if [ -e /sys/bus/virtio/devices/*/mount_tag ] && grep -q host_shared /sys/bus/virtio/devices/*/mount_tag 2>/dev/null; then mount -t 9p -o trans=virtio,version=9p2000.L host_shared /home/vos-live/shared 2>/dev/null || mount -t 9p -o trans=virtio,version=9p2000.L host_shared /root/shared 2>/dev/null; fi'
+ExecStop=/bin/umount /home/vos-live/shared /root/shared 2>/dev/null || true
+
+[Install]
+WantedBy=multi-user.target

@@ -678,6 +678,14 @@ Window::SetScreen(const ::Screen* screen)
 {
 	// TODO this assert fails in Desktop::ShowWindow
 	//ASSERT_MULTI_WRITE_LOCKED(fDesktop->ScreenLocker());
+	float scale = screen != NULL ? screen->Scale() : 1.0f;
+	status_t status = fDrawingEngine->SetScale(scale);
+	if (status != B_OK) {
+		debug_printf("app_server: Failed to update window drawing scale (%d)\n",
+			status);
+		return;
+	}
+
 	fScreen = screen;
 }
 

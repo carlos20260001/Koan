@@ -10,6 +10,7 @@
 #include <Entry.h>
 #include <Messenger.h>
 #include <Rect.h>
+#include <String.h>
 #include <Window.h>
 
 #include "FullScreenState.h"
@@ -108,6 +109,8 @@ private:
 			uint32				fVideoParNum;
 			uint32				fVideoParDen;
 			uint32				fVideoRotation;
+			uint64				fMprisTrackId;
+			BString				fMprisUri;
 			BRect				fSavedFrame;
 			BRect				fLastFrame;
 };

@@ -6,6 +6,8 @@
  * Authors:
  *		Rafael Romo
  *		Stefano Ceccherini (burton666@libero.it)
+ *
+ * Part of Koan, a VitruvianOS fork
  */
 #ifndef CONSTANTS_H
 #define CONSTANTS_H
@@ -40,6 +42,8 @@ static const uint32 UPDATE_DESKTOP_MSG = 'udsk';
 static const uint32 SLIDER_MODIFICATION_MSG = 'sldm';
 static const uint32 SLIDER_INVOKE_MSG = 'sldi';
 static const uint32 SLIDER_BRIGHTNESS_MSG = 'brig';
+static const uint32 SLIDER_SCALE_MSG = 'sclr';
+static const uint32 CHECKBOX_WAYLAND_MSG = 'wayl';
 static const uint32 SET_CUSTOM_REFRESH_MSG = 'scrf';
 static const uint32 DIM_COUNT_MSG = 'scrf';
 static const uint32 MAKE_INITIAL_MSG = 'mkin';

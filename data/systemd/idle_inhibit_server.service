@@ -1,0 +1,16 @@
+[Unit]
+Description=Vitruvian idle inhibition server (org.freedesktop.ScreenSaver)
+After=janus.service
+Requires=janus.service
+# Phase 2 spec integration
+BusName=org.freedesktop.ScreenSaver
+
+[Service]
+Type=dbus
+ExecStart=/system/servers/janus_launch idle_inhibit_server
+StandardOutput=append:/var/log/idle_inhibit_server.log
+StandardError=append:/var/log/idle_inhibit_server.log
+Restart=no
+
+[Install]
+WantedBy=graphical.target

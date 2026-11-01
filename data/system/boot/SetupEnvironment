@@ -1,6 +1,18 @@
 # Copyright 2019-2026, The Vitruvian Project. All rights reserved.
 # Distributed under the terms of the MIT License.
 
+# XDG Base Directory Specification (basedir-spec v1.0)
+# https://specifications.freedesktop.org/basedir-spec/
+export XDG_DATA_HOME="${XDG_DATA_HOME:-$HOME/.local/share}"
+export XDG_CONFIG_HOME="${XDG_CONFIG_HOME:-$HOME/.config}"
+export XDG_CACHE_HOME="${XDG_CACHE_HOME:-$HOME/.cache}"
+export XDG_CONFIG_DIRS="${XDG_CONFIG_DIRS:-/etc/xdg}"
+export XDG_DATA_DIRS="${XDG_DATA_DIRS:-/usr/share:/usr/local/share}"
+# XDG_RUNTIME_DIR is created by the session manager (vos-session-boot).
+# app_server creates its Wayland compatibility socket inside it.
+export XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"
+export WAYLAND_DISPLAY="${WAYLAND_DISPLAY:-wayland-0}"
+
 # HOME comes from PAM/login (from /etc/passwd) — do not override.
 export LC_CTYPE="en_US.UTF-8"
 

@@ -9,6 +9,8 @@
  *		Axel Dörfler, axeld@pinc-software.de
  *		Andrej Spielmann, <andrej.spielmann@seh.ox.ac.uk>
  *		Julian Harnath, <julian.harnath@rwth-aachen.de>
+ *
+ * Part of Koan, a VitruvianOS fork
  */
 #ifndef APP_SERVER_PROTOCOL_H
 #define APP_SERVER_PROTOCOL_H
@@ -179,6 +181,9 @@ enum {
 
 	AS_SCREEN_SET_BRIGHTNESS,
 	AS_SCREEN_GET_BRIGHTNESS,
+
+	AS_SCREEN_SET_SCALE,
+	AS_SCREEN_GET_SCALE,
 
 	// Misc stuff
 	AS_GET_ACCELERANT_PATH,
@@ -387,6 +392,12 @@ enum {
 	AS_SCREEN_BEGIN_CHANGE,
 	AS_SCREEN_CONFIRM_CHANGE,
 	AS_SCREEN_CANCEL_CHANGE,
+
+	// Wayland server control (Option A: Wayland server inside app_server)
+	AS_WAYLAND_ENABLE,
+	AS_WAYLAND_DISABLE,
+	AS_WAYLAND_IS_ENABLED,
+	AS_WAYLAND_GET_SOCKET,
 
 	AS_LAST_CODE
 };

@@ -9,6 +9,9 @@ find_package(PkgConfig REQUIRED)
 pkg_check_modules(LIBSEAT REQUIRED IMPORTED_TARGET libseat)
 pkg_check_modules(LIBEVDEV REQUIRED IMPORTED_TARGET libevdev)
 pkg_check_modules(GBM gbm)
+pkg_check_modules(WAYLAND_SERVER wayland-server>=1.16.0)
+pkg_check_modules(WAYLAND_CLIENT wayland-client)
+find_program(WAYLAND_SCANNER_EXECUTABLE wayland-scanner)
 
 if(GBM_FOUND)
 	add_definitions(-DHAVE_GBM)
@@ -176,6 +179,8 @@ Server(
 		stackandtile/Stacking.cpp
 		stackandtile/Tiling.cpp
 
+		wayland/WaylandServer.cpp
+
 	LIBS localestub shared agg icon linprog systemd ${FREETYPE_LIBRARY}
 		${UDEV_LIBRARIES} ${DRM_LIBRARIES} ${SEAT_LIBRARIES}
 		${LIBEVDEV_LIBRARIES} ${GBM_LIBRARIES} backlight
@@ -199,7 +204,46 @@ Server(
 	"./decorator"
 	"./drawing/Painter"
 	"./drawing/Painter/drawing_modes"
+	"./wayland"
 )
+
+if(WAYLAND_SERVER_FOUND AND WAYLAND_CLIENT_FOUND AND WAYLAND_SCANNER_EXECUTABLE)
+	# The Wayland server implements xdg-shell, whose protocol bindings are
+	# generated from the vendored specification at build time.
+	set(XDG_SHELL_XML
+		"${PROJECT_SOURCE_DIR}/vendor/wayland-protocols/stable/xdg-shell/xdg-shell.xml")
+	set(XDG_SHELL_HEADER
+		"${CMAKE_CURRENT_BINARY_DIR}/xdg-shell-server-protocol.h")
+	set(XDG_SHELL_CODE
+		"${CMAKE_CURRENT_BINARY_DIR}/xdg-shell-protocol.c")
+
+	add_custom_command(OUTPUT "${XDG_SHELL_HEADER}"
+		COMMAND "${WAYLAND_SCANNER_EXECUTABLE}" server-header
+			"${XDG_SHELL_XML}" "${XDG_SHELL_HEADER}"
+		DEPENDS "${XDG_SHELL_XML}" VERBATIM)
+	add_custom_command(OUTPUT "${XDG_SHELL_CODE}"
+		COMMAND "${WAYLAND_SCANNER_EXECUTABLE}" private-code
+			"${XDG_SHELL_XML}" "${XDG_SHELL_CODE}"
+		DEPENDS "${XDG_SHELL_XML}" VERBATIM)
+
+	set_source_files_properties("${XDG_SHELL_CODE}" PROPERTIES GENERATED TRUE)
+	set_source_files_properties(wayland/WaylandServer.cpp PROPERTIES
+		OBJECT_DEPENDS "${XDG_SHELL_HEADER}")
+	target_sources(app_server PRIVATE wayland/WaylandDataDeviceManager.cpp)
+	target_sources(app_server PRIVATE "${XDG_SHELL_CODE}")
+	target_include_directories(app_server PRIVATE "${CMAKE_CURRENT_BINARY_DIR}")
+
+	target_compile_definitions(app_server PRIVATE VOS_WAYLAND=1)
+	target_link_libraries(app_server PRIVATE
+		${WAYLAND_SERVER_LIBRARIES}
+		${WAYLAND_CLIENT_LIBRARIES})
+	target_include_directories(app_server PRIVATE
+		${WAYLAND_SERVER_INCLUDE_DIRS}
+		${WAYLAND_CLIENT_INCLUDE_DIRS})
+	message(STATUS "Wayland server support enabled for app_server")
+else()
+	message(STATUS "Wayland server support disabled (wayland-server/client/scanner not found)")
+endif()
 
 UsePrivateHeaders(app_server app interface graphics graphics/common kernel support)
 

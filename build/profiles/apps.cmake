@@ -97,7 +97,9 @@ set(DESKBAR_APPLETS
 	#AutoRaise
 	BluetoothStatus
 	Clock
+	MPRISReplicant
 	NetworkStatus
+	NotificationReplicant
 	OverlayImage
 	PowerStatus
 	ProcessController

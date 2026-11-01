@@ -6,7 +6,8 @@
  * Authors:
  *		Stefano Ceccherini (burton666@libero.it)
  *		Axel Dörfler, axeld@pinc-software.de
- */
+
+ * Part of Koan, a VitruvianOS fork */
 
 
 /*!	BPrivateScreen is the class which does the real work for
@@ -825,6 +826,53 @@ BPrivateScreen::SetTemperature(float kelvin)
 	link.StartMessage(AS_SCREEN_SET_TEMPERATURE);
 	link.Attach<int32>(ID());
 	link.Attach<float>(kelvin);
+
+	status_t status = B_ERROR;
+	link.FlushWithReply(status);
+
+	return status;
+}
+
+
+status_t
+BPrivateScreen::GetScale(float* scale)
+{
+	if (scale == NULL)
+		return B_BAD_VALUE;
+
+	BPrivate::AppServerLink link;
+	link.StartMessage(AS_SCREEN_GET_SCALE);
+	link.Attach<int32>(ID());
+
+	status_t status;
+	if (link.FlushWithReply(status) == B_OK && status == B_OK)
+		link.Read<float>(scale);
+
+	return status;
+}
+
+
+status_t
+BPrivateScreen::SetScale(float scale)
+{
+	BPrivate::AppServerLink link;
+	link.StartMessage(AS_SCREEN_SET_SCALE);
+	link.Attach<int32>(ID());
+	link.Attach<float>(scale);
+
+	status_t status = B_ERROR;
+	link.FlushWithReply(status);
+
+	return status;
+}
+
+
+status_t
+BPrivateScreen::SetWaylandEnabled(bool enabled)
+{
+	BPrivate::AppServerLink link;
+	link.StartMessage(enabled ? AS_WAYLAND_ENABLE : AS_WAYLAND_DISABLE);
+	link.Attach<int32>(ID());
 
 	status_t status = B_ERROR;
 	link.FlushWithReply(status);

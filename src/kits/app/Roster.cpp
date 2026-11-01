@@ -42,8 +42,11 @@
 #include <locks.h>
 
 #include <AppMisc.h>
+#include <DesktopEntry.h>
+#include <DesktopEntryLauncher.h>
 #include <DesktopLink.h>
 #include <LaunchRoster.h>
+#include <MimeAppsParser.h>
 #include <MessengerPrivate.h>
 #include <PortLink.h>
 #include <RosterPrivate.h>
@@ -2035,8 +2038,39 @@ BRoster::_LaunchApp(const char* mimeType, const entry_ref* ref,
 		DBG(OUT("  find app: %s (%" B_PRIx32 ") %s \n", strerror(error), error,
 			signature));
 
-		if (error != B_OK)
+		if (error != B_OK) {
+			MimeAppsParser mimeApps;
+			if (mimeApps.LoadAssociations() == B_OK) {
+				BMimeType type;
+				status_t mimeStatus = B_OK;
+				if (mimeType != NULL)
+					mimeStatus = type.SetTo(mimeType);
+				else if (docRef != NULL)
+					mimeStatus = BMimeType::GuessMimeType(docRef, &type);
+
+				const char* desktopID = mimeStatus == B_OK
+					? mimeApps.DefaultAppForMime(type.Type()) : NULL;
+				BString desktopPath;
+				if (desktopID != NULL
+					&& mimeApps.FindDesktopEntry(desktopID,
+						&desktopPath) == B_OK) {
+					DesktopEntry desktopEntry(desktopPath.String());
+					if (desktopEntry.IsValid() && !desktopEntry.Hidden()) {
+						status_t launchStatus = LaunchDesktopEntry(desktopEntry,
+							docRef, docRef != NULL ? 1 : 0);
+						if (launchStatus == B_OK)
+							return B_OK;
+						fprintf(stderr, "BRoster::_LaunchApp(): XDG handler %s "
+							"failed: %s (%" B_PRId32 ")\n",
+							desktopID,
+							strerror(launchStatus < 0 ? -launchStatus
+								: launchStatus),
+							launchStatus);
+					}
+				}
+			}
 			return error;
+		}
 
 		// build an argument vector
 		error = argVector.Init(argc, args, &appRef,

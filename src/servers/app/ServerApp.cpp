@@ -14,7 +14,8 @@
  *		Philippe Saint-Pierre, stpere@gmail.com
  *		Wim van der Meer, <WPJvanderMeer@gmail.com>
  *		Joseph Groover <looncraz@looncraz.net>
- */
+
+ * Part of Koan, a VitruvianOS fork */
 
 
 /*!	\class ServerApp ServerApp.h
@@ -525,9 +526,13 @@ ServerApp::_DispatchMessage(int32 code, BPrivate::LinkReceiver& link)
 			// A fresh input_server otherwise only learns the screen
 			// bounds and panel orientation on the next mode change.
 			if (stream != NULL) {
-				stream->UpdateScreenBounds(fDesktop->VirtualScreen().Frame(),
+				Screen* primaryScreen
+					= fDesktop->VirtualScreen().ScreenAt(0);
+				if (primaryScreen != NULL) {
+					stream->UpdateScreenBounds(primaryScreen->Frame(),
 					fDesktop->HWInterface()->PanelScanoutOrientation(),
 					fDesktop->HWInterface()->PanelReflection());
+				}
 			}
 
 			// TODO: this should be done using notifications (so that an
@@ -3480,6 +3485,35 @@ ServerApp::_DispatchMessage(int32 code, BPrivate::LinkReceiver& link)
 			break;
 		}
 
+		case AS_SCREEN_SET_SCALE:
+		{
+			STRACE(("ServerApp %s: AS_SCREEN_SET_SCALE\n", Signature()));
+			int32 id;
+			link.Read<int32>(&id);
+
+			float scale;
+			link.Read<float>(&scale);
+
+			status_t status = fDesktop->SetScreenScale(id, scale);
+			fLink.StartMessage(status);
+
+			fLink.Flush();
+			break;
+		}
+
+		case AS_SCREEN_GET_SCALE:
+		{
+			STRACE(("ServerApp %s: AS_SCREEN_GET_SCALE\n", Signature()));
+			int32 id;
+			link.Read<int32>(&id);
+
+			float scale = fDesktop->ScreenScale(id);
+			fLink.StartMessage(B_OK);
+			fLink.Attach<float>(scale);
+			fLink.Flush();
+			break;
+		}
+
 		case AS_SCREEN_SET_TEMPERATURE:
 		{
 			STRACE(("ServerApp %s: AS_SCREEN_SET_TEMPERATURE\n", Signature()));
@@ -3523,6 +3557,46 @@ ServerApp::_DispatchMessage(int32 code, BPrivate::LinkReceiver& link)
 			fLink.StartMessage(result);
 			if (result == B_OK)
 				fLink.AttachString(name.String());
+			fLink.Flush();
+			break;
+		}
+
+		case AS_WAYLAND_ENABLE:
+		{
+			STRACE(("ServerApp %s: AS_WAYLAND_ENABLE\n", Signature()));
+			status_t status = fDesktop->SetWaylandEnabled(true);
+			fLink.StartMessage(status);
+			if (status == B_OK) {
+				fLink.AttachString(fDesktop->WaylandSocket().String());
+			}
+			fLink.Flush();
+			break;
+		}
+
+		case AS_WAYLAND_DISABLE:
+		{
+			STRACE(("ServerApp %s: AS_WAYLAND_DISABLE\n", Signature()));
+			status_t status = fDesktop->SetWaylandEnabled(false);
+			fLink.StartMessage(status);
+			fLink.Flush();
+			break;
+		}
+
+		case AS_WAYLAND_IS_ENABLED:
+		{
+			STRACE(("ServerApp %s: AS_WAYLAND_IS_ENABLED\n", Signature()));
+			fLink.StartMessage(B_OK);
+			fLink.Attach(fDesktop->WaylandEnabled() ? 1 : 0);
+			fLink.Flush();
+			break;
+		}
+
+		case AS_WAYLAND_GET_SOCKET:
+		{
+			STRACE(("ServerApp %s: AS_WAYLAND_GET_SOCKET\n", Signature()));
+			fLink.StartMessage(fDesktop->WaylandEnabled() ? B_OK : B_ERROR);
+			if (fDesktop->WaylandEnabled())
+				fLink.AttachString(fDesktop->WaylandSocket().String());
 			fLink.Flush();
 			break;
 		}

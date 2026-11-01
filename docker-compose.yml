@@ -1,0 +1,64 @@
+# docker-compose.yml for VitruvianOS (V\OS) builds
+#
+# Builds VitruvianOS inside a privileged Podman/Docker container.
+#
+#   ./podman-compose up --build                  # configure + compile + ISO
+#   VOS_IMAGE_TYPES=iso,raw ./podman-compose up --build
+#   VOS_IMAGE_TYPES=none ./podman-compose up --build   # packages only
+#   VOS_BUILD_TYPE=Release ./podman-compose up --build
+#   ./podman-compose run --rm build ./docker/build.sh  # rerun the pipeline
+#   ./podman-compose run --rm -w /vitruvian/generated.amd64 build ninja
+#   ./podman-compose run --rm -w /vitruvian/generated.amd64 build \
+#       ../bake build --image-type=raw
+#   ./podman-compose down
+#
+# The whole pipeline runs in a single service on purpose. Compose starts
+# services in parallel, so separate configure/ninja/bake services race each
+# other and ninja fails with "loading 'build.ninja': No such file or
+# directory". docker/build.sh runs the steps in order and exits when done,
+# which also makes `up` return instead of leaving a shell running.
+#
+# Rootless podman can build the amd64 ISO and RAW images: they are assembled
+# with mke2fs -d / mtools / xorriso, without loop devices. Board images
+# (raspberry, rockchip, allwinner, ...) need losetup and only work with
+# rootful podman (sudo ./podman-compose) or on the host.
+#
+# Images are bind-mounted read/write; artifacts land in
+# generated.<arch>/output/ in the source tree.
+
+services:
+  build:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+    container_name: vitruvian-build
+    # mount/chroot/unshare for debootstrap and the chroot build
+    privileged: true
+    # rootless podman supports host networking; avoids slirp overhead
+    network_mode: host
+    volumes:
+      - .:/vitruvian:z
+    working_dir: /vitruvian
+    # Inside a rootless container uid 0 maps to the invoking host user, so
+    # files created here stay owned by you.
+    user: "0:0"
+    # reap orphaned debootstrap/apt children and forward signals
+    init: true
+    stop_grace_period: 30s
+    command: ["/vitruvian/docker/build.sh"]
+    environment:
+      DEBIAN_MIRROR: ${DEBIAN_MIRROR:-http://deb.debian.org/debian/}
+      VOS_BASE_SUITE: ${VOS_BASE_SUITE:-trixie}
+      VOS_KERNEL_FLAVOUR: ${VOS_KERNEL_FLAVOUR:-rt-amd64}
+      VOS_UNSAFE_IO: ${VOS_UNSAFE_IO:-0}
+      VOS_REPO_URL: ${VOS_REPO_URL:-}
+      VOS_REPO_KEY: ${VOS_REPO_KEY:-}
+      VOS_REPO_SUITE: ${VOS_REPO_SUITE:-}
+      VOS_ARCH: ${VOS_ARCH:-amd64}
+      VOS_BUILD_TYPE: ${VOS_BUILD_TYPE:-Debug}
+      VOS_IMAGE_TYPES: ${VOS_IMAGE_TYPES:-iso}
+      VOS_BUILD_DIR: ${VOS_BUILD_DIR:-}
+      VOS_SSHDEBUG: ${VOS_SSHDEBUG:-0}
+      VOS_CCACHE: ${VOS_CCACHE:-auto}
+      VOS_TMPFS_BUILD: ${VOS_TMPFS_BUILD:-auto}
+      USER: ${USER:-vitruvian}

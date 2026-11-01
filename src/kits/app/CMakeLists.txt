@@ -7,6 +7,9 @@ target_sources(be PRIVATE
 	Clipboard.cpp
 	Cursor.cpp
 	DesktopLink.cpp
+	DesktopEntry.cpp
+	DesktopEntryLauncher.cpp
+	DesktopEntryScanner.cpp
 	DirectMessageTarget.cpp
 	Handler.cpp
 	InitTerminateLibBe.cpp
@@ -23,6 +26,7 @@ target_sources(be PRIVATE
 	MessageQueue.cpp
 	MessageRunner.cpp
 	MessageUtils.cpp
+	MimeAppsParser.cpp
 	Messenger.cpp
 	Notification.cpp
 	PortLink.cpp

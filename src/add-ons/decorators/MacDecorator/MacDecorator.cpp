@@ -9,7 +9,7 @@
  */
 
 
-/*! Decorator resembling Mac OS 8 and 9 */
+/*! Decorator resembling Cuppertino 8 and 9 */
 
 
 #include "MacDecorator.h"

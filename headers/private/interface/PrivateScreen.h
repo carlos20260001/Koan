@@ -6,6 +6,8 @@
  * Authors:
  *		Stefano Ceccherini (burton666@libero.it)
  *		Axel Dörfler, axeld@pinc-software.de
+ *
+ * Part of Koan, a VitruvianOS fork
  */
 #ifndef _PRIVATE_SCREEN_H_
 #define _PRIVATE_SCREEN_H_
@@ -107,6 +109,13 @@ public:
 			// B_NOT_SUPPORTED when the output cannot do it.
 			status_t			GetTemperature(float*);
 			status_t			SetTemperature(float);
+
+			// Per-output fractional scaling factor (1.0 = no scaling).
+			status_t			GetScale(float*);
+			status_t			SetScale(float);
+
+			// Wayland server control (Option A).
+			status_t			SetWaylandEnabled(bool enabled);
 
 			// Kernel connector name, e.g. "HDMI-A-1" or "eDP-1".
 			status_t			GetConnectorName(BString& name);

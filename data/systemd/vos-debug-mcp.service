@@ -1,0 +1,29 @@
+[Unit]
+Description=Vitruvian SSH-debug MCP diagnostics
+ConditionKernelCommandLine=vitruvian.sshdebug
+Requires=vos-sshdebug.service
+After=network.target vos-sshdebug.service
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/python3 /usr/libexec/vos-debug-mcp
+Restart=on-failure
+RestartSec=2
+User=root
+Group=root
+NoNewPrivileges=yes
+CapabilityBoundingSet=
+ProtectSystem=strict
+ProtectHome=read-only
+PrivateTmp=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+RestrictSUIDSGID=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+SystemCallArchitectures=native
+
+[Install]
+WantedBy=multi-user.target

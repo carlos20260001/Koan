@@ -33,6 +33,8 @@ public:
 			int32				ChildrenCount();
 
 			void				AddInfo(NotificationView* view);
+			bool				RemoveNotification(const char* messageID,
+									int32 reason);
 			void				SetPreviewModeOn(bool enabled);
 
 			const BString&		Group() const;
@@ -42,6 +44,9 @@ public:
 			float				CloseButtonSize() const;
 
 private:
+			void				_NotifyClosed(NotificationView* view,
+									int32 reason);
+
 			BString				fLabel;
 			BMessenger			fMessenger;
 			infoview_t			fInfo;

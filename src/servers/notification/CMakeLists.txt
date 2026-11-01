@@ -7,7 +7,7 @@ Server(
 	NotificationWindow.cpp
 
 	INCLUDES 
-	LIBS translation notification localestub
+	LIBS translation notification localestub systemd
 	RDEF notification_server.rdef
 )
 

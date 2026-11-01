@@ -5,7 +5,8 @@
  * Authors:
  *		Stefano Ceccherini (burton666@libero.it)
  *		Axel Dörfler, axeld@pinc-software.de
- */
+
+ * Part of Koan, a VitruvianOS fork */
 
 
 #include <Screen.h>
@@ -365,6 +366,33 @@ BScreen::SetTemperature(float kelvin)
 {
 	if (fScreen != NULL)
 		return fScreen->SetTemperature(kelvin);
+	return B_ERROR;
+}
+
+
+status_t
+BScreen::GetScale(float* scale)
+{
+	if (fScreen != NULL)
+		return fScreen->GetScale(scale);
+	return B_ERROR;
+}
+
+
+status_t
+BScreen::SetScale(float scale)
+{
+	if (fScreen != NULL)
+		return fScreen->SetScale(scale);
+	return B_ERROR;
+}
+
+
+status_t
+BScreen::SetWaylandEnabled(bool enabled)
+{
+	if (fScreen != NULL)
+		return fScreen->SetWaylandEnabled(enabled);
 	return B_ERROR;
 }
 

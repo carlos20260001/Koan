@@ -116,6 +116,8 @@ ImageIncludeFile("data/pam.d/vitruvian-greeter" "/etc/pam.d")
 install(FILES data/pam.d/vitruvian-auth DESTINATION /usr/share/vos/pam.d/ COMPONENT data)
 
 install(FILES ${SYSTEMD_SERVICES} DESTINATION /etc/systemd/system/ COMPONENT data)
+install(FILES data/dbus-1/services/org.freedesktop.Notifications.service
+  DESTINATION /usr/share/dbus-1/services/ COMPONENT data)
 
 # Inert unless vitruvian.safemode is on the kernel cmdline.
 install(FILES data/systemd/vos-safemode-logging.service DESTINATION /etc/systemd/system/ COMPONENT data)

@@ -13,6 +13,7 @@
 
 
 class MainWin;
+class MprisService;
 
 
 class MediaPlayerApp : public BApplication {
@@ -27,6 +28,7 @@ public:
 
 private:
 			MainWin*			fMainWin;
+			MprisService*		fMprisService;
 };
 
 

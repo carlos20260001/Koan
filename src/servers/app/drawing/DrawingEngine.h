@@ -49,6 +49,7 @@ public:
 			bool			CopyToFrontEnabled() const
 								{ return fCopyToFront; }
 	virtual	void			CopyToFront(/*const*/ BRegion& region);
+			status_t		SetScale(float scale);
 
 	// locking
 			bool			LockParallelAccess();

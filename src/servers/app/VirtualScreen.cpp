@@ -4,14 +4,17 @@
  *
  * Authors:
  *		Axel Dörfler, axeld@pinc-software.de
- */
+
+ * Part of Koan, a VitruvianOS fork */
 
 
 #include "VirtualScreen.h"
 
 #include "HWInterface.h"
 #include "Desktop.h"
+#include "ScreenScaleTransform.h"
 
+#include <math.h>
 #include <new>
 
 
@@ -57,6 +60,8 @@ VirtualScreen::SetConfiguration(Desktop& desktop, const ScreenConfigurations& co
 
 	typedef std::map<Screen*, display_mode> ScreenModeMap;
 	ScreenModeMap previousModes;
+	typedef std::map<Screen*, float> ScreenScaleMap;
+	ScreenScaleMap previousScales;
 	bool previousModesFailed = false;
 
 	if (_changedScreens != NULL) {
@@ -70,6 +75,8 @@ VirtualScreen::SetConfiguration(Desktop& desktop, const ScreenConfigurations& co
 				screen->GetMode(mode);
 
 				previousModes.insert(std::make_pair(screen, mode));
+				previousScales.insert(std::make_pair(screen,
+					screen->Scale()));
 			}
 		} catch (...) {
 			previousModesFailed = true;
@@ -100,6 +107,12 @@ VirtualScreen::SetConfiguration(Desktop& desktop, const ScreenConfigurations& co
 			ScreenModeMap::const_iterator found = previousModes.find(screen);
 			if (found != previousModes.end()
 				&& memcmp(&mode, &found->second, sizeof(display_mode)))
+				*_changedScreens |= 1 << i;
+
+			ScreenScaleMap::const_iterator oldScale
+				= previousScales.find(screen);
+			if (oldScale != previousScales.end()
+				&& screen->Scale() != oldScale->second)
 				*_changedScreens |= 1 << i;
 		}
 	}
@@ -148,7 +161,18 @@ VirtualScreen::AddScreen(Screen* screen, const ScreenConfigurations& configurati
 
 	monitor_info info;
 	bool hasInfo = screen->GetMonitorInfo(info) == B_OK;
+	screen_configuration* configuration = configurations.BestFit(
+		screen->ID(), hasInfo ? &info : NULL);
+	float scale = configuration != NULL ? configuration->scale : 1.0f;
+	status = screen->SetScale(scale);
+	if (status != B_OK) {
+		delete item;
+		return status;
+	}
+	scale = screen->Scale();
+
 	currentConfigurations.Set(screen->ID(), hasInfo ? &info : NULL, screen->Frame(), mode);
+	currentConfigurations.SetScale(screen->ID(), scale);
 
 	// TODO: this works only for single screen configurations
 	fDrawingEngine = screen->GetDrawingEngine();
@@ -173,22 +197,19 @@ VirtualScreen::RemoveScreen(Screen* screen)
 void
 VirtualScreen::UpdateFrame()
 {
-	int32 virtualWidth = 0, virtualHeight = 0;
+	float virtualWidth = 0.0f;
+	float virtualHeight = 0.0f;
 
 	for (int32 i = 0; i < fScreenList.CountItems(); i++) {
-		Screen* screen = fScreenList.ItemAt(i)->screen;
-
-		uint16 width, height;
-		uint32 colorSpace;
-		float frequency;
-		screen->GetMode(width, height, colorSpace, frequency);
+		BRect frame = ScreenLogicalFrameAt(i);
 
 		// TODO: compute virtual size depending on the actual screen position!
-		virtualWidth += width;
-		virtualHeight = max_c(virtualHeight, height);
+		virtualWidth += frame.Width() + 1.0f;
+		virtualHeight = max_c(virtualHeight, frame.Height() + 1.0f);
 	}
 
-	fFrame.Set(0, 0, virtualWidth - 1, virtualHeight - 1);
+	fFrame.Set(0, 0, ceilf(virtualWidth) - 1.0f,
+		ceilf(virtualHeight) - 1.0f);
 }
 
 
@@ -255,6 +276,44 @@ VirtualScreen::ScreenFrameAt(int32 index) const
 		return item->frame;
 
 	return BRect(0, 0, 0, 0);
+}
+
+
+BRect
+VirtualScreen::ScreenLogicalFrameAt(int32 index) const
+{
+	screen_item* item = fScreenList.ItemAt(index);
+	if (item != NULL) {
+		return ScreenScaleTransform::ToLogicalFrame(item->frame,
+			item->screen->Scale());
+	}
+
+	return BRect(0, 0, 0, 0);
+}
+
+
+float
+VirtualScreen::ScreenScaleAt(int32 index) const
+{
+	screen_item* item = fScreenList.ItemAt(index);
+	if (item != NULL)
+		return item->screen->Scale();
+
+	return 1.0f;
+}
+
+
+float
+VirtualScreen::ScreenScaleByID(int32 id) const
+{
+	for (int32 i = fScreenList.CountItems(); i-- > 0;) {
+		screen_item* item = fScreenList.ItemAt(i);
+
+		if (item->screen->ID() == id || id == B_MAIN_SCREEN_ID.id)
+			return item->screen->Scale();
+	}
+
+	return 1.0f;
 }
 
 

@@ -1,0 +1,15 @@
+/*
+ * Copyright 2026, Koan contributors
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+resource app_signature "application/x-vnd.Vitruvian-MPRISReplicant";
+
+resource app_version {
+	major  = 1, middle = 0, minor  = 0,
+	variety = B_APPV_ALPHA, internal = 0,
+	short_info = "MPRIS Replicant",
+	long_info  = "Deskbar control for MediaPlayer"
+};
+
+resource app_flags B_SINGLE_LAUNCH | B_BACKGROUND_APP;

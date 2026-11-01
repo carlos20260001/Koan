@@ -26,7 +26,10 @@
 #include <Rect.h>
 #include <Screen.h>
 #include <String.h>
+#include <SupportDefs.h>
 #include <TextView.h>
+#include <Url.h>
+#include <string.h>
 
 #include "Controller.h"
 #include "ControllerView.h"
@@ -53,6 +56,13 @@ static const float kMinWidth = 360;
 static const float kMinHeight = 280;
 static const float kAudioMinWidth = 250;
 static const float kDefaultScale = 1.0f;
+
+static void
+notify_mpris()
+{
+	BMessage message('mprs');
+	BMessenger(be_app).SendMessage(&message);
+}
 
 
 MainWin::MainWin(BRect frame)
@@ -83,7 +93,8 @@ MainWin::MainWin(BRect frame)
 	fControlY(0),
 	fVideoParNum(0),
 	fVideoParDen(0),
-	fVideoRotation(0)
+	fVideoRotation(0),
+	fMprisTrackId(1)
 {
 	fController = new Controller(BMessenger(this));
 	// A separate playlist here was never seen by the controller, so opened
@@ -825,6 +836,141 @@ MainWin::MessageReceived(BMessage* message)
 			_ShowPlaylist();
 			break;
 
+		case 'mprc':
+		{
+			BString action;
+			status_t status = B_BAD_VALUE;
+			if (fController != NULL
+				&& message->FindString("action", &action) == B_OK) {
+				if (action == "Play")
+					status = fController->Play();
+				else if (action == "Pause")
+					status = fController->Pause();
+				else if (action == "Stop")
+					status = fController->Stop();
+				else if (action == "PlayPause")
+					status = fController->TogglePlaying();
+				else if (action == "Next")
+					status = fController->SkipForward();
+				else if (action == "Previous")
+					status = fController->SkipBackward();
+				else if (action == "Raise")
+				{
+					Activate();
+					status = B_OK;
+				} else if (action == "Quit") {
+					be_app->PostMessage(B_QUIT_REQUESTED);
+					status = B_OK;
+				} else if (action == "SeekBy") {
+					int64 offset;
+					if (message->FindInt64("value", &offset) == B_OK)
+						status = fController->SeekBy(offset);
+				} else if (action == "SeekTo") {
+					const char* track = NULL;
+					int64 position;
+					if (message->FindString("track", &track) == B_OK
+						&& fPlaylist != NULL
+						&& (fPlaylist->CurrentItem() != NULL
+							|| fMprisUri.Length() > 0)
+						&& message->FindInt64("value", &position) == B_OK) {
+						char currentTrack[64];
+						snprintf(currentTrack, sizeof(currentTrack),
+							"/org/mpris/MediaPlayer2/Track/t%016llx",
+							(unsigned long long)fMprisTrackId);
+						if (strcmp(track, currentTrack) == 0)
+							status = fController->SeekTo(position);
+					}
+				} else if (action == "SetVolume") {
+					float volume;
+					if (message->FindFloat("value", &volume) == B_OK)
+						status = fController->SetVolume(volume);
+				} else if (action == "SetLoop") {
+					const char* loop = NULL;
+					if (message->FindString("loop", &loop) == B_OK) {
+						_SetLoop(strcmp(loop, "Playlist") == 0);
+						status = B_OK;
+					}
+				} else if (action == "OpenUri") {
+					const char* uri = NULL;
+					if (message->FindString("uri", &uri) == B_OK) {
+						BUrl url(uri, true);
+						if (url.IsValid() && url.Protocol() == "file") {
+							status = fController->OpenUrl(url, uri);
+							if (status == B_OK) {
+								fMprisUri = uri;
+								fMprisTrackId++;
+								if (fMprisTrackId == 0)
+									fMprisTrackId++;
+							}
+						}
+					}
+				}
+
+				_UpdateTransport();
+			}
+			BMessage reply(B_REPLY);
+			reply.AddInt32("result", status);
+			message->SendReply(&reply);
+			break;
+		}
+
+		case 'mprq':
+		{
+			BMessage reply(B_REPLY);
+			const char* playbackStatus = "Stopped";
+			if (fController != NULL) {
+				switch (fController->State()) {
+					case BMediaPlayer::B_PLAYER_PLAYING:
+						playbackStatus = "Playing";
+						break;
+					case BMediaPlayer::B_PLAYER_PAUSED:
+						playbackStatus = "Paused";
+						break;
+					default:
+						break;
+				}
+				reply.AddInt64("position", fController->Position());
+				reply.AddInt64("duration", fController->Duration());
+				reply.AddFloat("volume", fController->Volume());
+				reply.AddBool("can_seek", fController->Duration() > 0);
+			}
+			reply.AddString("status", playbackStatus);
+			PlaylistItem* current = fPlaylist != NULL
+				? fPlaylist->CurrentItem() : NULL;
+			bool hasExternalUri = fMprisUri.Length() > 0;
+			reply.AddBool("has_track", current != NULL || hasExternalUri);
+			int32 currentIndex = fPlaylist != NULL
+				? fPlaylist->CurrentItemIndex() : -1;
+			reply.AddBool("can_go_next", currentIndex >= 0);
+			reply.AddBool("can_go_previous", currentIndex >= 0);
+			reply.AddBool("loop", fController != NULL
+				&& fController->IsLooping());
+			if (hasExternalUri) {
+				char trackID[64];
+				snprintf(trackID, sizeof(trackID),
+					"/org/mpris/MediaPlayer2/Track/t%016llx",
+					(unsigned long long)fMprisTrackId);
+				reply.AddString("track_id", trackID);
+				BUrl url(fMprisUri.String(), true);
+				BString title(url.Path());
+				int32 separator = title.FindLast('/');
+				if (separator >= 0)
+					title.Remove(0, separator + 1);
+				reply.AddString("title", title);
+				reply.AddString("uri", fMprisUri);
+			} else if (current != NULL) {
+				char trackID[64];
+				snprintf(trackID, sizeof(trackID),
+					"/org/mpris/MediaPlayer2/Track/t%016llx",
+					(unsigned long long)fMprisTrackId);
+				reply.AddString("track_id", trackID);
+				reply.AddString("title", current->Name());
+				reply.AddString("uri", current->Url().UrlString());
+			}
+			message->SendReply(&reply);
+			break;
+		}
+
 		case MSG_PLAYLIST_CLEAR:
 			if (fPlaylist != NULL) {
 				fPlaylist->Clear();
@@ -835,8 +981,12 @@ MainWin::MessageReceived(BMessage* message)
 
 		case MSG_PLAYLIST_ITEMS_CHANGED:
 		case MSG_PLAYLIST_CURRENT_CHANGED:
+			fMprisTrackId++;
+			if (fMprisTrackId == 0)
+				fMprisTrackId++;
 			_UpdateTransport();
 			_UpdateLocation();
+			notify_mpris();
 			break;
 
 		case MSG_CONTROLLER_POSITION:
@@ -856,6 +1006,7 @@ MainWin::MessageReceived(BMessage* message)
 						? fController->AudioChannels() : 2);
 			_UpdateTransport();
 			_PollPosition();
+			notify_mpris();
 			break;
 
 		case MSG_CONTROLLER_EOS:
@@ -903,10 +1054,15 @@ MainWin::MessageReceived(BMessage* message)
 
 		case MSG_CONTROLLER_ITEM:
 		{
+			fMprisUri = "";
+			fMprisTrackId++;
+			if (fMprisTrackId == 0)
+				fMprisTrackId++;
 			const char* name = NULL;
 			message->FindString("name", &name);
 			_UpdateTitle(name);
 			_UpdateLocation();
+			notify_mpris();
 			break;
 		}
 

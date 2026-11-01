@@ -10,10 +10,12 @@
 #include <Message.h>
 #include <Rect.h>
 #include <String.h>
+#include <SupportDefs.h>
+#include <stdio.h>
 
 #include "MainWin.h"
 #include "MediaMessages.h"
-
+#include "MprisService.h"
 
 #undef B_TRANSLATION_CONTEXT
 #define B_TRANSLATION_CONTEXT "MediaPlayer"
@@ -25,7 +27,8 @@ const char* kMediaPlayerSignature = "application/x-vnd.vos-MediaPlayer";
 MediaPlayerApp::MediaPlayerApp()
 	:
 	BApplication(kMediaPlayerSignature),
-	fMainWin(NULL)
+	fMainWin(NULL),
+	fMprisService(NULL)
 {
 	B_TRANSLATE_MARK_SYSTEM_NAME_VOID("MediaPlayer");
 }
@@ -33,6 +36,7 @@ MediaPlayerApp::MediaPlayerApp()
 
 MediaPlayerApp::~MediaPlayerApp()
 {
+	delete fMprisService;
 }
 
 
@@ -41,8 +45,26 @@ MediaPlayerApp::ReadyToRun()
 {
 	if (fMainWin == NULL)
 		fMainWin = new MainWin(BRect(40, 40, 400, 340));
+	if (fMainWin == NULL) {
+		fprintf(stderr, "MediaPlayer: cannot create main window\n");
+		return;
+	}
 	if (fMainWin->IsHidden())
 		fMainWin->Show();
+	if (fMprisService == NULL) {
+		fMprisService = new MprisService(BMessenger(fMainWin));
+		if (fMprisService == NULL) {
+			fprintf(stderr, "MediaPlayer: cannot allocate MPRIS service\n");
+		} else {
+			status_t status = fMprisService->Start();
+			if (status != B_OK) {
+				fprintf(stderr, "MediaPlayer: cannot start MPRIS service (%"
+					B_PRId32 ")\n", status);
+				delete fMprisService;
+				fMprisService = NULL;
+			}
+		}
+	}
 }
 
 
@@ -88,6 +110,16 @@ MediaPlayerApp::MessageReceived(BMessage* message)
 		case MSG_PLAYLIST_SHOW:
 			ReadyToRun();
 			fMainWin->PostMessage(message);
+			break;
+
+		case 'mprc':
+			ReadyToRun();
+			fMainWin->PostMessage(message);
+			break;
+
+		case 'mprs':
+			if (fMprisService != NULL)
+				fMprisService->NotifyPropertiesChanged();
 			break;
 
 		default:

@@ -375,6 +375,7 @@ NotificationView::MouseDown(BPoint point)
 			// Remove the info view after a click
 			BMessage remove_msg(kRemoveView);
 			remove_msg.AddPointer("view", this);
+			remove_msg.AddInt32("reason", 2);
 
 			BMessenger msgr(Parent());
 			msgr.SendMessage(&remove_msg);

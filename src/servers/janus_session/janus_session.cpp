@@ -71,6 +71,7 @@ static const KnownServer kFanOutServers[] = {
 	{ "Tracker",             "application/x-vnd.Be-TRAK",               false, false },
 	{ "vitruvian-login",     "application/x-vnd.vos-login",       false, false },
 	{ "FirstBootPrompt",     "application/x-vnd.vos-FirstBootPrompt", false, false },
+	{ "idle_inhibit_server", "application/x-vnd.vos-idle_inhibit_server", false, false },
 	{ NULL, NULL, false, false }
 };
 
@@ -620,16 +621,6 @@ launch_fanout_server(const KnownServer* ks, port_id replyPort, int32 replyToken,
 			setenv("XDG_CACHE_HOME", xdgPath, 0);
 		}
 
-		char runtimeDir[64];
-		snprintf(runtimeDir, sizeof(runtimeDir), "/run/user/%u", (unsigned)sUserUid);
-		struct stat st;
-		if (stat(runtimeDir, &st) == 0 && S_ISDIR(st.st_mode))
-			setenv("XDG_RUNTIME_DIR", runtimeDir, 0);
-		else {
-			fprintf(stderr, "janus_session: %s not usable for %s, "
-				"XDG_RUNTIME_DIR left unset (%s)\n", runtimeDir, name, strerror(errno));
-		}
-
 		if (sPamEnv != NULL) {
 			for (char** e = sPamEnv; *e != NULL; ++e) {
 				char* eq = strchr(*e, '=');
@@ -641,13 +632,28 @@ launch_fanout_server(const KnownServer* ks, port_id replyPort, int32 replyToken,
 			}
 		}
 
-		// Session apps are forked here, not by the user manager: export the
-		// session bus address unless pam_systemd already set it.
-		if (runtimeDir[0] != '\0') {
+		char runtimeDir[64];
+		snprintf(runtimeDir, sizeof(runtimeDir), "/run/user/%u",
+			(unsigned)sUserUid);
+		struct stat runtimeStat;
+		if (lstat(runtimeDir, &runtimeStat) == 0
+			&& S_ISDIR(runtimeStat.st_mode)
+			&& runtimeStat.st_uid == sUserUid
+			&& (runtimeStat.st_mode & 0777) == 0700) {
+			setenv("XDG_RUNTIME_DIR", runtimeDir, 1);
+
+			// Session apps are forked here, not by the user manager: export
+			// the session bus address unless pam_systemd already set it.
 			char busAddr[128];
 			snprintf(busAddr, sizeof(busAddr), "unix:path=%s/bus",
 				runtimeDir);
 			setenv("DBUS_SESSION_BUS_ADDRESS", busAddr, 0);
+		} else {
+			fprintf(stderr, "janus_session: %s is not a user-owned mode-0700 "
+				"directory for %s; XDG runtime and session bus variables "
+				"left unset\n", runtimeDir, name);
+			unsetenv("XDG_RUNTIME_DIR");
+			unsetenv("DBUS_SESSION_BUS_ADDRESS");
 		}
 
 		setenv("HOME",    sUserHome, 1);

@@ -1,10 +1,11 @@
 [Unit]
+Description=Vitruvian notification_server (org.freedesktop.Notifications)
 ConditionPathExists=!/var/lib/vos/greeter-enabled
-# Skipped in safe mode; minimal boot has no notification server.
 ConditionKernelCommandLine=!vitruvian.safemode
-Description=Vitruvian notification_server
 After=janus.service app_server.service
 Requires=janus.service app_server.service
+# Register on session bus per notification-spec v1.3
+BusName=org.freedesktop.Notifications
 
 [Service]
 Type=forking

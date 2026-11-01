@@ -50,6 +50,8 @@ All rights reserved.
 #include <ControlLook.h>
 #include <Debug.h>
 #include <Directory.h>
+#include <DesktopEntry.h>
+#include <DesktopEntryLauncher.h>
 #include <Dragger.h>
 #include <File.h>
 #include <LaunchDaemonDefs.h>
@@ -775,6 +777,21 @@ TBarApp::MessageReceived(BMessage* message)
 		case kShowSplash:
 			run_be_about();
 			break;
+
+		case kLaunchDesktopEntry:
+		{
+			const char* path = NULL;
+			status_t status = message->FindString("path", &path);
+			if (status == B_OK) {
+				DesktopEntry entry(path);
+				status = LaunchDesktopEntry(entry);
+			}
+			if (status != B_OK) {
+				fprintf(stderr, "Deskbar: desktop-entry launch failed (%"
+					B_PRId32 ")\n", status);
+			}
+			break;
+		}
 
 		case B_LOCALE_CHANGED:
 		{

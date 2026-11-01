@@ -1,6 +1,8 @@
 /*
  * Copyright 2007-2009, Haiku, Inc. All rights reserved.
  * Distributed under the terms of the MIT License.
+ *
+ * Part of Koan, a VitruvianOS fork
  */
 #ifndef _SCREEN_H
 #define _SCREEN_H
@@ -87,6 +89,13 @@ public:
 
 			status_t			GetTemperature(float* kelvin);
 			status_t			SetTemperature(float kelvin);
+
+			// Per-output fractional scaling factor (1.0 = no scaling).
+			status_t			GetScale(float* scale);
+			status_t			SetScale(float scale);
+
+			// Wayland server control (Option A).
+			status_t			SetWaylandEnabled(bool enabled);
 
 private:
 	// Forbidden and deprecated methods

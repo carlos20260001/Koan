@@ -317,6 +317,16 @@ AppServer::_CreateDesktop(uid_t userID, const char* targetScreen)
 				strerror(status));
 			return NULL;
 		}
+
+#ifdef VOS_WAYLAND
+		// The Wayland compatibility server is part of the default
+		// desktop. Failure is not fatal: native clients keep working.
+		status_t waylandStatus = desktop->SetWaylandEnabled(true);
+		if (waylandStatus != B_OK) {
+			syslog(LOG_WARNING, "Wayland server could not be started: %s\n",
+				strerror(waylandStatus));
+		}
+#endif
 	} catch (...) {
 		// there is obviously no memory left
 		return NULL;

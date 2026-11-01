@@ -19,6 +19,8 @@
 #include <GroupLayout.h>
 #include <GroupView.h>
 
+#include <Notifications.h>
+
 #include "AppGroupView.h"
 
 #include "NotificationWindow.h"
@@ -145,6 +147,7 @@ AppGroupView::MouseDown(BPoint point)
 	if (BRect(fCloseRect).InsetBySelf(-5, -5).Contains(point)) {
 		int32 children = fInfo.size();
 		for (int32 i = 0; i < children; i++) {
+			_NotifyClosed(fInfo[i], 2);
 			fInfo[i]->RemoveSelf();
 			delete fInfo[i];
 		}
@@ -192,6 +195,9 @@ AppGroupView::MessageReceived(BMessage* msg)
 			if (vIt == fInfo.end())
 				break;
 
+			int32 reason = 1;
+			msg->FindInt32("reason", &reason);
+			_NotifyClosed(view, reason);
 			fInfo.erase(vIt);
 			view->RemoveSelf();
 			delete view;
@@ -255,6 +261,50 @@ AppGroupView::AddInfo(NotificationView* view)
 		Show();
 	if (view->IsHidden(view) && !fCollapsed)
 		view->Show();
+}
+
+
+bool
+AppGroupView::RemoveNotification(const char* messageID, int32 reason)
+{
+	if (messageID == NULL)
+		return false;
+
+	infoview_t::iterator it = fInfo.begin();
+	for (; it != fInfo.end(); ++it) {
+		if (messageID != (*it)->MessageID())
+			continue;
+
+		NotificationView* view = *it;
+		_NotifyClosed(view, reason);
+		fInfo.erase(it);
+		view->RemoveSelf();
+		delete view;
+
+		if (fInfo.empty()) {
+			Hide();
+			BMessage removeSelfMessage(kRemoveGroupView);
+			removeSelfMessage.AddPointer("view", this);
+			fMessenger.SendMessage(&removeSelfMessage);
+		}
+		return true;
+	}
+
+	return false;
+}
+
+
+void
+AppGroupView::_NotifyClosed(NotificationView* view, int32 reason)
+{
+	const char* messageID = view->MessageID();
+	if (messageID == NULL || messageID[0] == '\0')
+		return;
+
+	BMessage message(kNotificationClosed);
+	message.AddString("message_id", messageID);
+	message.AddInt32("reason", reason);
+	fMessenger.SendMessage(&message);
 }
 
 
