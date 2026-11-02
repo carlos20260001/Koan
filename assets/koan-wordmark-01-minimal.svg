@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 420 120" width="420" height="120">
+  <!-- Koan Wordmark 01 — Minimal geometric sans -->
+  <defs>
+    <style>
+      .koan { font-family: 'Segoe UI', 'Helvetica Neue', Arial, sans-serif; font-weight: 600; font-size: 72px; letter-spacing: -1.5px; }
+    </style>
+  </defs>
+  <rect width="100%" height="100%" fill="none"/>
+  <text x="30" y="82" class="koan" fill="#1a1a2e">Koan</text>
+  <!-- subtle underline accent -->
+  <rect x="32" y="92" width="48" height="3" rx="1.5" fill="#3d5a80"/>
+</svg>

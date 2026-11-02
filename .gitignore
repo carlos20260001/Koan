@@ -8,8 +8,8 @@ build-amd64/
 buildtools/
 compile_commands.json
 .cache/
-Agents.md
-agents/
+AGENTS.md
+Agents/
 code-conduct-ai.md
 clean-code-agent.md
 vendor/
