@@ -584,6 +584,7 @@ InputServer::MessageReceived(BMessage* message)
 				pos.x = fMousePos.x * frame.Width() / fFrame.Width();
 				pos.y = fMousePos.y * frame.Height() / fFrame.Height();
 			}
+			fMousePos = pos;
 			fFrame = frame;
 			fScreenOrientation = orientation;
 			fScreenReflection = reflection;
