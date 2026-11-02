@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="https://v-os.dev/img/vos-mark.svg" width="120" alt="Koan">
+  <img src="/assets/Koan-Logo.svg" width="200" height="200" alt="Koan">
 </p>
 <img src="https://numerio.goatcounter.com/count?p=/koan-readme" alt="" width="0" height="0">
 
