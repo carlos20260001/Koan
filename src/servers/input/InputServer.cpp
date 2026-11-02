@@ -224,7 +224,18 @@ InputServer::_InitKeyboardMouseStates()
 	// find the center of the screen
 	// fMousePos is then set to the center of the screen.
 
-	fFrame = fScreen.Frame();
+	// fFrame constrains event "where", which is physical space (see
+	// IS_SCREEN_BOUNDS_UPDATED). BScreen::Frame() is the logical frame,
+	// so take the physical one from the display mode instead; otherwise
+	// the cursor is confined to the logical (1/scale) region until the
+	// first bounds notice arrives.
+	display_mode mode;
+	if (fScreen.GetMode(&mode) == B_OK && mode.virtual_width > 0
+		&& mode.virtual_height > 0) {
+		fFrame = BRect(0, 0, mode.virtual_width - 1,
+			mode.virtual_height - 1);
+	} else
+		fFrame = fScreen.Frame();
 	if (fFrame == BRect(0, 0, 0, 0))
 		fFrame = BRect(0, 0, 799, 599);
 	fMousePos = BPoint((int32)((fFrame.right + 1) / 2),
@@ -573,7 +584,10 @@ InputServer::MessageReceived(BMessage* message)
 			if (message->FindInt32("screen_reflection", &reflection) != B_OK)
 				reflection = 0;
 
-			if (frame == fFrame && orientation == fScreenOrientation
+			// The first notice always has to be recorded: it is what
+			// marks the bounds valid for devices registered later.
+			if (fScreenBoundsValid && frame == fFrame
+				&& orientation == fScreenOrientation
 				&& reflection == fScreenReflection)
 				return;
 
