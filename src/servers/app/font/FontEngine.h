@@ -131,6 +131,13 @@ class FontEngine {
 								FontEngine(const FontEngine&);
 			const FontEngine&	operator=(const FontEngine&);
 
+			bool				_UnhintedAdvances() const
+									{ return (fDeviceScaled || !fHinting)
+										&& FT_IS_SCALABLE(fFace); }
+			double				_LinearAdvance(FT_Fixed advance) const
+									{ return advance / 65536.0
+										* fLinearScale; }
+
 			int					fLastError;
 			bool				fLibraryInitialized;
 			FT_Library			fLibrary;	// handle to library
@@ -139,6 +146,8 @@ class FontEngine {
 			glyph_rendering		fGlyphRendering;
 			bool				fHinting;
 			bool				fDeviceScaled;
+			double				fLinearScale;
+				// from linear advances to those of the exact size
 
 			// members needed to generate individual glyphs according
 			// to glyph rendering type

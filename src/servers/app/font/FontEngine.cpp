@@ -431,6 +431,7 @@ FontEngine::FontEngine()
 	fGlyphRendering(glyph_ren_native_gray8),
 	fHinting(true),
 	fDeviceScaled(false),
+	fLinearScale(1.0),
 
 	fDataSize(0),
 	fDataType(glyph_data_invalid),
@@ -517,9 +518,11 @@ FontEngine::PrepareGlyph(uint32 glyphIndex)
 
 	fAdvanceX = int26p6_to_dbl(fFace->glyph->advance.x);
 	fAdvanceY = int26p6_to_dbl(fFace->glyph->advance.y);
-	if (fDeviceScaled && FT_IS_SCALABLE(fFace)) {
-		// light hinting rounds the advance to whole pixels
-		fAdvanceX = fFace->glyph->linearHoriAdvance / 65536.0;
+	if (_UnhintedAdvances()) {
+		// Light hinting rounds the advance to whole pixels. Unhinted
+		// advances of the exact size are what a string measures at the
+		// logical size and what it takes up drawn at the scaled size.
+		fAdvanceX = _LinearAdvance(fFace->glyph->linearHoriAdvance);
 	}
 
 	fInsetLeft = int26p6_to_dbl(fFace->glyph->metrics.horiBearingX);
@@ -636,10 +639,18 @@ FontEngine::GetKerning(uint32 first, uint32 second, double* x, double* y)
 {
 	if (fFace && first && second && FT_HAS_KERNING(fFace)) {
 		FT_Vector delta;
-		FT_Get_Kerning(fFace, first, second, FT_KERNING_DEFAULT, &delta);
+		// Kerning fitted to whole pixels would be whole logical pixels in
+		// a measurement, and whole buffer pixels in the drawing.
+		bool unhinted = _UnhintedAdvances();
+		FT_Get_Kerning(fFace, first, second,
+			unhinted ? FT_KERNING_UNFITTED : FT_KERNING_DEFAULT, &delta);
 
 		double dx = int26p6_to_dbl(delta.x);
 		double dy = int26p6_to_dbl(delta.y);
+		if (unhinted) {
+			dx *= fLinearScale;
+			dy *= fLinearScale;
+		}
 
 		*x += dx;
 		*y += dy;
@@ -698,11 +709,24 @@ FontEngine::Init(const char* fontFilePath, unsigned faceIndex, double size,
 			break;
 	}
 
-	if (fDeviceScaled && FT_IS_SCALABLE(fFace)) {
-		// A logical size times the scale is rarely a whole number of
-		// pixels; rounding it would make the glyphs narrower or wider than
-		// their measured advances.
+	fLinearScale = 1.0;
+	if (FT_IS_SCALABLE(fFace)) {
+		// The exact size, fractions included. Whole pixel sizes cut 13.8
+		// down to 13: a program measured a 13.8 point string at 13 points
+		// on a scaled desktop, where the Painter draws it at 13.8 times the
+		// scale (a logical size times the scale is rarely a whole number of
+		// pixels anyway), and the string did not fit what it measured.
 		FT_Set_Char_Size(fFace, 0, (FT_F26Dot6)(size * 64.0 + 0.5), 72, 72);
+		// The size is set in 1/64 pixels, and fonts that ask for it get
+		// whole pixels per em: unhinted advances are corrected to the size
+		// asked for, so that the logical size and that times the scale
+		// give the same string widths.
+		if (fFace->size != NULL && fFace->size->metrics.x_scale > 0
+			&& fFace->units_per_EM > 0) {
+			fLinearScale = size * 64.0 * 65536.0
+				/ ((double)fFace->units_per_EM
+					* fFace->size->metrics.x_scale);
+		}
 	} else {
 		FT_Set_Pixel_Sizes(fFace,
 			unsigned(size * 64.0) >> 6,		// pixel_width
