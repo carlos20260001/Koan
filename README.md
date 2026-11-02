@@ -38,6 +38,28 @@ Images boot from ext4, and the live ISO uses SquashFS. XFS and Btrfs also work.
 
 Release images are built for amd64 and arm64, and the arm64 ones include the Raspberry Pi 4 and 5. There's a riscv64 port in the nightly builds. See the [boards site](https://boards.v-os.dev/) (VitruvianOS) for the full list , For Koan itself We only have an amd64 machine so I will only release amd64 in the meanwhile (Check github releases for Koan itself).
 
+### Screen Scaling (HiDPI)
+
+Koan supports fractional per-display scaling (1.0x, 1.25x, 1.5x, 1.75x) so the UI
+stays sharp on mixed-DPI and high-resolution screens. Scaling is applied
+consistently to window bounds, title bars, tabs, controls, fonts, bitmaps,
+clipping/damage regions, cursor coordinates, hit tests, resize borders, and
+drag-and-drop. Pointer coordinates are transformed in the inverse direction from
+rendering so input stays aligned with what you see.
+
+The deskbar and native applications scale automatically with the display. When
+moving a window between displays with different scale factors, its logical size
+stays stable.
+
+> **⚠️ Browser web content is not scaling-aware**
+> >
+> > Web content rendered by the browser (e.g. NetPlus) does not automatically
+> > respond to system screen scaling. Web pages render at CSS pixels and are not
+> > resized by the display scale factor. To make web content larger or smaller,
+> > use the browser's manual zoom (Ctrl++ / Ctrl− / Ctrl+0) instead.
+
+---
+
 ### Nexus
 
 Nexus is a set of Linux kernel modules that give Koan its BeOS-style primitives, ports and node monitoring among them. It's a submodule at `src/system/kernel/nexus` and ships as the `nexus-dkms` package. More in the [Nexus repository](https://github.com/VitruvianOS/Nexus) (VitruvianOS).
