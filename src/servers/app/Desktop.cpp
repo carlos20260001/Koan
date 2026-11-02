@@ -337,6 +337,7 @@ MouseFilter::Filter(BMessage* message, EventTarget** _target, int32* _viewToken,
 	// window hit-testing and positioning work correctly with fractional
 	// display scaling.
 	where = fDesktop->PhysicalToLogical(where);
+	message->ReplacePoint("where", where);
 
 	int32 buttons;
 	if (message->FindInt32("buttons", &buttons) != B_OK)
