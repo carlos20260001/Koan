@@ -9626,6 +9626,14 @@ BPoseView::ColumnRedraw(BRect updateRect)
 	// used for dynamic column resizing using an offscreen draw buffer
 	ASSERT(ViewMode() == kListMode);
 
+	if (!OffscreenBitmap::MatchesScreenDensity(Window())) {
+		// The buffer has the logical size: on a scaled screen the resized
+		// column's names came out blurred until the next redraw
+		// (haiku#58). Redraw the column the way Draw() does.
+		SynchronousUpdate(updateRect);
+		return;
+	}
+
 #if COLUMN_MODE_ON_DESKTOP
 	if (IsDesktopView()) {
 		BScreen screen(Window());
@@ -10080,8 +10088,13 @@ BPoseView::ResizeColumn(BColumn* column, float newSize, float* lastLineDrawPos,
 		}
 		ColumnRedraw(columnDrawRect);
 	}
-	if (invalidateRect.left < invalidateRect.right)
-		SynchronousUpdate(invalidateRect, true);
+	if (invalidateRect.left < invalidateRect.right) {
+		// Not clipped to that rectangle: on a scaled screen the CopyBits()
+		// above mostly moves by a fraction of a buffer pixel and leaves its
+		// destination to be redrawn in this same update, which a clipped
+		// Draw() left blank (haiku#58).
+		SynchronousUpdate(invalidateRect);
+	}
 
 	fStateNeedsSaving =  true;
 

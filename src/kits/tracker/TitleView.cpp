@@ -227,6 +227,12 @@ BTitleView::Draw(BRect /*updateRect*/, bool useOffscreen, bool updateOnly,
 	BRect bounds(Bounds());
 	BView* view;
 
+	// The column titles drawn into the logical size bitmap on a scaled
+	// screen stayed blurred after a click or a resize until something
+	// else redrew the view (haiku#58).
+	if (useOffscreen && !OffscreenBitmap::MatchesScreenDensity(Window()))
+		useOffscreen = false;
+
 	if (useOffscreen) {
 		ASSERT(sOffscreen);
 		BRect frame(bounds);

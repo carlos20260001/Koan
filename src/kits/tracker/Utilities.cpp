@@ -56,6 +56,7 @@ All rights reserved.
 #include <OS.h>
 #include <PopUpMenu.h>
 #include <Region.h>
+#include <Screen.h>
 #include <StorageDefs.h>
 #include <TextView.h>
 #include <Volume.h>
@@ -515,6 +516,18 @@ OffscreenBitmap::View() const
 {
 	ASSERT(fBitmap);
 	return fBitmap->ChildAt(0);
+}
+
+
+/*static*/ bool
+OffscreenBitmap::MatchesScreenDensity(BWindow* window)
+{
+	// On a desktop drawn at 150 or 175 percent (or 200) a view's drawing
+	// lands on the frame buffer's finer grid, with text rendered at that
+	// density; a bitmap of the view's logical size is enlarged (area
+	// sampled) when it is drawn, and its text is a blurred copy of what
+	// the window shows once it redraws itself.
+	return BScreen(window).DeviceScale() == 1.0f;
 }
 
 
