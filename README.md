@@ -40,8 +40,7 @@ Release images are built for amd64 and arm64, and the arm64 ones include the Ras
 
 ### Screen Scaling (HiDPI)
 
-Koan supports fractional per-display scaling (1.0x, 1.25x, 1.5x, 1.75x) so the UI
-stays sharp on mixed-DPI and high-resolution screens. Scaling is applied
+Koan supports fractional per-display scaling so the UI stays sharp on mixed-DPI and high-resolution screens. Scaling is applied
 consistently to window bounds, title bars, tabs, controls, fonts, bitmaps,
 clipping/damage regions, cursor coordinates, hit tests, resize borders, and
 drag-and-drop. Pointer coordinates are transformed in the inverse direction from
