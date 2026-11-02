@@ -57,6 +57,10 @@ stays stable.
 > > resized by the display scale factor. To make web content larger or smaller,
 > > use the browser's manual zoom (Ctrl++ / Ctrl− / Ctrl+0) instead.
 
+<p align="center">
+  <img src="/Netplus-on-Koan.png" alt="NetPlus running on Koan with fractional screen scaling and deskbar" width="800" />
+</p>
+
 ---
 
 ### Nexus
