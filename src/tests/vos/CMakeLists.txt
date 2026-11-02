@@ -20,13 +20,6 @@ add_executable(test_display_change_tracker
 target_include_directories(test_display_change_tracker PRIVATE
 	${CMAKE_SOURCE_DIR}/src/servers/app)
 
-# Screen-change relayout policy (pure helpers, no window server).
-Application(test_screen_relayout
-	SOURCES test_screen_relayout.cpp
-		${CMAKE_SOURCE_DIR}/src/servers/app/ScreenRelayout.cpp
-	INCLUDES ${CMAKE_SOURCE_DIR}/src/servers/app)
-UsePrivateHeaders(test_screen_relayout interface)
-
 # Fractional screen coordinate and raster-boundary transforms.
 Application(test_screen_scale_transform
 	SOURCES test_screen_scale_transform.cpp

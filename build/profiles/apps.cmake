@@ -23,6 +23,7 @@ set(SYSTEM_APPS
 	GLTeapot
 	Installer
 	LaunchBox
+	LocalSend
 	Magnify
 	MediaConverter
 	MediaPlayer
@@ -30,6 +31,7 @@ set(SYSTEM_APPS
 	NetPlus
 	PackageManager
 	People
+	Passwords
 	PrintOMatic
 	ResEdit
 	SerialConnect
@@ -39,6 +41,7 @@ set(SYSTEM_APPS
 	StyledEdit
 	Terminal
 	#TextSearch
+	WebMail
 	Workspaces
 )
 ImageInclude("/system/apps" ${SYSTEM_APPS})
@@ -97,10 +100,15 @@ set(DESKBAR_APPLETS
 	#AutoRaise
 	BluetoothStatus
 	Clock
+	LocationStatus
+	Messages
 	MPRISReplicant
+	NetworkStatus
 	NetworkStatus
 	NotificationReplicant
 	OverlayImage
+	Phone
+	PhoneSignal
 	PowerStatus
 	ProcessController
 	Pulse

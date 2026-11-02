@@ -40,6 +40,8 @@ public:
 	virtual	void				MessageReceived(BMessage* message);
 	virtual	void				DispatchMessage(BMessage* message, BHandler* handler);
 	virtual	void				FrameResized(float newWidth, float newHeight);
+	virtual	void				Zoom(BPoint origin, float width, float height);
+	virtual	void				ScreenChanged(BRect frame, color_space mode);
 	virtual	bool				QuitRequested();
 
 private:
@@ -64,7 +66,6 @@ private:
 			void				_ApplyFullScreenResult(
 									const FullScreenState::Result& result);
 			void				_SetCursorHidden(bool hidden);
-			void				_KeepAspectOnResize();
 			void				_PositionControls();
 			void				_ShowControls();
 			void				_HideControlsIdle();
@@ -113,6 +114,10 @@ private:
 			BString				fMprisUri;
 			BRect				fSavedFrame;
 			BRect				fLastFrame;
+			uint32				fSizedWidth;
+			uint32				fSizedHeight;
+			bool				fSizedForAudio;
+			BRect				fZoomFrame;
 };
 
 
