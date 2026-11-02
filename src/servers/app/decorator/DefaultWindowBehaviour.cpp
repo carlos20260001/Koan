@@ -1029,6 +1029,11 @@ DefaultWindowBehaviour::_RegionFor(const BMessage* message, int32& tab) const
 	if (message->FindPoint("where", &where) != B_OK)
 		return Decorator::REGION_NONE;
 
+	// The message's "where" is in physical pixels; convert to logical so
+	// decorator hit-testing (tabRect, closeRect, zoomRect) works at
+	// fractional display scaling.
+	where = fDesktop->PhysicalToLogical(where);
+
 	return decorator->RegionAt(where, tab);
 }
 
