@@ -333,6 +333,10 @@ protected:
 									BRegion* regionToShift, int32 xOffset,
 									int32 yOffset);
 
+			bool				_CopyContentsApproximately(
+									const BRegion& region, int32 xOffset,
+									int32 yOffset);
+
 			// different types of drawing
 			void				_TriggerContentRedraw(BRegion& dirty,
 									const BRegion& expose = BRegion());

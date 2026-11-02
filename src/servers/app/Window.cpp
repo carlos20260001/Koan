@@ -16,6 +16,7 @@
 
 #include "Window.h"
 
+#include <math.h>
 #include <new>
 #include <stdio.h>
 
@@ -469,6 +470,7 @@ Window::CopyContents(BRegion* region, int32 xOffset, int32 yOffset)
 		return;
 
 	BRegion* newDirty = fRegionPool.GetRegion(*region);
+	bool approximate = false;
 
 	// clip the region to the visible contents at the
 	// source and destination location (note that VisibleContentRegion()
@@ -508,6 +510,10 @@ Window::CopyContents(BRegion* region, int32 xOffset, int32 yOffset)
 				if (fDrawingEngine->LockParallelAccess()) {
 					bool copied = fDrawingEngine->CopyRegion(copyRegion,
 						xOffset, yOffset);
+					if (!copied) {
+						approximate = _CopyContentsApproximately(*copyRegion,
+							xOffset, yOffset);
+					}
 					fDrawingEngine->UnlockParallelAccess();
 					if (!copied)
 						copyRegion->MakeEmpty();
@@ -545,10 +551,54 @@ Window::CopyContents(BRegion* region, int32 xOffset, int32 yOffset)
 	// (with the right offset)
 	newDirty->OffsetBy(xOffset, yOffset);
 	newDirty->IntersectWith(&fVisibleContentRegion);
-	if (newDirty->CountRects() > 0)
-		ProcessDirtyRegion(*newDirty);
+	if (newDirty->CountRects() > 0) {
+		if (approximate) {
+			// The content is nearly in place: the program redraws it in an
+			// update, which puts the background and what it draws on the
+			// screen together. Exposed, the background was put on the
+			// screen at once and the program's drawing came later, so the
+			// whole view flashed at every such scroll step.
+			ProcessDirtyRegion(*newDirty, BRegion());
+		} else
+			ProcessDirtyRegion(*newDirty);
+	}
 
 	fRegionPool.Recycle(newDirty);
+}
+
+
+/*!	On a desktop drawn at 125, 150 or 175 percent most scroll steps (and
+	CopyBits() offsets) are a fraction of a buffer pixel, which a copy cannot
+	move: the destination has to be redrawn (haiku#57). Until the program
+	has done that, it shows the content moved by the nearest whole number
+	of buffer pixels, within a pixel of where it belongs, instead of where it
+	was before the scroll. One logical pixel off the edges of the region
+	keeps the copy inside its destination.
+
+	Called with the drawing engine locked; returns whether the region was
+	copied so.
+*/
+bool
+Window::_CopyContentsApproximately(const BRegion& region, int32 xOffset,
+	int32 yOffset)
+{
+	float scale = fDrawingEngine->RenderScale();
+	if (scale == 1)
+		return false;
+
+	BRegion source;
+	for (int32 i = 0; i < region.CountRects(); i++) {
+		clipping_rect rect = region.RectAtInt(i);
+		clipping_rect inner = { rect.left + 1, rect.top + 1, rect.right - 1,
+			rect.bottom - 1 };
+		if (inner.left <= inner.right && inner.top <= inner.bottom)
+			source.Include(inner);
+	}
+	if (source.CountRects() == 0)
+		return false;
+
+	return fDrawingEngine->CopyRegionByDeviceOffset(&source,
+		(int32)roundf(xOffset * scale), (int32)roundf(yOffset * scale));
 }
 
 
