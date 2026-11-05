@@ -1017,6 +1017,37 @@ Painter::StrokeRect(const BRect& r) const
 		}
 	}
 
+	// In the other drawing modes (a translucent B_OP_ALPHA outline, such
+	// as Tracker's selection rectangle) a one pixel outline on a scaled
+	// desktop covers the buffer pixels of its logical pixels, like an
+	// opaque one does. Stroked at the scale, an edge at 125, 150 or 175%
+	// lands between buffer pixels and partly covers pixels that belong to
+	// the logical pixel next to it, which a redraw of the edge's own
+	// pixels then leaves behind: a moving outline leaves a trail.
+	if (fPenSize == 1.0 && fIdentityViewTransform && fDeviceScale != 1
+		&& fMaskedUnpackedScanline == NULL
+		&& *fPatternHandler.GetR5Pattern() == B_SOLID_HIGH) {
+		BRect rect(floorf(min_c(a.x, b.x)), floorf(min_c(a.y, b.y)),
+			floorf(max_c(a.x, b.x)), floorf(max_c(a.y, b.y)));
+		rgb_color color = fPatternHandler.HighColor();
+		if (rect.Width() < 2 || rect.Height() < 2) {
+			// no inside: the edges would cover each other
+			FillDeviceRect(_DeviceRect(rect), color);
+		} else {
+			// four edges that do not overlap, so that a translucent or
+			// inverting mode applies once to every pixel
+			FillDeviceRect(_DeviceRect(BRect(rect.left, rect.top,
+				rect.right, rect.top)), color);
+			FillDeviceRect(_DeviceRect(BRect(rect.left, rect.bottom,
+				rect.right, rect.bottom)), color);
+			FillDeviceRect(_DeviceRect(BRect(rect.left, rect.top + 1,
+				rect.left, rect.bottom - 1)), color);
+			FillDeviceRect(_DeviceRect(BRect(rect.right, rect.top + 1,
+				rect.right, rect.bottom - 1)), color);
+		}
+		return _Clipped(_DeviceRect(rect));
+	}
+
 	if (fIdentityViewTransform && fmodf(fPenSize, 2.0) != 0.0) {
 		// shift coords to center of pixels
 		a.x += 0.5;
