@@ -38,6 +38,7 @@ target_sources(be PRIVATE
 	Server.cpp
 	ServerLink.cpp
 	ServerMemoryAllocator.cpp
+	TeamRef.cpp
 	TokenSpace.cpp
 	TypeConstants.cpp
 )

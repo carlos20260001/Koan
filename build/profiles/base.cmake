@@ -28,6 +28,7 @@ set(INPUT_SERVER_FILTERS
 	switch_workspace
 	minimize_all
 	screen_saver
+	xvitruvian
 #	shortcut_catcher
 )
 ImageInclude("/system/add-ons/input_server/filters" ${INPUT_SERVER_FILTERS})
@@ -71,6 +72,7 @@ set(SYSTEM_LIBS
 	localestub
 	midi
 	midi2
+	outputaddon
 )
 ImageInclude("/lib" ${SYSTEM_LIBS})
 

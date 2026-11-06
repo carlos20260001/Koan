@@ -15,6 +15,7 @@ set(SYSTEMD_SERVICES
   data/systemd/vos-fsck-failed.service
   data/systemd/vos-overclock.service
   data/systemd/vos-overclock-ok.service
+  data/systemd/vos-attrs-sync.service
 )
 
 install(FILES data/tmpfiles.d/vos.conf
@@ -25,6 +26,10 @@ install(PROGRAMS data/libexec/vos-firstboot-commit
 
 install(PROGRAMS data/libexec/vos-pdf-printer
   DESTINATION /usr/libexec/)
+
+install(PROGRAMS data/libexec/vos-attrs-sync
+  DESTINATION /usr/libexec/)
+install(DIRECTORY DESTINATION /usr/share/vos/attrs)
 
 install(PROGRAMS data/libexec/vos-install-helper
   DESTINATION /usr/libexec/)
@@ -128,6 +133,8 @@ install(FILES data/systemd/logind.conf.d/50-vos.conf
 
 install(FILES data/etc/security/pwquality.conf.d/50-vos.conf
   DESTINATION /etc/security/pwquality.conf.d/ COMPONENT data)
+install(FILES data/etc/security/limits.d/90-vos.conf
+  DESTINATION /etc/security/limits.d/ COMPONENT data)
 
 ImageIncludeFile("data/pam.d/vitruvian-session" "/etc/pam.d")
 ImageIncludeFile("data/pam.d/vitruvian-greeter" "/etc/pam.d")

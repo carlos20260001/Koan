@@ -23,7 +23,7 @@ class LocationStringView;
 class Playlist;
 class PlaylistWindow;
 class SettingsMessage;
-class VideoView;
+class PlayerVideoView;
 class BHandler;
 class BMenuBar;
 class BMenu;
@@ -83,7 +83,7 @@ private:
 private:
 			Controller*			fController;
 			Playlist*			fPlaylist;
-			VideoView*			fVideoView;
+			PlayerVideoView*			fVideoView;
 			ControllerView*		fControllerView;
 			LocationStringView*	fLocationView;
 			PlaylistWindow*		fPlaylistWindow;

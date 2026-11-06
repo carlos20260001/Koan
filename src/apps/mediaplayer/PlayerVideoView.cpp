@@ -3,7 +3,7 @@
  * Distributed under the terms of the MIT License.
  */
 
-#include "VideoView.h"
+#include "PlayerVideoView.h"
 
 #include <ControlLook.h>
 #include <Font.h>
@@ -16,8 +16,11 @@
 #include <media2/MediaDefs.h>
 #include <media2/MediaPlayer.h>
 
+#include <Bitmap.h>
+
 #include "MediaMessages.h"
 #include "VideoDisplay.h"
+#include "VideoFrameRing.h"
 
 
 // Frames lagging the presented audio sample by more than this are dropped.
@@ -27,7 +30,7 @@ static const bigtime_t kRevealCoalesce = 200000;
 static const float kRevealThreshold = 5.0f;
 
 
-VideoView::VideoView(BRect frame, const char* name, uint32 resizeMask)
+PlayerVideoView::PlayerVideoView(BRect frame, const char* name, uint32 resizeMask)
 	:
 	BView(frame, name, resizeMask,
 		B_WILL_DRAW | B_FRAME_EVENTS | B_FULL_UPDATE_ON_RESIZE | B_NAVIGABLE),
@@ -45,14 +48,14 @@ VideoView::VideoView(BRect frame, const char* name, uint32 resizeMask)
 }
 
 
-VideoView::~VideoView()
+PlayerVideoView::~PlayerVideoView()
 {
 	delete fBitmap;
 }
 
 
 void
-VideoView::SetVideoFormat(uint32 width, uint32 height, uint32 pixelWidthAspect,
+PlayerVideoView::SetVideoFormat(uint32 width, uint32 height, uint32 pixelWidthAspect,
 	uint32 pixelHeightAspect, uint32 rotation)
 {
 	fVideoWidth = width;
@@ -67,7 +70,7 @@ VideoView::SetVideoFormat(uint32 width, uint32 height, uint32 pixelWidthAspect,
 
 
 void
-VideoView::GetPreferredSize(float* width, float* height)
+PlayerVideoView::GetPreferredSize(float* width, float* height)
 {
 	if (!HasVideo()) {
 		if (width != NULL)
@@ -86,7 +89,7 @@ VideoView::GetPreferredSize(float* width, float* height)
 
 
 void
-VideoView::FrameResized(float width, float height)
+PlayerVideoView::FrameResized(float width, float height)
 {
 	BView::FrameResized(width, height);
 	Invalidate();
@@ -94,7 +97,7 @@ VideoView::FrameResized(float width, float height)
 
 
 void
-VideoView::SetFullscreenMode(bool fullscreen)
+PlayerVideoView::SetFullscreenMode(bool fullscreen)
 {
 	fFullscreen = fullscreen;
 	if (Window() != NULL) {
@@ -114,7 +117,7 @@ VideoView::SetFullscreenMode(bool fullscreen)
 
 
 void
-VideoView::MouseDown(BPoint point)
+PlayerVideoView::MouseDown(BPoint point)
 {
 	MakeFocus();
 	BMessage* message = Window()->CurrentMessage();
@@ -145,7 +148,7 @@ VideoView::MouseDown(BPoint point)
 
 
 void
-VideoView::MouseMoved(BPoint point, uint32 transit,
+PlayerVideoView::MouseMoved(BPoint point, uint32 transit,
 	const BMessage* dragMessage)
 {
 	if (fDragging && (Window()->CurrentMessage() != NULL)) {
@@ -181,7 +184,7 @@ VideoView::MouseMoved(BPoint point, uint32 transit,
 
 
 void
-VideoView::MouseUp(BPoint point)
+PlayerVideoView::MouseUp(BPoint point)
 {
 	fDragging = false;
 }
@@ -190,7 +193,7 @@ VideoView::MouseUp(BPoint point)
 // In full screen the window polls idle time to auto-hide the strip; the
 // reveal itself is driven from MouseMoved above.
 void
-VideoView::Pulse()
+PlayerVideoView::Pulse()
 {
 	if (fFullscreen)
 		Window()->PostMessage(MSG_FULLSCREEN_TICK);
@@ -198,47 +201,58 @@ VideoView::Pulse()
 
 
 void
-VideoView::MessageReceived(BMessage* message)
+PlayerVideoView::MessageReceived(BMessage* message)
 {
 	if (message->what != BMediaPlayer::B_PLAYER_VIDEO_FRAME) {
 		BView::MessageReceived(message);
 		return;
 	}
 
-	const void* data = NULL;
-	ssize_t size = 0;
+	void* bitmapPtr = NULL;
+	void* ringPtr = NULL;
 	int32 width = 0;
-	int32 height = 0;
-	int32 stride = 0;
+	int32 slot = -1;
+	int64 sequence = -1;
+	int64 generation = -1;
 	bigtime_t startTime = 0;
 	bigtime_t audioTime = -1;
-	if (message->FindData("frame", B_RAW_TYPE, &data, &size) != B_OK)
-		return;
-	message->FindInt32("width", &width);
-	message->FindInt32("height", &height);
-	message->FindInt32("stride", &stride);
-	message->FindInt64("start_time", &startTime);
-	message->FindInt64("audio_time", &audioTime);
-	if (width <= 0 || height <= 0 || stride < width * 4
-			|| size < (ssize_t)stride * height) {
+	if (message->FindPointer("bitmap", &bitmapPtr) != B_OK
+			|| message->FindPointer("ring", &ringPtr) != B_OK
+			|| message->FindInt32("slot", &slot) != B_OK
+			|| message->FindInt64("sequence", &sequence) != B_OK
+			|| message->FindInt64("generation", &generation) != B_OK) {
 		return;
 	}
+	message->FindInt32("width", &width);
+	message->FindInt64("start_time", &startTime);
+	message->FindInt64("audio_time", &audioTime);
+
+	BBitmap* source = static_cast<BBitmap*>(bitmapPtr);
+	VideoFrameRing* ring = static_cast<VideoFrameRing*>(ringPtr);
+	if (source == NULL || ring == NULL || width <= 0)
+		return;
+	if (generation != ring->Generation() || !ring->ClaimSlot(slot, sequence))
+		return;
 
 	// Without an audio track there is nothing to compare against, so
 	// present every frame in order.
 	if (audioTime >= 0 && startTime >= 0
 			&& (audioTime - startTime) > kFrameDropThreshold) {
+		ring->ReleaseSlot(slot);
 		return;
 	}
 
-	_PresentFrame(data, (uint32)width, (uint32)height, (uint32)stride);
+	_PresentFrame(source->Bits(), (uint32)width,
+		(uint32)source->Bounds().IntegerHeight() + 1,
+		(uint32)source->BytesPerRow());
+	ring->ReleaseSlot(slot);
 }
 
 
 // Rotation metadata is honoured here: the stored frame is rotated into
 // the bitmap so Draw only has to letterbox.
 void
-VideoView::_PresentFrame(const void* data, uint32 width, uint32 height,
+PlayerVideoView::_PresentFrame(const void* data, uint32 width, uint32 height,
 	uint32 stride)
 {
 	const bool swapAxes = fRotation == B_VIDEO_ROTATE_90
@@ -296,7 +310,7 @@ VideoView::_PresentFrame(const void* data, uint32 width, uint32 height,
 
 
 void
-VideoView::_ClearFrame()
+PlayerVideoView::_ClearFrame()
 {
 	delete fBitmap;
 	fBitmap = NULL;
@@ -304,7 +318,7 @@ VideoView::_ClearFrame()
 
 
 void
-VideoView::Draw(BRect updateRect)
+PlayerVideoView::Draw(BRect updateRect)
 {
 	BRect bounds = Bounds();
 	FillRect(bounds, B_SOLID_LOW);

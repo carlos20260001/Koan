@@ -82,10 +82,10 @@ Server(
 		IntPoint.cpp
 		IntRect.cpp
 		Layer.cpp
-		MultiLocker.cpp
 		MessageLooper.cpp
 		OffscreenServerWindow.cpp
 		OffscreenWindow.cpp
+		OutputAddonManager.cpp
 		PictureBoundingBoxPlayer.cpp
 		ProfileMessageSupport.cpp
 		RGBColor.cpp
@@ -102,9 +102,11 @@ Server(
 		ServerWindow.cpp
 		SystemPalette.cpp
 		View.cpp
+		VirtualOutput.cpp
 		VirtualScreen.cpp
 		Window.cpp
 		WindowList.cpp
+		../../kits/shared/PointerControlCore.cpp
 		Workspace.cpp
 		WorkspacesView.cpp
 
@@ -164,6 +166,7 @@ Server(
 
 		drawing/interface/linux/drm/DrmHWInterface.cpp
 		drawing/interface/linux/drm/DrmBuffer.cpp
+		drawing/interface/linux/drm/BufferAgeTracker.cpp
 		drawing/interface/linux/drm/modeset.c
 
 		drawing/interface/linux/fbdev/FBDevHWInterface.cpp
@@ -210,7 +213,7 @@ Server(
 		"./drawing/Painter/drawing_modes"
 )
 
-UsePrivateHeaders(app_server app interface graphics graphics/common kernel support)
+UsePrivateHeaders(app_server app interface graphics graphics/common input kernel support system)
 
 # Decorator add-ons subclass app_server classes and resolve them here.
 set_target_properties(app_server PROPERTIES ENABLE_EXPORTS ON)
