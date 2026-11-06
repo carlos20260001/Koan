@@ -32,26 +32,6 @@ Application(test_xdg_discovery
 	LIBS be)
 UsePrivateHeaders(test_xdg_discovery app)
 
-# Wayland event resources must only receive events for their owning client.
-find_package(PkgConfig REQUIRED)
-pkg_check_modules(WAYLAND_SERVER QUIET IMPORTED_TARGET wayland-server)
-pkg_check_modules(WAYLAND_CLIENT QUIET IMPORTED_TARGET wayland-client)
-if(WAYLAND_SERVER_FOUND)
-	Application(test_wayland_resource_owner
-		SOURCES test_wayland_resource_owner.cpp
-		LIBS PkgConfig::WAYLAND_SERVER
-		INCLUDES ${CMAKE_SOURCE_DIR}/src/servers/app/wayland)
-endif()
-if(WAYLAND_SERVER_FOUND AND WAYLAND_CLIENT_FOUND)
-	find_package(Threads REQUIRED)
-	Application(test_wayland_data_device_manager
-		SOURCES
-			test_wayland_data_device_manager.cpp
-			${CMAKE_SOURCE_DIR}/src/servers/app/wayland/WaylandDataDeviceManager.cpp
-		LIBS PkgConfig::WAYLAND_SERVER PkgConfig::WAYLAND_CLIENT Threads::Threads
-		INCLUDES ${CMAKE_SOURCE_DIR}/src/servers/app/wayland)
-endif()
-
 # Panel orientation rules (header only, no window server).
 Application(test_panel_orientation
 	SOURCES test_panel_orientation.cpp)

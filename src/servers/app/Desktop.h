@@ -59,11 +59,8 @@ class HWInterface;
 class ServerApp;
 class ServerWindow;
 class Window;
-class WaylandServer;
 class WorkspacesView;
 struct server_read_only_memory;
-
-#include "wayland/WaylandServer.h"
 
 namespace BPrivate {
 	class LinkSender;
@@ -168,40 +165,6 @@ public:
 			// using the containing screen's scale factor.
 			BPoint				PhysicalToLogical(const BPoint& physical) const;
 			BPoint				LogicalToPhysical(const BPoint& logical) const;
-
-			// Wayland server access
-			void				SetWaylandServer(class WaylandServer* server);
-			class WaylandServer* GetWaylandServer() const { return fWaylandServer; }
-
-			// Wayland input forwarding (called from MouseFilter/KeyboardFilter
-			// after processing, to forward events to connected Wayland clients).
-			void				NotifyWaylandPointerMotion(int32 x, int32 y,
-															 uint32 time);
-			void				NotifyWaylandPointerButton(uint32 button,
-															 uint32 state,
-															 uint32 time);
-			void				NotifyWaylandKeyboardKey(uint32 key,
-														   uint32 state,
-														   uint32 time,
-														   uint32 modifiers);
-
-			// Wayland server control (Option A: Wayland server inside app_server).
-			// When enabled, app_server runs a wl_display socket so Wayland
-			// clients can connect. Disabled by default.
-			status_t			SetWaylandEnabled(bool enabled);
-			bool				WaylandEnabled() const;
-			BString				WaylandSocket() const;
-
-			// Wayland window lifecycle (Option A).
-			// Creates a native Window for a Wayland xdg_toplevel surface.
-			Window*				CreateWaylandWindow(const BRect& frame,
-													const char* title,
-													ServerWindow** serverWindow = NULL);
-			void				DestroyWaylandWindow(Window* window);
-			void				SetWaylandWindowTitle(Window* window,
-													const char* title);
-			void				SetWaylandWindowMinimized(Window* window,
-													bool minimized);
 
 	// Unconfirmed display change: the deadline lives here so that the
 	// revert does not depend on the client surviving.
@@ -491,22 +454,11 @@ private:
 			BPoint				fLastMousePosition;
 			int32				fLastMouseButtons;
 
-			// Last Wayland pointer position (logical coordinates)
-			int32				fPointerX;
-			int32				fPointerY;
-
 			Window*				fFocus;
 			Window*				fFront;
 			Window*				fBack;
 
 			StackAndTile		fStackAndTile;
-
-			class WaylandServer*		fWaylandServer;
-			bool				fWaylandEnabled;
-			BString				fWaylandSocket;
-
-			// Wayland app server
-			ServerApp*			fWaylandApp;
 
 			BMessage			fPendingColors;
 

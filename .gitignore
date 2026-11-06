@@ -38,3 +38,5 @@ Thumbs.db
 PHASE1-STATUS.md
 PHASE2-STATUS.md
 XDG-SPECIFICATIONS.md
+###You should Download your own copy of the HaikuPorts repository and place it in the third-party-ports directory. The following line is to ignore the HaikuPorts repository if you have it in your project.
+third-party-ports/

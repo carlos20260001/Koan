@@ -3561,46 +3561,6 @@ ServerApp::_DispatchMessage(int32 code, BPrivate::LinkReceiver& link)
 			break;
 		}
 
-		case AS_WAYLAND_ENABLE:
-		{
-			STRACE(("ServerApp %s: AS_WAYLAND_ENABLE\n", Signature()));
-			status_t status = fDesktop->SetWaylandEnabled(true);
-			fLink.StartMessage(status);
-			if (status == B_OK) {
-				fLink.AttachString(fDesktop->WaylandSocket().String());
-			}
-			fLink.Flush();
-			break;
-		}
-
-		case AS_WAYLAND_DISABLE:
-		{
-			STRACE(("ServerApp %s: AS_WAYLAND_DISABLE\n", Signature()));
-			status_t status = fDesktop->SetWaylandEnabled(false);
-			fLink.StartMessage(status);
-			fLink.Flush();
-			break;
-		}
-
-		case AS_WAYLAND_IS_ENABLED:
-		{
-			STRACE(("ServerApp %s: AS_WAYLAND_IS_ENABLED\n", Signature()));
-			fLink.StartMessage(B_OK);
-			fLink.Attach(fDesktop->WaylandEnabled() ? 1 : 0);
-			fLink.Flush();
-			break;
-		}
-
-		case AS_WAYLAND_GET_SOCKET:
-		{
-			STRACE(("ServerApp %s: AS_WAYLAND_GET_SOCKET\n", Signature()));
-			fLink.StartMessage(fDesktop->WaylandEnabled() ? B_OK : B_ERROR);
-			if (fDesktop->WaylandEnabled())
-				fLink.AttachString(fDesktop->WaylandSocket().String());
-			fLink.Flush();
-			break;
-		}
-
 		case AS_READ_BITMAP:
 		{
 			STRACE(("ServerApp %s: AS_READ_BITMAP\n", Signature()));

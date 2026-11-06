@@ -868,20 +868,6 @@ BPrivateScreen::SetScale(float scale)
 
 
 status_t
-BPrivateScreen::SetWaylandEnabled(bool enabled)
-{
-	BPrivate::AppServerLink link;
-	link.StartMessage(enabled ? AS_WAYLAND_ENABLE : AS_WAYLAND_DISABLE);
-	link.Attach<int32>(ID());
-
-	status_t status = B_ERROR;
-	link.FlushWithReply(status);
-
-	return status;
-}
-
-
-status_t
 BPrivateScreen::GetConnectorName(BString& name)
 {
 	BPrivate::AppServerLink link;

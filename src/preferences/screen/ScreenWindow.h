@@ -127,10 +127,6 @@ private:
 			float			fOriginalScale;
 			bool			fScaleSupported;
 
-			// Wayland server toggle
-			BCheckBox*		fWaylandCheckBox;
-			bool			fWaylandEnabled;
-
 			BMenuField*		fTemperatureField;
 			BPopUpMenu*		fTemperatureMenu;
 			float			fTemperature;

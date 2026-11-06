@@ -202,7 +202,6 @@ init_pam_session()
 
 	pam_putenv(sPamHandle, "XDG_SEAT=seat0");
 	pam_putenv(sPamHandle, "XDG_VTNR=1");
-	pam_putenv(sPamHandle, "XDG_SESSION_TYPE=wayland");
 
 	r = pam_setcred(sPamHandle, PAM_ESTABLISH_CRED);
 	if (r != PAM_SUCCESS) {

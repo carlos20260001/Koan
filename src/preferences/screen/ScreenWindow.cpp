@@ -285,14 +285,6 @@ ScreenWindow::ScreenWindow(ScreenSettings* settings)
 		fScaleSupported = false;
 	}
 
-	// Wayland server toggle
-	fWaylandCheckBox = new BCheckBox("wayland",
-		B_TRANSLATE("Enable Wayland server"), NULL);
-	groupView->AddChild(fWaylandCheckBox);
-
-	fWaylandEnabled = false;
-	fWaylandCheckBox->SetValue(B_CONTROL_OFF);
-
 	// colour temperature presets; hidden when the output has no gamma LUT
 
 	fTemperature = 6500.0f;
@@ -1618,16 +1610,6 @@ ScreenWindow::MessageReceived(BMessage* message)
 			BScreen screen(this);
 			float scale = message->FindInt32("be:value") / 100.0f;
 			screen.SetScale(scale);
-			_CheckApplyEnabled();
-			break;
-		}
-
-		case CHECKBOX_WAYLAND_MSG:
-		{
-			bool enable = fWaylandCheckBox->Value() == B_CONTROL_ON;
-			BScreen screen(this);
-			screen.SetWaylandEnabled(enable);
-			fWaylandEnabled = enable;
 			_CheckApplyEnabled();
 			break;
 		}

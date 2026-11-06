@@ -388,15 +388,6 @@ BScreen::SetScale(float scale)
 }
 
 
-status_t
-BScreen::SetWaylandEnabled(bool enabled)
-{
-	if (fScreen != NULL)
-		return fScreen->SetWaylandEnabled(enabled);
-	return B_ERROR;
-}
-
-
 //	#pragma mark - Deprecated methods
 
 
