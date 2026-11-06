@@ -393,12 +393,6 @@ enum {
 	AS_SCREEN_CONFIRM_CHANGE,
 	AS_SCREEN_CANCEL_CHANGE,
 
-	// Wayland server control (Option A: Wayland server inside app_server)
-	AS_WAYLAND_ENABLE,
-	AS_WAYLAND_DISABLE,
-	AS_WAYLAND_IS_ENABLED,
-	AS_WAYLAND_GET_SOCKET,
-
 	AS_LAST_CODE
 };
 

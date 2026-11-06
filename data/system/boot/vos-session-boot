@@ -18,8 +18,6 @@ if [ "$runtime_owner" != "$(id -u)" ] || [ "$runtime_mode" != "700" ]; then
     exit 1
 fi
 
-# app_server publishes its Wayland compatibility socket under this name.
-export WAYLAND_DISPLAY="${WAYLAND_DISPLAY:-wayland-0}"
 
 set -e
 

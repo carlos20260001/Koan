@@ -114,8 +114,6 @@ public:
 			status_t			GetScale(float*);
 			status_t			SetScale(float);
 
-			// Wayland server control (Option A).
-			status_t			SetWaylandEnabled(bool enabled);
 
 			// Kernel connector name, e.g. "HDMI-A-1" or "eDP-1".
 			status_t			GetConnectorName(BString& name);

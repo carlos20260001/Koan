@@ -94,8 +94,6 @@ public:
 			status_t			GetScale(float* scale);
 			status_t			SetScale(float scale);
 
-			// Wayland server control (Option A).
-			status_t			SetWaylandEnabled(bool enabled);
 
 private:
 	// Forbidden and deprecated methods
