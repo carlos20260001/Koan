@@ -31,6 +31,10 @@ message(STATUS "Build config written to: ${CMAKE_BINARY_DIR}/buildconfig.conf")
 
 include(build/engine.cmake)
 
+# Optional: build the wlroots-koan Wayland compositor library and wire it
+# into the graphics system (display server / compositor backend).
+option(VOS_WITH_WLROOTS "Build wlroots-koan Wayland compositor library" OFF)
+
 add_subdirectory(src)
 
 if(NOT BUILDTOOLS_MODE STREQUAL "1")

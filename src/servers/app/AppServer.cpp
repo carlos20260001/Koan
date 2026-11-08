@@ -31,6 +31,17 @@
 #include "ScreenManager.h"
 #include "ServerProtocol.h"
 
+#ifdef VOS_WITH_WLROOTS
+#	include <new>
+#	include <MessengerPrivate.h>
+
+extern "C" {
+#	include <wlr/util/log.h>
+}
+
+#	include "WaylandWindow.h"
+#endif
+
 
 //#define DEBUG_SERVER
 #ifdef DEBUG_SERVER
@@ -85,6 +96,30 @@ AppServer::AppServer(status_t* status)
 	// Create the bitmap allocator. Object declared in BitmapManager.cpp
 	gBitmapManager = new BitmapManager();
 
+#ifdef VOS_WITH_WLROOTS
+	gWaylandWindowBridge = new(std::nothrow) WaylandWindowBridge();
+	if (gWaylandWindowBridge) {
+		status_t status = gWaylandWindowBridge->Init();
+		if (status == B_OK) {
+			/* The Wayland thread must wake this looper, because only
+			 * this looper's messages reach AppServer::MessageReceived().
+			 * A private port would never be drained. */
+			BMessenger messenger(this);
+			port_id port = BMessenger::Private(messenger).Port();
+			if (port >= B_OK) {
+				gAppServerPort = port;
+				gWaylandWindowBridge->SetWakePort(port);
+			} else
+				status = port;
+		}
+		if (status != B_OK) {
+			delete gWaylandWindowBridge;
+			gWaylandWindowBridge = NULL;
+			wlr_log(WLR_ERROR, "app_server: failed to initialize Wayland bridge");
+		}
+	}
+#endif
+
 #ifndef HAIKU_TARGET_PLATFORM_LIBBE_TEST
 #if 0
 	// This is not presently needed, as app_server is launched from the login session.
@@ -107,6 +142,16 @@ AppServer::AppServer(status_t* status)
 */
 AppServer::~AppServer()
 {
+#ifdef VOS_WITH_WLROOTS
+	/* Tear down the bridge before the bitmap manager: destroying native
+	 * Wayland windows releases ServerBitmaps owned by the manager. */
+	if (gWaylandWindowBridge) {
+		gWaylandWindowBridge->Shutdown();
+		delete gWaylandWindowBridge;
+		gWaylandWindowBridge = NULL;
+	}
+#endif
+
 	delete fLockRequest;
 	delete gBitmapManager;
 
@@ -281,6 +326,13 @@ AppServer::MessageReceived(BMessage* message)
 			break;
 		}
 
+#ifdef VOS_WITH_WLROOTS
+		case kMsgWaylandWake:
+			if (gWaylandWindowBridge)
+				gWaylandWindowBridge->WaylandWakeup();
+			break;
+#endif
+
 		default:
 			// We don't allow application scripting
 			STRACE(("AppServer received unexpected code %" B_PRId32 "\n",
@@ -293,6 +345,16 @@ AppServer::MessageReceived(BMessage* message)
 bool
 AppServer::QuitRequested()
 {
+#ifdef VOS_WITH_WLROOTS
+	/* Remove Wayland windows while their desktops are still alive, then
+	 * stop the dispatch thread and release the display. */
+	if (gWaylandWindowBridge) {
+		gWaylandWindowBridge->Shutdown();
+		delete gWaylandWindowBridge;
+		gWaylandWindowBridge = NULL;
+	}
+#endif
+
 	// Tear down desktops so the HWInterface destructor drops the DRM
 	// master — otherwise the next app_server hits EACCES on drmSetMaster.
 	while (fDesktops.CountItems() > 0) {
@@ -337,6 +399,11 @@ AppServer::_CreateDesktop(uid_t userID, const char* targetScreen)
 				strerror(status));
 			return NULL;
 		}
+
+#ifdef VOS_WITH_WLROOTS
+		if (gWaylandWindowBridge)
+			gWaylandWindowBridge->SetDesktop(desktop.Get());
+#endif
 
 	} catch (...) {
 		// there is obviously no memory left
@@ -398,8 +465,18 @@ main(int argc, char** argv)
 
 	status_t status;
 	AppServer* server = new AppServer(&status);
-	if (status == B_OK)
+	if (status == B_OK) {
+#ifdef VOS_WITH_WLROOTS
+		if (gWaylandWindowBridge) {
+			thread_id t = gWaylandWindowBridge->StartDispatchThread();
+			if (t < B_OK) {
+				wlr_log(WLR_ERROR, "app_server: failed to start Wayland "
+					"dispatch thread");
+			}
+		}
+#endif
 		server->Run();
+	}
 
 	return status == B_OK ? EXIT_SUCCESS : EXIT_FAILURE;
 }

@@ -1,0 +1,82 @@
+#ifndef WLR_CONFIG_H
+#define WLR_CONFIG_H
+
+/**
+ * Whether the DRM backend is compile-time enabled.
+ * Disabled on Koan: Koan provides its own native display stack.
+ */
+#cmakedefine01 WLR_HAS_DRM_BACKEND
+
+/**
+ * Whether the libinput backend is compile-time enabled.
+ * Disabled on Koan: Koan provides its own native input stack.
+ */
+#cmakedefine01 WLR_HAS_LIBINPUT_BACKEND
+
+/**
+ * Whether the X11 backend is compile-time enabled.
+ * Disabled on Koan.
+ */
+#cmakedefine01 WLR_HAS_X11_BACKEND
+
+/**
+ * Whether the GLES2 renderer is compile-time enabled.
+ * Disabled on Koan: the pixman renderer is used instead.
+ */
+#cmakedefine01 WLR_HAS_GLES2_RENDERER
+
+/**
+ * Whether the Vulkan renderer is compile-time enabled.
+ * Disabled on Koan.
+ */
+#cmakedefine01 WLR_HAS_VULKAN_RENDERER
+
+/**
+ * Whether the GBM allocator is compile-time enabled.
+ * Disabled on Koan.
+ */
+#cmakedefine01 WLR_HAS_GBM_ALLOCATOR
+
+/**
+ * Whether the udmabuf allocator is compile-time enabled.
+ * Disabled on Koan.
+ */
+#cmakedefine01 WLR_HAS_UDMABUF_ALLOCATOR
+
+/**
+ * Whether Xwayland support is compile-time enabled.
+ * Disabled on Koan.
+ */
+#cmakedefine01 WLR_HAS_XWAYLAND
+
+/**
+ * Whether session support is compile-time enabled.
+ * Disabled on Koan.
+ */
+#cmakedefine01 WLR_HAS_SESSION
+
+/**
+ * Whether traditional color management support is compile-time enabled.
+ * Disabled on Koan.
+ */
+#cmakedefine01 WLR_HAS_COLOR_MANAGEMENT
+
+/**
+ * Whether EGL is available.
+ * Disabled on Koan.
+ */
+#cmakedefine01 HAVE_EGL
+
+/**
+ * Whether eventfd is available.
+ * Available on Linux/Koan.
+ */
+#cmakedefine01 HAVE_EVENTFD
+
+/**
+ * Whether linux/sync_file.h is available.
+ * Disabled on Koan (no DRM syncobj).
+ */
+#cmakedefine01 HAVE_LINUX_SYNC_FILE
+
+#endif

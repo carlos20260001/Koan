@@ -10,6 +10,14 @@ pkg_check_modules(LIBSEAT REQUIRED IMPORTED_TARGET libseat)
 pkg_check_modules(LIBEVDEV REQUIRED IMPORTED_TARGET libevdev)
 pkg_check_modules(GBM gbm)
 
+# wlroots-koan optional support (VOS_WITH_WLROOTS).
+# The wlroots static library target is defined in
+# src/add-ons/wlroots-koan/CMakeLists.txt and processed before servers
+# (see src/CMakeLists.txt) so app_server can link against it directly.
+if(VOS_WITH_WLROOTS)
+	add_definitions(-DVOS_WITH_WLROOTS)
+endif()
+
 if(GBM_FOUND)
 	add_definitions(-DHAVE_GBM)
 endif()
@@ -55,6 +63,13 @@ if(HAVE_DRM_ADDFB2_MODS)
 	add_definitions(-DHAVE_DRM_ADDFB2_MODS)
 endif()
 
+
+# Wayland window bridge: only compiled when VOS_WITH_WLROOTS is ON.
+if(VOS_WITH_WLROOTS)
+	set(APP_SERVER_WAYLAND_SRCS WaylandWindow.cpp)
+else()
+	set(APP_SERVER_WAYLAND_SRCS "")
+endif()
 
 Server(
 	app_server
@@ -109,6 +124,7 @@ Server(
 		../../kits/shared/PointerControlCore.cpp
 		Workspace.cpp
 		WorkspacesView.cpp
+		${APP_SERVER_WAYLAND_SRCS}
 
 		decorator/Decorator.cpp
 		decorator/DecorManager.cpp
@@ -212,6 +228,20 @@ Server(
 		"./drawing/Painter"
 		"./drawing/Painter/drawing_modes"
 )
+
+if(VOS_WITH_WLROOTS)
+	target_link_libraries(app_server PRIVATE wlroots)
+	# app_server includes the Koan adapter/server headers from WaylandWindow.h.
+	# Do NOT add backend/koan here: its minimal xf86drm*.h stubs would shadow
+	# the real libdrm headers used by app_server's own DRM code. Those stubs
+	# are private to the wlroots target. Public wlroots include roots,
+	# generated protocol headers and enum forwarders are propagated by the
+	# wlroots target itself.
+	target_include_directories(app_server PRIVATE
+		"${PROJECT_SOURCE_DIR}/src/add-ons/wlroots-koan/server")
+	target_compile_definitions(app_server PRIVATE WLR_USE_UNSTABLE
+		WLR_PRIVATE=)
+endif()
 
 UsePrivateHeaders(app_server app interface graphics graphics/common input kernel support system)
 

@@ -10,8 +10,8 @@
  *
  * Threading:
  *  - Native Window/ServerWindow objects are only touched from app_server.
- *  - The Wayland dispatch thread pushes commands to the queue and writes to
- *    fWakePort to notify app_server.
+ *  - The Wayland dispatch thread pushes commands to the queue and writes a
+ *    wake-up message to app_server's looper port (fWakePort).
  *  - app_server drains the queue in response to the wake-up message.
  */
 
@@ -19,7 +19,9 @@
 
 #include <new>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
 
 #include <MessagePrivate.h>
 #include <PortLink.h>
@@ -33,10 +35,16 @@
 #include "ServerWindow.h"
 #include "Window.h"
 #include "View.h"
+#include "koan_server.h"
 
-#include <wlr/types/wlr_xdg_shell.h>
+/* wlroots and libwayland declarations are C linkage: wlroots public headers
+ * have no extern "C" guards of their own. */
+extern "C" {
 #include <wayland-server-core.h>
+#include <wlr/types/wlr_xdg_shell.h>
 #include <wlr/util/log.h>
+}
+
 #include <drm/drm_fourcc.h>
 
 WaylandWindowBridge *gWaylandWindowBridge = NULL;
@@ -48,7 +56,8 @@ WaylandWindowBridge::WaylandWindowBridge()
 	fDispatchThread(-1),
 	fRunning(false),
 	fDisplay(NULL),
-	fDesktop(NULL)
+	fDesktop(NULL),
+	fServerApp(NULL)
 {
 	wl_list_init(&fWindows);
 	memset(fSocketName, 0, sizeof(fSocketName));
@@ -80,35 +89,27 @@ WaylandWindowBridge::Init()
 	};
 	koan_adapter_set_window_callbacks(&cbs, NULL, this);
 
-	/* Create a port the Wayland dispatch thread can write to in order to
-	 * wake app_server's message loop. */
-	fWakePort = create_port(16, "wayland_bridge");
-	if (fWakePort < B_OK) {
-		wlr_log(WLR_ERROR, "Wayland bridge: failed to create wake port");
-		koan_queue_destroy(queue);
-		return fWakePort;
-	}
-
+	/* The wake port is app_server's own looper port; it is installed with
+	 * SetWakePort() from AppServer before the dispatch thread starts.
+	 * The bridge never creates or deletes it. */
 	return B_OK;
 }
 
 void
 WaylandWindowBridge::Shutdown()
 {
-	if (fDispatchThread >= B_OK) {
-		fRunning = false;
-		if (fWakePort >= B_OK) {
-			/* Wake the dispatch thread so it can exit. */
-			write_port(fWakePort, kMsgWaylandWake, NULL, 0);
-		}
-		wait_for_thread(fDispatchThread, NULL);
-		fDispatchThread = -1;
+	/* Terminate the Wayland event loop first. The dispatch thread blocks in
+	 * wl_display_run(), so it must be stopped with wl_display_terminate()
+	 * rather than the app_server wake port. */
+	StopDispatchThread();
+
+	if (fDisplay) {
+		koan_server_destroy(fDisplay);
+		fDisplay = NULL;
 	}
 
-	if (fWakePort >= B_OK) {
-		delete_port(fWakePort);
-		fWakePort = -1;
-	}
+	/* fWakePort belongs to app_server; just forget it. */
+	fWakePort = -1;
 
 	BAutolock locker(fLock);
 	struct wayland_window *ww, *tmp;
@@ -117,14 +118,26 @@ WaylandWindowBridge::Shutdown()
 		delete ww;
 	}
 	wl_list_init(&fWindows);
+
+	/* The shared client context outlives individual windows. Quit it
+	 * after every ServerWindow is gone so its window list is empty, then
+	 * wait for the message loop to exit before deleting it. */
+	if (fServerApp) {
+		fServerApp->Quit();
+		thread_id thread = fServerApp->Thread();
+		if (thread >= B_OK)
+			wait_for_thread(thread, NULL);
+		delete fServerApp;
+		fServerApp = NULL;
+	}
 }
 
 /* -------------------------------------------------------------------------- */
 /* Dispatch thread                                                            */
 /* -------------------------------------------------------------------------- */
 
-static int32
-wayland_dispatch_thread(void *arg)
+int32
+WaylandWindowBridge::s_dispatch_thread(void *arg)
 {
 	WaylandWindowBridge *bridge = (WaylandWindowBridge *)arg;
 
@@ -159,21 +172,32 @@ WaylandWindowBridge::StartDispatchThread()
 
 	if (!koan_server_start()) {
 		wlr_log(WLR_ERROR, "Wayland bridge: failed to start backend");
+		koan_server_destroy(fDisplay);
+		fDisplay = NULL;
+		fSocketName[0] = '\0';
 		return -1;
 	}
 
 	fRunning = true;
-	fDispatchThread = spawn_thread(wayland_dispatch_thread,
+	fDispatchThread = spawn_thread(s_dispatch_thread,
 		"wayland dispatch", B_DISPLAY_PRIORITY, this);
 	if (fDispatchThread < B_OK) {
+		wlr_log(WLR_ERROR, "Wayland bridge: failed to spawn dispatch thread");
 		fRunning = false;
+		koan_server_destroy(fDisplay);
+		fDisplay = NULL;
+		fSocketName[0] = '\0';
 		return fDispatchThread;
 	}
 
 	if (resume_thread(fDispatchThread) != B_OK) {
+		wlr_log(WLR_ERROR, "Wayland bridge: failed to resume dispatch thread");
 		kill_thread(fDispatchThread);
 		fDispatchThread = -1;
 		fRunning = false;
+		koan_server_destroy(fDisplay);
+		fDisplay = NULL;
+		fSocketName[0] = '\0';
 		return B_ERROR;
 	}
 
@@ -185,14 +209,10 @@ WaylandWindowBridge::StartDispatchThread()
 void
 WaylandWindowBridge::StopDispatchThread()
 {
-	if (!fRunning)
-		return;
-
-	/* Terminate the Wayland display. This causes wl_display_run() to
-	 * return and the dispatch thread to exit. */
-	if (fDisplay) {
+	/* Terminate the display even when the thread never started: fDisplay
+	 * may have been created before spawn_thread() failed. */
+	if (fDisplay)
 		wl_display_terminate(fDisplay);
-	}
 
 	if (fDispatchThread >= B_OK) {
 		wait_for_thread(fDispatchThread, NULL);
@@ -213,7 +233,8 @@ WaylandWindowBridge::DrainCommands()
 	if (!queue)
 		return;
 
-	int processed = koan_queue_drain(queue, s_queue_processor, this);
+	int processed = koan_queue_drain_direction(queue,
+		KOAN_QUEUE_TO_APP_SERVER, s_queue_processor, this);
 	if (processed > 0)
 		wlr_log(WLR_INFO, "Wayland bridge: drained %d commands", processed);
 }
@@ -221,17 +242,8 @@ WaylandWindowBridge::DrainCommands()
 void
 WaylandWindowBridge::WaylandWakeup()
 {
-	/* Drain all pending messages from the wake port, then drain commands. */
-	if (fWakePort < B_OK)
-		return;
-
-	while (true) {
-		int32 code;
-		ssize_t status = read_port(fWakePort, &code, NULL, 0);
-		if (status < B_OK)
-			break;
-	}
-
+	/* app_server's message loop already consumed the wake-up message
+	 * from its own port; all that is left is to process the commands. */
 	DrainCommands();
 }
 
@@ -251,11 +263,20 @@ WaylandWindowBridge::s_create_window(void *userdata, struct koan_queue *queue,
 	payload.create_window.toplevel = toplevel;
 	payload.create_window.width = width;
 	payload.create_window.height = height;
+	/* Copy the title while we are still on the Wayland thread. The
+	 * toplevel and its title may be destroyed before app_server drains
+	 * the command, so the receiver must not dereference it. */
+	payload.create_window.title = toplevel->title
+		? strdup(toplevel->title) : NULL;
 
 	/* Push the command without blocking. app_server processes it on its
 	 * thread and replies via KOAN_CMD_WINDOW_READY, which the Wayland
-	 * thread drains through koan_adapter_drain_commands(). */
-	if (!koan_queue_push(queue, KOAN_CMD_CREATE_WINDOW, &payload, NULL)) {
+	 * thread drains through koan_adapter_drain_commands(). The queue
+	 * deep-copies the title, so our copy is always ours to free. */
+	struct koan_command *queued = koan_queue_push(queue,
+		KOAN_CMD_CREATE_WINDOW, &payload, NULL);
+	free(payload.create_window.title);
+	if (!queued) {
 		wlr_log(WLR_ERROR, "Wayland bridge: failed to queue CREATE_WINDOW");
 		return;
 	}
@@ -403,49 +424,79 @@ WaylandWindowBridge::s_queue_processor(struct koan_command *cmd, void *userdata)
 }
 
 status_t
+WaylandWindowBridge::EnsureServerApp()
+{
+	if (fServerApp)
+		return B_OK;
+	if (!fDesktop)
+		return B_ERROR;
+
+	/* A ServerWindow needs a ServerApp to own it. One shared context is
+	 * enough for all Wayland windows; it is not registered in the
+	 * Desktop's client application list, so the bridge owns it and
+	 * quits/deletes it explicitly in Shutdown().
+	 *
+	 * The client ports are intentionally invalid: all Wayland traffic
+	 * goes through this bridge, not through the BWindow message
+	 * protocol. The client team is app_server itself so the ServerApp's
+	 * message port is owned by a live team. */
+	ServerApp *app = new(std::nothrow) ServerApp(fDesktop, -1, -1,
+		getpid(), -1, "application/x-vnd.Vos-WaylandClient");
+	if (!app)
+		return B_NO_MEMORY;
+
+	status_t status = app->Run();
+	if (status != B_OK) {
+		delete app;
+		return status;
+	}
+
+	fServerApp = app;
+	return B_OK;
+}
+
+status_t
 WaylandWindowBridge::create_native_window(wayland_window *ww,
-		int32_t width, int32_t height)
+		const char *title, int32_t width, int32_t height)
 {
 	if (!fDesktop)
 		return B_ERROR;
 
-	/* We need a ServerApp to create a ServerWindow. Create a dedicated
-	 * app_server client context for Wayland windows. */
-	ServerApp *app = new(std::nothrow) ServerApp(fDesktop, -1, -1,
-		B_SYSTEM_TEAM, -1, "application/x-vnd.Vos-WaylandClient");
-	if (!app)
-		return B_NO_MEMORY;
+	status_t status = EnsureServerApp();
+	if (status != B_OK)
+		return status;
 
 	ServerWindow *server_window = new(std::nothrow) ServerWindow(
-		ww->toplevel->title ? ww->toplevel->title : "Wayland Window",
-		app, -1, -1, -1);
-	if (!server_window) {
-		delete app;
+		title && title[0] ? title : "Wayland Window",
+		fServerApp, -1, -1, -1);
+	if (!server_window)
 		return B_NO_MEMORY;
-	}
 
 	BRect frame(0, 0, width - 1, height - 1);
-	status_t status = server_window->Init(frame, B_BORDERED_WINDOW_LOOK,
+	status = server_window->Init(frame, B_BORDERED_WINDOW_LOOK,
 		B_NORMAL_WINDOW_FEEL, B_NOT_RESIZABLE | B_NOT_MINIMIZABLE,
 		B_CURRENT_WORKSPACE);
 	if (status != B_OK) {
+		/* Init() may already have added the window to the app's list;
+		 * the destructor removes it again. */
 		delete server_window;
-		delete app;
 		return status;
 	}
 
 	::Window *window = server_window->Window();
 	if (!window) {
+		/* Quit() deletes the ServerWindow synchronously because its
+		 * message loop was never started, which also removes it from
+		 * the desktop. */
 		server_window->Quit();
-		delete app;
 		return B_ERROR;
 	}
 
-	fDesktop->AddWindow(window);
+	/* ServerWindow::Init() already added the window to the desktop.
+	 * Adding it a second time would corrupt the window list. */
 
 	ww->server_window = server_window;
 	ww->window = window;
-	ww->visible = true;
 
 	wlr_log(WLR_INFO, "Wayland bridge: created native window %dx%d", width,
 		height);
@@ -458,10 +509,9 @@ WaylandWindowBridge::destroy_native_window(wayland_window *ww)
 	if (!ww)
 		return;
 
-	if (fDesktop && ww->window) {
-		fDesktop->RemoveWindow(ww->window);
-	}
-
+	/* The ServerWindow owns the native Window and removes it from the
+	 * desktop in its destructor. Quit() deletes it synchronously since
+	 * its message loop was never started. */
 	if (ww->server_window) {
 		ww->server_window->Quit();
 		ww->server_window = NULL;
@@ -475,6 +525,7 @@ int
 WaylandWindowBridge::process_create_window(struct koan_command *cmd)
 {
 	struct wlr_xdg_toplevel *toplevel = cmd->payload.create_window.toplevel;
+	const char *title = cmd->payload.create_window.title;
 	int32_t width = cmd->payload.create_window.width;
 	int32_t height = cmd->payload.create_window.height;
 
@@ -496,7 +547,7 @@ WaylandWindowBridge::process_create_window(struct koan_command *cmd)
 	ww->window = NULL;
 	ww->visible = false;
 
-	status_t status = create_native_window(ww, width, height);
+	status_t status = create_native_window(ww, title, width, height);
 	if (status != B_OK) {
 		delete ww;
 		cmd->payload.create_window.window_out = NULL;
@@ -506,18 +557,22 @@ WaylandWindowBridge::process_create_window(struct koan_command *cmd)
 	wl_list_insert(&fWindows, &ww->link);
 	cmd->payload.create_window.window_out = ww;
 
+	/* CREATE_WINDOW is only queued once the toplevel is mapped, so the
+	 * native window starts visible. Re-maps are handled by the adapter's
+	 * SET_VISIBILITY command. */
+	if (fDesktop && ww->window && !ww->visible) {
+		fDesktop->ShowWindow(ww->window);
+		ww->visible = true;
+	}
+
 	/* Notify the Wayland thread that the native window handle is ready
-	 * by pushing KOAN_CMD_WINDOW_READY back onto the queue. The Wayland
-	 * thread's event loop will wake up and drain it. */
+	 * by pushing KOAN_CMD_WINDOW_READY back onto the queue. The push
+	 * wakes the Wayland event loop through the queue's wake pipe. */
 	union koan_cmd_payload ready_payload = {0};
 	ready_payload.window_ready.toplevel = toplevel;
 	ready_payload.window_ready.window = ww;
 	koan_queue_push(koan_adapter_queue(), KOAN_CMD_WINDOW_READY,
 		&ready_payload, NULL);
-
-	/* Notify app_server that a command is pending. */
-	if (fWakePort >= B_OK)
-		write_port(fWakePort, kMsgWaylandWake, NULL, 0);
 
 	return 0;
 }
@@ -562,8 +617,9 @@ WaylandWindowBridge::process_set_title(struct koan_command *cmd)
 		return 0;
 
 	fDesktop->SetWindowTitle(ww->window, title);
-	/* Do NOT free 'title' here: koan_queue_drain() calls free_payload()
-	 * which frees set_title.title after the processor returns. */
+	/* Do NOT free 'title' here: koan_queue_drain_direction() calls
+	 * free_payload() which frees set_title.title after the processor
+	 * returns. */
 	return 0;
 }
 
@@ -616,25 +672,36 @@ WaylandWindowBridge::process_set_buffer(struct koan_command *cmd)
 
 	color_space space = drm_format_to_colorspace(format);
 
-	ServerBitmap *bitmap = gBitmapManager->CreateBitmap(
+	/* CreateBitmap() returns an owned reference (count 1) and registers the
+	 * bitmap with the manager using a raw pointer. Adopt that reference so
+	 * both the manager registration and the reference are released on every
+	 * path below. */
+	BReference<ServerBitmap> bitmap(gBitmapManager->CreateBitmap(
 		NULL, *ww->server_window->Desktop()->HWInterface(),
-		BRect(0, 0, width - 1, height - 1), space, 0, stride);
-	if (!bitmap) {
+		BRect(0, 0, width - 1, height - 1), space, 0, stride), true);
+	if (!bitmap.IsSet()) {
 		return -1;
 	}
 
 	status_t status = bitmap->ImportBits(data, stride * height, stride,
 		space);
-	/* Do NOT free 'data' here: koan_queue_drain() calls free_payload()
-	 * which frees set_buffer.data after the processor returns. */
+	/* Do NOT free 'data' here: koan_queue_drain_direction() calls
+	 * free_payload() which frees set_buffer.data after the processor
+	 * returns. */
 
 	if (status != B_OK) {
-		delete bitmap;
+		/* Detach from the manager before the reference is dropped: it
+		 * holds a raw pointer and would otherwise keep a dangling entry. */
+		gBitmapManager->BitmapRemoved(bitmap);
 		return -1;
 	}
 
+	/* The view takes its own reference. The bitmap is not client-visible,
+	 * so drop the manager registration and our creation reference; the
+	 * view owns it until it is replaced or destroyed. */
 	top_view->SetViewBitmap(bitmap, IntRect(0, 0, width - 1, height - 1),
-		IntRect(0, 0, width - 1, height - 1), B_BITMAP_RESIZING_MODE_NONE, 0);
+		IntRect(0, 0, width - 1, height - 1), 0 /* no tiling */, 0);
+	gBitmapManager->BitmapRemoved(bitmap);
 
 	native_window->MarkContentDirty(native_window->VisibleRegion(),
 		native_window->VisibleRegion());

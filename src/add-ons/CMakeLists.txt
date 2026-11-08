@@ -8,3 +8,7 @@ add_subdirectory(opengl)
 add_subdirectory(screen_savers)
 add_subdirectory(tracker)
 add_subdirectory(translators)
+
+if(VOS_WITH_WLROOTS AND NOT WLROOTS_KOAN_ADDED)
+	add_subdirectory(wlroots-koan)
+endif()

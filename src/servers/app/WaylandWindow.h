@@ -10,8 +10,8 @@
  *
  * Threading:
  *  - Native Window/ServerWindow objects are only touched from app_server.
- *  - The Wayland dispatch thread pushes commands to the queue and writes to
- *    fWakePort to notify app_server.
+ *  - The Wayland dispatch thread pushes commands to the queue and writes a
+ *    wake-up message to app_server's looper port (fWakePort).
  *  - app_server drains the queue in response to the wake-up message.
  */
 
@@ -60,6 +60,10 @@ public:
 	/* Set the desktop that owns Wayland windows. */
 	void SetDesktop(Desktop *desktop) { fDesktop = desktop; }
 
+	/* Set the port the Wayland thread wakes when commands are queued.
+	 * This is app_server's own looper port; the bridge does not own it. */
+	void SetWakePort(port_id port) { fWakePort = port; }
+
 	/* Shut down: called from app_server shutdown (app_server thread). */
 	void Shutdown();
 
@@ -105,13 +109,18 @@ private:
 	int process_set_buffer(struct koan_command *cmd);
 	int process_set_visibility(struct koan_command *cmd);
 
+	/* Wayland dispatch thread entry point. A static member (rather than a
+	 * free function) so it can access the private fDisplay member. */
+	static int32 s_dispatch_thread(void *arg);
+
 	static int s_queue_processor(struct koan_command *cmd, void *userdata);
 
 	wayland_window *find_window_by_toplevel(struct wlr_xdg_toplevel *toplevel);
 	wayland_window *find_window_by_server_window(ServerWindow *server_window);
 
-	status_t create_native_window(wayland_window *ww, int32_t width,
-			int32_t height);
+	status_t EnsureServerApp();
+	status_t create_native_window(wayland_window *ww, const char *title,
+			int32_t width, int32_t height);
 	void destroy_native_window(wayland_window *ww);
 	void update_buffer(wayland_window *ww, void *data, int32_t width,
 			int32_t height, int32_t stride, uint32_t format);
@@ -119,11 +128,12 @@ private:
 
 	BLocker fLock;
 	struct wl_list fWindows;      /* wayland_window.link */
-	port_id fWakePort;            /* port the Wayland thread writes to */
+	port_id fWakePort;            /* app_server's looper port (not owned) */
 	thread_id fDispatchThread;    /* Wayland dispatch thread */
 	bool fRunning;
 	struct wl_display *fDisplay;
 	Desktop *fDesktop;
+	ServerApp *fServerApp;        /* shared client context for all windows */
 	char fSocketName[64];
 };
 

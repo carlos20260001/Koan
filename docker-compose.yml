@@ -61,4 +61,5 @@ services:
       VOS_SSHDEBUG: ${VOS_SSHDEBUG:-0}
       VOS_CCACHE: ${VOS_CCACHE:-auto}
       VOS_TMPFS_BUILD: ${VOS_TMPFS_BUILD:-auto}
+      VOS_CMAKE_EXTRA_OPTS: ${VOS_CMAKE_EXTRA_OPTS:-}
       USER: ${USER:-vitruvian}

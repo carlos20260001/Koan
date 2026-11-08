@@ -209,7 +209,7 @@ if [ ! -f build.ninja ] || [ ! -f CMakeCache.txt ] \
     # Do NOT set CC/CXX to "ccache gcc" — that breaks compiler detection
     # (ccache -dumpmachine without a real compiler wrapped fails).
     if [ "$USE_CCACHE" -eq 1 ]; then
-        export VOS_CMAKE_EXTRA_OPTS="-DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache"
+        export VOS_CMAKE_EXTRA_OPTS="${VOS_CMAKE_EXTRA_OPTS:-} -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache"
     fi
     # When building on tmpfs, configure runs outside the source tree; tell it
     # where the source dir is so CMake doesn't resolve ".." to /tmp.
