@@ -7,7 +7,8 @@
 # DEB_DIR defaults to generated.release (where build-debs.sh leaves them).
 # Every VOS-*-Linux-*.deb there is offered; the guest installs the ones
 # whose package it already has. The VOS packages depend on each other's
-# exact version, so updating only some of them breaks apt in the guest.
+# exact version (and Break older ones), so they go in together with
+# --auto-deconfigure; updating only some of them breaks apt in the guest.
 #
 # Needs the serial root shell from vm-shell.sh. The host serves DEB_DIR on
 # 127.0.0.1:8765, which QEMU user networking exposes to the guest as
@@ -37,10 +38,11 @@ done
 # Keep only debs whose package is installed in the guest.
 select='sel=""; for d in *.deb; do dpkg -s "$(dpkg-deb -f $d Package)" >/dev/null 2>&1 && sel="$sel $d"; done; echo INSTALLING:$sel'
 
-# Restart janus as stop + kill leftovers + start: after an interrupted
-# upgrade systemd can keep the old janus in the unit's cgroup ("Found
-# left-over process ... Ignoring") and a plain restart then runs two
-# sessions fighting over DRM.
-restart='systemctl stop janus.service; systemctl kill --signal=KILL janus.service 2>/dev/null; sleep 1; systemctl start janus.service; sleep 8'
+# Restart janus, then make sure no old session survives before starting
+# it again: janus_session and its servers live in the user's logind
+# session scope, not in janus.service's cgroup, so a janus that died
+# without stopping its session (killed, crashed) leaves a second session
+# holding DRM. Terminating the session users' logind sessions clears them.
+restart='systemctl stop janus.service; loginctl terminate-user vos_login 2>/dev/null; loginctl terminate-user vos-live 2>/dev/null; sleep 2; systemctl start janus.service; sleep 8'
 
-$VMCTL send "mkdir -p /tmp/debs && cd /tmp/debs && rm -f *.deb &&$fetch true; $select; dpkg -i \$sel > /tmp/dpkg.log 2>&1; echo DPKG_EXIT=\$?; tail -3 /tmp/dpkg.log; md5sum /system/servers/app_server; $restart; pgrep -a app_server; cd /\r" 90
+$VMCTL send "mkdir -p /tmp/debs && cd /tmp/debs && rm -f *.deb &&$fetch true; $select; dpkg -i --auto-deconfigure \$sel > /tmp/dpkg.log 2>&1; echo DPKG_EXIT=\$?; tail -3 /tmp/dpkg.log; md5sum /system/servers/app_server; $restart; pgrep -a app_server; cd /\r" 90

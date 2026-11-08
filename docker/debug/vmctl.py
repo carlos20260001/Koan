@@ -6,6 +6,15 @@
   vmctl.py shot FILE.png         QMP screendump of the guest display
   vmctl.py hmp "COMMAND"         HMP monitor command (e.g. "sendkey ret",
                                  "info status", "quit")
+  vmctl.py move X Y              put the pointer at screen pixel X,Y
+  vmctl.py click X Y [BUTTON]    move there and click (left, right, middle)
+  vmctl.py drag X1 Y1 X2 Y2 [KEY...]
+                                 left-drag, holding QEMU qcodes (e.g.
+                                 meta_l, the Option key for Stack & Tile)
+
+The guest's QEMU mouse is a VMware VMMouse, an absolute device: HMP
+mouse_move (relative) does not move it, so move/click send absolute QMP
+input events scaled from $VOS_DBG_SCREEN (default 1280x800).
 
 TEXT understands \\r (Enter), \\n, \\t, \\\\ and \\xHH (e.g. \\x1b for Esc,
 \\x05 for Ctrl-E). Everything else is sent literally, so shell code such as
@@ -92,6 +101,51 @@ def qmp(command, **arguments):
     return result
 
 
+def _abs_events(x, y):
+    w, h = (int(v) for v in os.environ.get("VOS_DBG_SCREEN",
+        "1280x800").split("x"))
+    return [
+        {"type": "abs", "data": {"axis": "x", "value": int(x * 32767 / (w - 1))}},
+        {"type": "abs", "data": {"axis": "y", "value": int(y * 32767 / (h - 1))}},
+    ]
+
+
+def move(x, y):
+    return qmp("input-send-event", events=_abs_events(x, y))
+
+
+def click(x, y, button="left"):
+    move(x, y)
+    time.sleep(0.1)
+    for down in (True, False):
+        qmp("input-send-event", events=[{"type": "btn",
+            "data": {"button": button, "down": down}}])
+        time.sleep(0.1)
+
+
+def _key(qcode, down):
+    qmp("input-send-event", events=[{"type": "key", "data": {"down": down,
+        "key": {"type": "qcode", "data": qcode}}}])
+
+
+def drag(x1, y1, x2, y2, keys=()):
+    for k in keys:
+        _key(k, True)
+    move(x1, y1)
+    time.sleep(1.0)  # app_server picks up input lazily under load
+    qmp("input-send-event", events=[{"type": "btn",
+        "data": {"button": "left", "down": True}}])
+    steps = 12
+    for i in range(1, steps + 1):
+        time.sleep(0.08)
+        move(x1 + (x2 - x1) * i // steps, y1 + (y2 - y1) * i // steps)
+    time.sleep(0.5)
+    qmp("input-send-event", events=[{"type": "btn",
+        "data": {"button": "left", "down": False}}])
+    for k in keys:
+        _key(k, False)
+
+
 def main(argv):
     if len(argv) >= 2 and argv[0] == "send":
         send(argv[1], float(argv[2]) if len(argv) > 2 else 2.0)
@@ -100,6 +154,12 @@ def main(argv):
             format="png")
         if "error" in result:
             sys.exit(result["error"].get("desc", "screendump failed"))
+    elif len(argv) == 3 and argv[0] == "move":
+        move(int(argv[1]), int(argv[2]))
+    elif len(argv) in (3, 4) and argv[0] == "click":
+        click(int(argv[1]), int(argv[2]), argv[3] if len(argv) == 4 else "left")
+    elif len(argv) >= 5 and argv[0] == "drag":
+        drag(*(int(v) for v in argv[1:5]), keys=argv[5:])
     elif len(argv) == 2 and argv[0] == "hmp":
         result = qmp("human-monitor-command", **{"command-line": argv[1]})
         print(result.get("return", result))
