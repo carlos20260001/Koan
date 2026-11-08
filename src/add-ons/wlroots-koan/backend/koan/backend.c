@@ -25,6 +25,7 @@ static bool koan_backend_start(struct wlr_backend *backend) {
 
 static void koan_backend_destroy(struct wlr_backend *backend) {
 	wlr_log(WLR_INFO, "Koan backend: destroy");
+	wlr_backend_finish(backend);
 	struct wlr_koan_backend *kbackend = (struct wlr_koan_backend *)
 		((char *)backend - offsetof(struct wlr_koan_backend, backend));
 	free(kbackend);

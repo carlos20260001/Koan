@@ -10,8 +10,8 @@
  *
  * Threading:
  *  - Native Window/ServerWindow objects are only touched from app_server.
- *  - The Wayland dispatch thread pushes commands to the queue and writes a
- *    wake-up message to app_server's looper port (fWakePort).
+ *  - The Wayland dispatch thread pushes commands to the queue and posts a
+ *    coalesced kMsgWaylandWake BMessage to app_server's looper.
  *  - app_server drains the queue in response to the wake-up message.
  */
 
@@ -52,7 +52,7 @@ WaylandWindowBridge *gWaylandWindowBridge = NULL;
 WaylandWindowBridge::WaylandWindowBridge()
 	:
 	fLock("WaylandWindowBridge lock"),
-	fWakePort(-1),
+	fWakePending(0),
 	fDispatchThread(-1),
 	fRunning(false),
 	fDisplay(NULL),
@@ -89,9 +89,9 @@ WaylandWindowBridge::Init()
 	};
 	koan_adapter_set_window_callbacks(&cbs, NULL, this);
 
-	/* The wake port is app_server's own looper port; it is installed with
-	 * SetWakePort() from AppServer before the dispatch thread starts.
-	 * The bridge never creates or deletes it. */
+	/* The wake target is app_server's own looper; it is installed with
+	 * SetWakeTarget() from AppServer before the dispatch thread starts.
+	 * The bridge never owns it. */
 	return B_OK;
 }
 
@@ -108,8 +108,8 @@ WaylandWindowBridge::Shutdown()
 		fDisplay = NULL;
 	}
 
-	/* fWakePort belongs to app_server; just forget it. */
-	fWakePort = -1;
+	/* The wake target belongs to app_server; just forget it. */
+	fWakeTarget = BMessenger();
 
 	BAutolock locker(fLock);
 	struct wayland_window *ww, *tmp;
@@ -242,9 +242,27 @@ WaylandWindowBridge::DrainCommands()
 void
 WaylandWindowBridge::WaylandWakeup()
 {
-	/* app_server's message loop already consumed the wake-up message
-	 * from its own port; all that is left is to process the commands. */
+	/* Clear the in-flight flag before draining: a command queued while we
+	 * drain posts a fresh wake-up instead of being left behind. */
+	atomic_set(&fWakePending, 0);
 	DrainCommands();
+}
+
+void
+WaylandWindowBridge::_Wake()
+{
+	if (!fWakeTarget.IsValid())
+		return;
+
+	/* Coalesce: one pending wake-up is enough, WaylandWakeup() drains the
+	 * whole queue. */
+	if (atomic_get_and_set(&fWakePending, 1) != 0)
+		return;
+
+	if (fWakeTarget.SendMessage(kMsgWaylandWake) != B_OK) {
+		atomic_set(&fWakePending, 0);
+		wlr_log(WLR_ERROR, "Wayland bridge: failed to wake app_server");
+	}
 }
 
 /* -------------------------------------------------------------------------- */
@@ -282,8 +300,7 @@ WaylandWindowBridge::s_create_window(void *userdata, struct koan_queue *queue,
 	}
 
 	/* Notify app_server that a command is pending. */
-	if (bridge->fWakePort >= B_OK)
-		write_port(bridge->fWakePort, kMsgWaylandWake, NULL, 0);
+	bridge->_Wake();
 }
 
 void
@@ -298,8 +315,7 @@ WaylandWindowBridge::s_destroy_window(void *userdata, struct koan_queue *queue,
 	payload.destroy_window.window = window;
 	koan_queue_push(queue, KOAN_CMD_DESTROY_WINDOW, &payload, NULL);
 
-	if (bridge->fWakePort >= B_OK)
-		write_port(bridge->fWakePort, kMsgWaylandWake, NULL, 0);
+	bridge->_Wake();
 }
 
 void
@@ -317,8 +333,7 @@ WaylandWindowBridge::s_set_title(void *userdata, struct koan_queue *queue,
 	/* dup_payload() made its own strdup() copy for the queue; free ours. */
 	free((void *)payload.set_title.title);
 
-	if (bridge->fWakePort >= B_OK)
-		write_port(bridge->fWakePort, kMsgWaylandWake, NULL, 0);
+	bridge->_Wake();
 }
 
 void
@@ -335,8 +350,7 @@ WaylandWindowBridge::s_set_size(void *userdata, struct koan_queue *queue,
 	payload.set_size.height = height;
 	koan_queue_push(queue, KOAN_CMD_SET_SIZE, &payload, NULL);
 
-	if (bridge->fWakePort >= B_OK)
-		write_port(bridge->fWakePort, kMsgWaylandWake, NULL, 0);
+	bridge->_Wake();
 }
 
 void
@@ -371,8 +385,7 @@ WaylandWindowBridge::s_set_buffer(void *userdata, struct koan_queue *queue,
 	payload.set_buffer.format = format;
 	koan_queue_push(queue, KOAN_CMD_SET_BUFFER, &payload, NULL);
 
-	if (bridge->fWakePort >= B_OK)
-		write_port(bridge->fWakePort, kMsgWaylandWake, NULL, 0);
+	bridge->_Wake();
 }
 
 void
@@ -388,8 +401,7 @@ WaylandWindowBridge::s_set_visibility(void *userdata, struct koan_queue *queue,
 	payload.set_visibility.visible = visible;
 	koan_queue_push(queue, KOAN_CMD_SET_VISIBILITY, &payload, NULL);
 
-	if (bridge->fWakePort >= B_OK)
-		write_port(bridge->fWakePort, kMsgWaylandWake, NULL, 0);
+	bridge->_Wake();
 }
 
 /* -------------------------------------------------------------------------- */

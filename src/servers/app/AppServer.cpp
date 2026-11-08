@@ -13,6 +13,8 @@
 
 #include "AppServer.h"
 
+#include <errno.h>
+#include <fcntl.h>
 #include <signal.h>
 #include <syslog.h>
 #include <unistd.h>
@@ -33,7 +35,6 @@
 
 #ifdef VOS_WITH_WLROOTS
 #	include <new>
-#	include <MessengerPrivate.h>
 
 extern "C" {
 #	include <wlr/util/log.h>
@@ -53,7 +54,7 @@ extern "C" {
 
 
 // Globals
-port_id gAppServerPort;
+port_id gAppServerPort = -1;
 BTokenSpace gTokenSpace;
 uint32 gAppServerSIMDFlags = 0;
 
@@ -103,14 +104,13 @@ AppServer::AppServer(status_t* status)
 		if (status == B_OK) {
 			/* The Wayland thread must wake this looper, because only
 			 * this looper's messages reach AppServer::MessageReceived().
-			 * A private port would never be drained. */
+			 * Use a BMessenger: BLooper discards raw port writes that do
+			 * not carry a flattened BMessage. */
 			BMessenger messenger(this);
-			port_id port = BMessenger::Private(messenger).Port();
-			if (port >= B_OK) {
-				gAppServerPort = port;
-				gWaylandWindowBridge->SetWakePort(port);
-			} else
-				status = port;
+			if (messenger.IsValid())
+				gWaylandWindowBridge->SetWakeTarget(messenger);
+			else
+				status = B_BAD_VALUE;
 		}
 		if (status != B_OK) {
 			delete gWaylandWindowBridge;
@@ -439,14 +439,42 @@ AppServer::_FindDesktop(uid_t userID, const char* targetScreen)
 //	#pragma mark -
 
 
-// Async-signal-safe: post B_QUIT_REQUESTED so the looper unwinds the
-// C++ teardown (Desktop -> HWInterface dtor -> drmDropMaster).
+// Self-pipe for SIGTERM/SIGINT. The handler only does an async-signal-safe
+// write(); a watcher thread turns it into a real B_QUIT_REQUESTED BMessage
+// so the looper unwinds the C++ teardown (Desktop -> HWInterface dtor ->
+// drmDropMaster). A raw write_port() without a flattened BMessage is
+// discarded by BLooper, which left the DRM master held after a SIGTERM.
+static int sQuitPipe[2] = { -1, -1 };
+
+
 static void
 signal_quit(int /*signo*/)
 {
-	if (gAppServerPort >= 0)
-		write_port_etc(gAppServerPort, B_QUIT_REQUESTED, NULL, 0,
-			B_RELATIVE_TIMEOUT, 0);
+	int savedErrno = errno;
+	if (sQuitPipe[1] >= 0) {
+		char byte = 1;
+		ssize_t written = write(sQuitPipe[1], &byte, 1);
+		(void)written;
+	}
+	errno = savedErrno;
+}
+
+
+static int32
+quit_watcher(void* data)
+{
+	AppServer* server = (AppServer*)data;
+	char byte;
+	for (;;) {
+		ssize_t bytesRead = read(sQuitPipe[0], &byte, 1);
+		if (bytesRead == 1)
+			break;
+		if (bytesRead < 0 && errno == EINTR)
+			continue;
+		return 0;
+	}
+	server->PostMessage(B_QUIT_REQUESTED);
+	return 0;
 }
 
 
@@ -454,6 +482,11 @@ int
 main(int argc, char** argv)
 {
 	srand(real_time_clock_usecs());
+
+	if (pipe2(sQuitPipe, O_CLOEXEC) != 0) {
+		sQuitPipe[0] = -1;
+		sQuitPipe[1] = -1;
+	}
 
 	struct sigaction sa;
 	memset(&sa, 0, sizeof(sa));
@@ -466,6 +499,13 @@ main(int argc, char** argv)
 	status_t status;
 	AppServer* server = new AppServer(&status);
 	if (status == B_OK) {
+		if (sQuitPipe[0] >= 0) {
+			thread_id watcher = spawn_thread(quit_watcher,
+				"app_server quit watcher", B_NORMAL_PRIORITY, server);
+			if (watcher >= B_OK)
+				resume_thread(watcher);
+		}
+
 #ifdef VOS_WITH_WLROOTS
 		if (gWaylandWindowBridge) {
 			thread_id t = gWaylandWindowBridge->StartDispatchThread();

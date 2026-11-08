@@ -10,8 +10,9 @@
  *
  * Threading:
  *  - Native Window/ServerWindow objects are only touched from app_server.
- *  - The Wayland dispatch thread pushes commands to the queue and writes a
- *    wake-up message to app_server's looper port (fWakePort).
+ *  - The Wayland dispatch thread pushes commands to the queue and posts a
+ *    kMsgWaylandWake BMessage to app_server's looper (fWakeTarget). Wake-ups
+ *    are coalesced: only one is in flight until app_server handles it.
  *  - app_server drains the queue in response to the wake-up message.
  */
 
@@ -60,9 +61,11 @@ public:
 	/* Set the desktop that owns Wayland windows. */
 	void SetDesktop(Desktop *desktop) { fDesktop = desktop; }
 
-	/* Set the port the Wayland thread wakes when commands are queued.
-	 * This is app_server's own looper port; the bridge does not own it. */
-	void SetWakePort(port_id port) { fWakePort = port; }
+	/* Set the looper the Wayland thread wakes when commands are queued.
+	 * This is app_server itself; the bridge does not own it. A BMessenger
+	 * is required: BLooper drops raw port writes without a flattened
+	 * BMessage, so write_port(code, NULL, 0) never reaches the handler. */
+	void SetWakeTarget(const BMessenger& target) { fWakeTarget = target; }
 
 	/* Shut down: called from app_server shutdown (app_server thread). */
 	void Shutdown();
@@ -115,6 +118,9 @@ private:
 
 	static int s_queue_processor(struct koan_command *cmd, void *userdata);
 
+	/* Post a coalesced wake-up to app_server (Wayland thread). */
+	void _Wake();
+
 	wayland_window *find_window_by_toplevel(struct wlr_xdg_toplevel *toplevel);
 	wayland_window *find_window_by_server_window(ServerWindow *server_window);
 
@@ -128,7 +134,8 @@ private:
 
 	BLocker fLock;
 	struct wl_list fWindows;      /* wayland_window.link */
-	port_id fWakePort;            /* app_server's looper port (not owned) */
+	BMessenger fWakeTarget;       /* app_server's looper (not owned) */
+	int32 fWakePending;           /* 1 while a wake-up is in flight */
 	thread_id fDispatchThread;    /* Wayland dispatch thread */
 	bool fRunning;
 	struct wl_display *fDisplay;

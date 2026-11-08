@@ -53,6 +53,7 @@ struct koan_server {
 	struct wlr_scene *scene;
 	struct wlr_scene_output_layout *scene_layout;
 	struct wlr_output_layout *output_layout;
+	struct wlr_output *output;    /* synthetic Koan output, owned here */
 
 	struct wl_list toplevels;     /* struct koan_toplevel.link */
 
@@ -229,6 +230,13 @@ static int koan_server_handle_queue_fd(int fd, uint32_t mask, void *data) {
 /* Output                                                                     */
 /* -------------------------------------------------------------------------- */
 
+static bool koan_output_commit(struct wlr_output *output,
+		const struct wlr_output_state *state) {
+	(void)output;
+	(void)state;
+	return true;
+}
+
 static bool koan_server_create_output(struct koan_server *server) {
 	if (!server->output_layout || !server->scene_layout)
 		return false;
@@ -237,12 +245,14 @@ static bool koan_server_create_output(struct koan_server *server) {
 	if (!output)
 		return false;
 
+	/* wlr_output_init() asserts impl->commit != NULL, and asserts are
+	 * active in every Vitruvian build type (defs.cmake never defines
+	 * NDEBUG). A NULL commit aborted app_server at startup. Koan does not
+	 * render output frames itself (app_server presents), so commit just
+	 * accepts the state. destroy stays NULL: wlr_output_destroy() then
+	 * runs wlr_output_finish() and free()s the calloc'ed output. */
 	static const struct wlr_output_impl output_impl = {
-		.commit = NULL,   /* Koan does not render output frames directly */
-		.test = NULL,
-		.set_cursor = NULL,
-		.move_cursor = NULL,
-		.destroy = NULL,
+		.commit = koan_output_commit,
 	};
 
 	wlr_output_init(output, server->backend, &output_impl,
@@ -253,12 +263,16 @@ static bool koan_server_create_output(struct koan_server *server) {
 	struct wlr_output_state state;
 	wlr_output_state_init(&state);
 	wlr_output_state_set_enabled(&state, true);
+	/* Enabling without a mode fails output_basic_test() ("zero mode"). */
+	wlr_output_state_set_custom_mode(&state, 1920, 1080, 60000);
 	wlr_output_state_set_scale(&state, 1.0f);
-	wlr_output_commit_state(output, &state);
+	if (!wlr_output_commit_state(output, &state))
+		wlr_log(WLR_ERROR, "Koan output: initial commit failed");
 	wlr_output_state_finish(&state);
 
 	wlr_output_create_global(output, server->display);
 	wlr_output_layout_add(server->output_layout, output, 0, 0);
+	server->output = output;
 	wlr_log(WLR_INFO, "Koan output: created (placeholder dimensions)");
 	return true;
 }
@@ -518,12 +532,21 @@ void koan_server_destroy(struct wl_display *display) {
 		wlr_seat_destroy(server->seat);
 	if (server->cursor)
 		wlr_cursor_destroy(server->cursor);
+	/* Destroy the output before its layout and the display: its destroy
+	 * signal removes it from the layout and drops the wl_output global. */
+	if (server->output)
+		wlr_output_destroy(server->output);
+	server->output = NULL;
 	if (server->output_layout)
 		wlr_output_layout_destroy(server->output_layout);
 	if (server->scene)
 		wlr_scene_node_destroy(&server->scene->tree.node);
-	if (server->koan_backend)
-		free(server->koan_backend);
+	/* Go through the backend impl so events.destroy is emitted and the
+	 * Koan backend frees itself (koan_backend_destroy). */
+	if (server->backend)
+		wlr_backend_destroy(server->backend);
+	server->backend = NULL;
+	server->koan_backend = NULL;
 
 	if (server->queue_fd_source)
 		wl_event_source_remove(server->queue_fd_source);
