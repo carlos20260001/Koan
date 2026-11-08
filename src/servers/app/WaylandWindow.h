@@ -141,6 +141,7 @@ private:
 	struct wl_display *fDisplay;
 	Desktop *fDesktop;
 	ServerApp *fServerApp;        /* shared client context for all windows */
+	int32 fNextViewToken;         /* top-view tokens in fServerApp's space */
 	char fSocketName[64];
 };
 

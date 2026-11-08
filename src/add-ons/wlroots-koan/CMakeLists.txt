@@ -478,3 +478,13 @@ set_target_properties(wlroots PROPERTIES
 add_library(wlroots-koan::wlroots ALIAS wlroots)
 
 message(STATUS "wlroots-koan: configured with wayland-server, pixman, xkbcommon")
+
+# Host-runnable regression tests for the Koan server layer. Off by default so
+# the OS build is unchanged; enable from a standalone wrapper project, e.g.
+#   cmake -S <wrapper> -B /tmp/wb -DWLROOTS_KOAN_BUILD_TESTS=ON
+#   ninja -C /tmp/wb && ctest --test-dir /tmp/wb
+option(WLROOTS_KOAN_BUILD_TESTS "Build wlroots-koan host regression tests" OFF)
+if(WLROOTS_KOAN_BUILD_TESTS)
+    enable_testing()
+    add_subdirectory(tests)
+endif()

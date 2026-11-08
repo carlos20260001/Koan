@@ -29,6 +29,7 @@
 #include "AppServer.h"
 #include "BitmapManager.h"
 #include "Desktop.h"
+#include "DrawState.h"
 #include "DrawingEngine.h"
 #include "ServerApp.h"
 #include "ServerBitmap.h"
@@ -57,7 +58,8 @@ WaylandWindowBridge::WaylandWindowBridge()
 	fRunning(false),
 	fDisplay(NULL),
 	fDesktop(NULL),
-	fServerApp(NULL)
+	fServerApp(NULL),
+	fNextViewToken(1)
 {
 	wl_list_init(&fWindows);
 	memset(fSocketName, 0, sizeof(fSocketName));
@@ -484,7 +486,9 @@ WaylandWindowBridge::create_native_window(wayland_window *ww,
 	if (!server_window)
 		return B_NO_MEMORY;
 
+	/* Offset from the screen corner so the border is visible. */
 	BRect frame(0, 0, width - 1, height - 1);
+	frame.OffsetBy(40, 40);
 	status = server_window->Init(frame, B_BORDERED_WINDOW_LOOK,
 		B_NORMAL_WINDOW_FEEL, B_NOT_RESIZABLE | B_NOT_MINIMIZABLE,
 		B_CURRENT_WORKSPACE);
@@ -507,6 +511,45 @@ WaylandWindowBridge::create_native_window(wayland_window *ww,
 	/* ServerWindow::Init() already added the window to the desktop.
 	 * Adding it a second time would corrupt the window list. */
 
+	/* A BWindow client creates its root view with AS_VIEW_CREATE_ROOT;
+	 * Wayland clients never send it, so create it here. Without a top
+	 * view Window::SetHidden() dereferences NULL in ShowWindow() and
+	 * SET_BUFFER has nowhere to put the client's pixels. View tokens live
+	 * in the owning ServerApp's token space, which all Wayland windows
+	 * share, so each top view needs its own token. */
+	View *top_view = new(std::nothrow) View(
+		IntRect(0, 0, width - 1, height - 1), IntPoint(0, 0),
+		"wayland surface", fNextViewToken++, B_FOLLOW_ALL_SIDES,
+		B_WILL_DRAW);
+	if (!top_view || top_view->InitCheck() != B_OK) {
+		delete top_view;
+		server_window->Quit();
+		return B_NO_MEMORY;
+	}
+	top_view->CurrentState()->SetFont(fServerApp->PlainFont());
+	if (fDesktop->LockAllWindows()) {
+		window->SetTopView(top_view);
+		fDesktop->UnlockAllWindows();
+	} else {
+		delete top_view;
+		server_window->Quit();
+		return B_ERROR;
+	}
+
+	/* Run the window's message loop, as ServerApp::_CreateWindow() does
+	 * for BWindow clients. Desktop repaints (show, expose, move, windows
+	 * on top going away) only queue a dirty region and RequestRedraw();
+	 * the loop is what calls Window::RedrawDirtyRegion() to paint the
+	 * border and the top view background, i.e. the client's pixels.
+	 * Without it the window area stayed black. Messages the loop tries
+	 * to send back to the (non-existent) BWindow client fail harmlessly
+	 * on the invalid client ports. */
+	status = server_window->Run();
+	if (status != B_OK) {
+		server_window->Quit();
+		return status;
+	}
+
 	ww->server_window = server_window;
 	ww->window = window;
 
@@ -522,8 +565,9 @@ WaylandWindowBridge::destroy_native_window(wayland_window *ww)
 		return;
 
 	/* The ServerWindow owns the native Window and removes it from the
-	 * desktop in its destructor. Quit() deletes it synchronously since
-	 * its message loop was never started. */
+	 * desktop in its destructor. Its message loop is running, so Quit()
+	 * hides the window and asks the loop to delete it asynchronously;
+	 * forget the pointers right away. */
 	if (ww->server_window) {
 		ww->server_window->Quit();
 		ww->server_window = NULL;
@@ -708,6 +752,28 @@ WaylandWindowBridge::process_set_buffer(struct koan_command *cmd)
 		return -1;
 	}
 
+	/* The window's message loop paints this view concurrently. Take the
+	 * same locks it holds, in the same order: the ServerWindow's own lock,
+	 * then the desktop lock. */
+	if (!fDesktop || !ww->server_window->Lock()) {
+		gBitmapManager->BitmapRemoved(bitmap);
+		return -1;
+	}
+
+	/* Follow the client's size. ResizeWindowBy() takes the all-windows
+	 * write lock itself, as for AS_WINDOW_RESIZE. */
+	BRect frame = native_window->Frame();
+	int32 dw = width - (frame.IntegerWidth() + 1);
+	int32 dh = height - (frame.IntegerHeight() + 1);
+	if (dw != 0 || dh != 0)
+		fDesktop->ResizeWindowBy(native_window, dw, dh);
+
+	if (!fDesktop->LockSingleWindow()) {
+		ww->server_window->Unlock();
+		gBitmapManager->BitmapRemoved(bitmap);
+		return -1;
+	}
+
 	/* The view takes its own reference. The bitmap is not client-visible,
 	 * so drop the manager registration and our creation reference; the
 	 * view owns it until it is replaced or destroyed. */
@@ -715,9 +781,17 @@ WaylandWindowBridge::process_set_buffer(struct koan_command *cmd)
 		IntRect(0, 0, width - 1, height - 1), 0 /* no tiling */, 0);
 	gBitmapManager->BitmapRemoved(bitmap);
 
-	native_window->MarkContentDirty(native_window->VisibleRegion(),
-		native_window->VisibleRegion());
+	/* MarkContentDirty() intersects its arguments in place, so pass
+	 * copies: handing it VisibleRegion() itself clipped the window's own
+	 * visible region down to its content and lost the border. The
+	 * expose part repaints the view background, i.e. the new bitmap,
+	 * right away. */
+	BRegion dirty(native_window->VisibleContentRegion());
+	BRegion expose(dirty);
+	native_window->MarkContentDirty(dirty, expose);
 
+	fDesktop->UnlockSingleWindow();
+	ww->server_window->Unlock();
 	return 0;
 }
 
