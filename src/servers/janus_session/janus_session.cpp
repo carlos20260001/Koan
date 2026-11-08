@@ -649,12 +649,20 @@ launch_fanout_server(const KnownServer* ks, port_id replyPort, int32 replyToken,
 			snprintf(busAddr, sizeof(busAddr), "unix:path=%s/bus",
 				runtimeDir);
 			setenv("DBUS_SESSION_BUS_ADDRESS", busAddr, 0);
+
+			// Like DISPLAY for X11: app_server binds its Wayland socket
+			// under this name in the runtime dir (VOS_WITH_WLROOTS), and
+			// every session app inherits it so Wayland clients such as
+			// Firefox or GTK apps can find it. Without wlroots no socket
+			// exists and clients fall back as on any system without one.
+			setenv("WAYLAND_DISPLAY", "wayland-0", 1);
 		} else {
 			fprintf(stderr, "janus_session: %s is not a user-owned mode-0700 "
 				"directory for %s; XDG runtime and session bus variables "
 				"left unset\n", runtimeDir, name);
 			unsetenv("XDG_RUNTIME_DIR");
 			unsetenv("DBUS_SESSION_BUS_ADDRESS");
+			unsetenv("WAYLAND_DISPLAY");
 		}
 
 		setenv("HOME",    sUserHome, 1);
