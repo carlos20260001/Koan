@@ -9,6 +9,7 @@ buildtools/
 compile_commands.json
 .cache/
 AGENTS.md
+CLAUDE.md
 Agents/
 code-conduct-ai.md
 clean-code-agent.md
