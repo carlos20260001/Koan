@@ -44,10 +44,22 @@ struct wlr_xdg_toplevel;
 
 struct wayland_window {
 	struct wl_list link;
-	struct wlr_xdg_toplevel *toplevel;
-	ServerWindow *server_window;
+	struct wlr_xdg_toplevel *toplevel;  /* key only: never dereferenced here */
+	ServerWindow *server_window;        /* a WaylandServerWindow */
 	::Window *window;
 	bool visible;
+	bool maximized;
+	BRect restore_frame;                /* native frame before maximizing */
+	int32 pid;                          /* client process, 0 if unknown */
+};
+
+/* A Wayland client process with native windows, registered with the
+ * registrar under its pid so Deskbar lists it like a native app. */
+struct wayland_client {
+	struct wl_list link;
+	int32 pid;
+	int32 windows;
+	bool registered;
 };
 
 class WaylandWindowBridge {
@@ -86,6 +98,12 @@ public:
 	/* Access the Koan Wayland display (for WAYLAND_DISPLAY env var). */
 	const char *SocketName() const { return fSocketName; }
 
+	/* Queue a native window action (enum koan_native_action) for the
+	 * app_server thread. Safe from any thread and from inside Desktop
+	 * calls that hold window locks: the action runs when the queue is
+	 * drained. */
+	void QueueNativeAction(void *window, int32 action, int32 arg);
+
 private:
 	/* koan_window_callbacks implementations (called from Wayland thread,
 	 * push commands to the queue). */
@@ -111,6 +129,13 @@ private:
 	int process_set_size(struct koan_command *cmd);
 	int process_set_buffer(struct koan_command *cmd);
 	int process_set_visibility(struct koan_command *cmd);
+	int process_native_action(struct koan_command *cmd);
+	void zoom_window(wayland_window *ww);
+
+	/* Deskbar/registrar bookkeeping (app_server thread, fLock held). */
+	void client_window_added(int32 pid, const char *app_id);
+	void client_window_removed(int32 pid);
+	void unregister_all_clients();
 
 	/* Wayland dispatch thread entry point. A static member (rather than a
 	 * free function) so it can access the private fDisplay member. */
@@ -134,6 +159,7 @@ private:
 
 	BLocker fLock;
 	struct wl_list fWindows;      /* wayland_window.link */
+	struct wl_list fClients;      /* wayland_client.link */
 	BMessenger fWakeTarget;       /* app_server's looper (not owned) */
 	int32 fWakePending;           /* 1 while a wake-up is in flight */
 	thread_id fDispatchThread;    /* Wayland dispatch thread */

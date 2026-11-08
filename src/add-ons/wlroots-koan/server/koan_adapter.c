@@ -350,6 +350,33 @@ static int process_app_server_command(struct koan_command *cmd, void *userdata) 
 		}
 		break;
 
+	case KOAN_CMD_TOPLEVEL_CLOSE:
+		{
+			/* The toplevel may be gone by now: only use it if it is
+			 * still one of ours. */
+			struct koan_toplevel *kt =
+				find_toplevel(cmd->payload.toplevel_close.toplevel);
+			if (kt)
+				wlr_xdg_toplevel_send_close(kt->toplevel);
+		}
+		break;
+
+	case KOAN_CMD_TOPLEVEL_CONFIGURE:
+		{
+			const struct koan_cmd_toplevel_configure *c =
+				&cmd->payload.toplevel_configure;
+			struct koan_toplevel *kt = find_toplevel(c->toplevel);
+			if (!kt || !kt->toplevel->base->initialized)
+				break;
+			if (c->width > 0 && c->height > 0)
+				wlr_xdg_toplevel_set_size(kt->toplevel, c->width, c->height);
+			if (c->maximized >= 0)
+				wlr_xdg_toplevel_set_maximized(kt->toplevel, c->maximized != 0);
+			if (c->activated >= 0)
+				wlr_xdg_toplevel_set_activated(kt->toplevel, c->activated != 0);
+		}
+		break;
+
 	default:
 		/* Wayland -> app_server commands (CREATE_WINDOW, SET_BUFFER, etc.)
 		 * are pushed by the Wayland thread itself and processed by

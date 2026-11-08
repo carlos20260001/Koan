@@ -20,9 +20,8 @@ public:
 	virtual				~OffscreenServerWindow();
 
 			// util methods.
-	virtual	void		SendMessageToClient(const BMessage* msg,
-							int32 target = B_NULL_TOKEN,
-							bool usePreferred = false) const;
+	virtual	status_t	SendMessageToClient(const BMessage* msg,
+							int32 target = B_NULL_TOKEN) const;
 
 	virtual	::Window*	MakeWindow(BRect frame, const char* name,
 							window_look look, window_feel feel, uint32 flags,

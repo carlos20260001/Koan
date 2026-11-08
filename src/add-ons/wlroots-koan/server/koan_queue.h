@@ -56,6 +56,14 @@ enum koan_cmd_type {
 	KOAN_CMD_KEYBOARD_FOCUS,
 	/* app_server -> Wayland: native window creation completed */
 	KOAN_CMD_WINDOW_READY,
+	/* app_server -> Wayland: the user acted on the native window */
+	KOAN_CMD_TOPLEVEL_CLOSE,
+	KOAN_CMD_TOPLEVEL_CONFIGURE,
+
+	/* app_server -> app_server: native window actions that must not run
+	 * inside the Desktop call that requested them (it holds window
+	 * locks); the bridge performs them when it drains the queue. */
+	KOAN_CMD_NATIVE_ACTION,
 };
 
 /* Which thread is the intended consumer of a command. koan_queue_push()
@@ -73,6 +81,8 @@ struct koan_cmd_create_window {
 	int32_t width;
 	int32_t height;
 	char *title;        /* strdup'd by sender; queue owns its own copy */
+	char *app_id;       /* xdg app_id or NULL; queue owns its own copy */
+	int32_t pid;        /* client process (team for Deskbar); 0 unknown */
 	void *window_out;   /* filled in by app_server; NULL on failure */
 	bool done;          /* set true by app_server when processed */
 };
@@ -158,6 +168,37 @@ struct koan_cmd_window_ready {
 	void *window;
 };
 
+/* KOAN_CMD_TOPLEVEL_CLOSE: decorator close button -> xdg_toplevel.close.
+ * The toplevel is only a key; the Wayland thread checks it is still alive
+ * before using it. */
+struct koan_cmd_toplevel_close {
+	struct wlr_xdg_toplevel *toplevel;
+};
+
+/* KOAN_CMD_TOPLEVEL_CONFIGURE: native size/state -> xdg_toplevel.configure.
+ * width/height 0 keep the client's size; maximized/activated -1 keep the
+ * current state. */
+struct koan_cmd_toplevel_configure {
+	struct wlr_xdg_toplevel *toplevel;
+	int32_t width;
+	int32_t height;
+	int32_t maximized;
+	int32_t activated;
+};
+
+enum koan_native_action {
+	KOAN_NATIVE_MINIMIZE,     /* arg: 1 minimize, 0 restore */
+	KOAN_NATIVE_ZOOM,         /* maximize / restore */
+};
+
+/* KOAN_CMD_NATIVE_ACTION. window is the bridge's handle; the bridge
+ * checks it is still alive before using it. */
+struct koan_cmd_native_action {
+	void *window;
+	int32_t action;           /* enum koan_native_action */
+	int32_t arg;
+};
+
 union koan_cmd_payload {
 	struct koan_cmd_create_window create_window;
 	struct koan_cmd_destroy_window destroy_window;
@@ -172,6 +213,9 @@ union koan_cmd_payload {
 	struct koan_cmd_keyboard_modifiers keyboard_modifiers;
 	struct koan_cmd_keyboard_focus keyboard_focus;
 	struct koan_cmd_window_ready window_ready;
+	struct koan_cmd_toplevel_close toplevel_close;
+	struct koan_cmd_toplevel_configure toplevel_configure;
+	struct koan_cmd_native_action native_action;
 };
 
 struct koan_command {

@@ -16,7 +16,12 @@
  *   5. a subsurface (where Firefox draws its whole window) is composed
  *      over the root, both through the parent's commit (synchronized) and
  *      on its own commit (desynchronized), and gets its frame callback;
- *   6. destroying a mapped toplevel and an unmapped one must not crash.
+ *   6. app_server's window actions reach the client: a configure with
+ *      size and maximized/activated states, and close; an action for a
+ *      toplevel that no longer exists is ignored;
+ *   7. a decoration created before the first commit ends up server-side
+ *      (setting it too early used to be an assertion in wlroots);
+ *   8. destroying a mapped toplevel and an unmapped one must not crash.
  *
  * Exits 0 on success, 1 on a reported failure; a crash or assertion also
  * fails.
@@ -37,6 +42,7 @@
 #include <wlr/util/log.h>
 
 #include "xdg-shell-client-protocol.h"
+#include "xdg-decoration-unstable-v1-client-protocol.h"
 
 #include "koan_adapter.h"
 #include "koan_queue.h"
@@ -164,6 +170,7 @@ struct client {
 	struct wl_shm *shm;
 	struct wl_subcompositor *subcompositor;
 	struct xdg_wm_base *wm_base;
+	struct zxdg_decoration_manager_v1 *decoration_manager;
 };
 
 struct toplevel {
@@ -173,6 +180,10 @@ struct toplevel {
 	uint32_t configure_serial;
 	bool configured;
 	bool frame_done;
+	int32_t width, height;      /* last xdg_toplevel.configure */
+	bool maximized, activated;
+	bool closed;
+	uint32_t decoration_mode;   /* 0 until configured */
 };
 
 static void
@@ -195,6 +206,10 @@ registry_global(void *data, struct wl_registry *registry, uint32_t name,
 			&& c->wm_base == NULL)
 		c->wm_base = wl_registry_bind(registry, name,
 			&xdg_wm_base_interface, 1);
+	else if (strcmp(interface, zxdg_decoration_manager_v1_interface.name) == 0
+			&& c->decoration_manager == NULL)
+		c->decoration_manager = wl_registry_bind(registry, name,
+			&zxdg_decoration_manager_v1_interface, 1);
 }
 
 static void
@@ -240,19 +255,41 @@ static void
 toplevel_configure(void *data, struct xdg_toplevel *xdg_toplevel,
 	int32_t width, int32_t height, struct wl_array *states)
 {
-	(void)data;
+	struct toplevel *t = data;
 	(void)xdg_toplevel;
-	(void)width;
-	(void)height;
-	(void)states;
+	t->width = width;
+	t->height = height;
+	t->maximized = false;
+	t->activated = false;
+	uint32_t *state;
+	wl_array_for_each(state, states) {
+		if (*state == XDG_TOPLEVEL_STATE_MAXIMIZED)
+			t->maximized = true;
+		else if (*state == XDG_TOPLEVEL_STATE_ACTIVATED)
+			t->activated = true;
+	}
 }
 
 static void
 toplevel_close(void *data, struct xdg_toplevel *xdg_toplevel)
 {
-	(void)data;
+	struct toplevel *t = data;
 	(void)xdg_toplevel;
+	t->closed = true;
 }
+
+static void
+decoration_configure(void *data,
+	struct zxdg_toplevel_decoration_v1 *decoration, uint32_t mode)
+{
+	struct toplevel *t = data;
+	(void)decoration;
+	t->decoration_mode = mode;
+}
+
+static const struct zxdg_toplevel_decoration_v1_listener sDecorationListener = {
+	.configure = decoration_configure,
+};
 
 static const struct xdg_toplevel_listener sToplevelListener = {
 	.configure = toplevel_configure,
@@ -272,9 +309,11 @@ static const struct wl_callback_listener sFrameListener = {
 	.done = frame_done,
 };
 
-static void
-toplevel_create(struct client *c, struct toplevel *t, const char *title)
+static struct zxdg_toplevel_decoration_v1 *
+toplevel_create(struct client *c, struct toplevel *t, const char *title,
+	bool decorate)
 {
+	struct zxdg_toplevel_decoration_v1 *decoration = NULL;
 	memset(t, 0, sizeof(*t));
 	t->surface = wl_compositor_create_surface(c->compositor);
 	t->xdg_surface = xdg_wm_base_get_xdg_surface(c->wm_base, t->surface);
@@ -282,8 +321,19 @@ toplevel_create(struct client *c, struct toplevel *t, const char *title)
 	t->xdg_toplevel = xdg_surface_get_toplevel(t->xdg_surface);
 	xdg_toplevel_add_listener(t->xdg_toplevel, &sToplevelListener, t);
 	xdg_toplevel_set_title(t->xdg_toplevel, title);
+	if (decorate) {
+		/* Like GTK/Qt: create the decoration before the first commit and
+		 * ask to draw the frame ourselves. */
+		decoration = zxdg_decoration_manager_v1_get_toplevel_decoration(
+			c->decoration_manager, t->xdg_toplevel);
+		zxdg_toplevel_decoration_v1_add_listener(decoration,
+			&sDecorationListener, t);
+		zxdg_toplevel_decoration_v1_set_mode(decoration,
+			ZXDG_TOPLEVEL_DECORATION_V1_MODE_CLIENT_SIDE);
+	}
 	/* Initial commit: no buffer, asks the compositor for a configure. */
 	wl_surface_commit(t->surface);
+	return decoration;
 }
 
 static void
@@ -387,18 +437,25 @@ main(void)
 	struct wl_registry *registry = wl_display_get_registry(c.display);
 	wl_registry_add_listener(registry, &sRegistryListener, &c);
 	CHECK(settle(&c), "registry roundtrip failed");
-	CHECK(c.compositor && c.shm && c.subcompositor && c.wm_base,
-		"missing wl_compositor, wl_shm, wl_subcompositor or xdg_wm_base "
-		"global");
+	CHECK(c.compositor && c.shm && c.subcompositor && c.wm_base
+		&& c.decoration_manager,
+		"missing wl_compositor, wl_shm, wl_subcompositor, xdg_wm_base or "
+		"zxdg_decoration_manager_v1 global");
 	xdg_wm_base_add_listener(c.wm_base, &sWmBaseListener, NULL);
 
 	/* 1. Initial commit must be answered with a configure. */
 	struct toplevel mapped;
-	toplevel_create(&c, &mapped, "mapped");
+	struct zxdg_toplevel_decoration_v1 *decoration =
+		toplevel_create(&c, &mapped, "mapped", true);
 	CHECK(settle(&c), "roundtrip after initial commit failed");
 	CHECK(mapped.configured,
 		"no xdg_surface.configure after the initial commit; clients "
 		"wait forever and never map");
+	/* 7. (checked early: it is part of the first configure) */
+	CHECK(mapped.decoration_mode
+		== ZXDG_TOPLEVEL_DECORATION_V1_MODE_SERVER_SIDE,
+		"a decoration created before the first commit was not switched to "
+		"server-side, so the client draws its own frame");
 
 	/* 2. Ack + buffer commit maps the surface. A synchronized subsurface
 	 * committed first is applied with the parent's commit. */
@@ -469,13 +526,45 @@ main(void)
 		"the subsurface's frame callback never completed; Firefox stops "
 		"drawing its content after one frame");
 
-	/* 6. Destroy an unmapped toplevel, then the mapped one. */
+	/* 6. Window actions from app_server. */
+	union koan_cmd_payload action = {0};
+	action.toplevel_configure.toplevel = atomic_load(&sCreatedToplevel);
+	action.toplevel_configure.width = 100;
+	action.toplevel_configure.height = 80;
+	action.toplevel_configure.maximized = 1;
+	action.toplevel_configure.activated = 1;
+	CHECK(koan_queue_push(koan_adapter_queue(), KOAN_CMD_TOPLEVEL_CONFIGURE,
+		&action, NULL) != NULL, "failed to queue TOPLEVEL_CONFIGURE");
+	CHECK(settle(&c), "roundtrip after TOPLEVEL_CONFIGURE failed");
+	CHECK(mapped.width == 100 && mapped.height == 80 && mapped.maximized
+		&& mapped.activated,
+		"TOPLEVEL_CONFIGURE did not reach the client as a configure with "
+		"size, maximized and activated");
+
+	/* A key that is not (or no longer) a toplevel must be ignored. */
+	union koan_cmd_payload stale = {0};
+	stale.toplevel_close.toplevel = (struct wlr_xdg_toplevel *)&sNativeWindowToken;
+	CHECK(koan_queue_push(koan_adapter_queue(), KOAN_CMD_TOPLEVEL_CLOSE,
+		&stale, NULL) != NULL, "failed to queue stale TOPLEVEL_CLOSE");
+	CHECK(settle(&c), "server died on a close for a stale toplevel");
+	CHECK(!mapped.closed, "a stale close reached the wrong toplevel");
+
+	union koan_cmd_payload close_cmd = {0};
+	close_cmd.toplevel_close.toplevel = atomic_load(&sCreatedToplevel);
+	CHECK(koan_queue_push(koan_adapter_queue(), KOAN_CMD_TOPLEVEL_CLOSE,
+		&close_cmd, NULL) != NULL, "failed to queue TOPLEVEL_CLOSE");
+	CHECK(settle(&c), "roundtrip after TOPLEVEL_CLOSE failed");
+	CHECK(mapped.closed,
+		"TOPLEVEL_CLOSE (decorator close button) never reached the client");
+
+	/* 8. Destroy an unmapped toplevel, then the mapped one. */
 	struct toplevel unmapped;
-	toplevel_create(&c, &unmapped, "unmapped");
+	toplevel_create(&c, &unmapped, "unmapped", false);
 	CHECK(settle(&c), "roundtrip for unmapped toplevel failed");
 	toplevel_destroy(&unmapped);
 	CHECK(settle(&c), "server died destroying an unmapped toplevel");
 
+	zxdg_toplevel_decoration_v1_destroy(decoration);
 	wl_subsurface_destroy(subsurface);
 	wl_surface_destroy(child);
 	toplevel_destroy(&mapped);
@@ -495,6 +584,6 @@ main(void)
 	rmdir(runtime_dir);
 
 	printf("PASS: xdg-shell client configure/map/buffer/frame/subsurface/"
-		"destroy\n");
+		"actions/decoration/destroy\n");
 	return 0;
 }

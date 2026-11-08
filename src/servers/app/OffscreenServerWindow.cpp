@@ -27,14 +27,15 @@ OffscreenServerWindow::~OffscreenServerWindow()
 }
 
 
-void
-OffscreenServerWindow::SendMessageToClient(const BMessage* msg, int32 target,
-	bool usePreferred) const
+status_t
+OffscreenServerWindow::SendMessageToClient(const BMessage* msg, int32 target)
+	const
 {
 	// We're a special kind of window. The client BWindow thread is not running,
 	// so we cannot post messages to the client. In order to not mess around
 	// with all the other code, we simply make this function virtual and
 	// don't do anything in this implementation.
+	return B_OK;
 }
 
 

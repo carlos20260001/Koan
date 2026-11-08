@@ -23,16 +23,24 @@
 #include <string.h>
 #include <unistd.h>
 
+#include <ctype.h>
+#include <limits.h>
+
+#include <Entry.h>
 #include <MessagePrivate.h>
 #include <PortLink.h>
+#include <Roster.h>
+#include <RosterPrivate.h>
 
 #include "AppServer.h"
 #include "BitmapManager.h"
 #include "Desktop.h"
+#include "Decorator.h"
 #include "DrawState.h"
 #include "DrawingEngine.h"
 #include "ServerApp.h"
 #include "ServerBitmap.h"
+#include "Screen.h"
 #include "ServerWindow.h"
 #include "Window.h"
 #include "View.h"
@@ -50,6 +58,138 @@ extern "C" {
 
 WaylandWindowBridge *gWaylandWindowBridge = NULL;
 
+/* -------------------------------------------------------------------------- */
+/* WaylandServerWindow                                                        */
+/* -------------------------------------------------------------------------- */
+
+/* The ServerWindow of a Wayland toplevel. There is no BWindow client to
+ * notify, so the desktop's notifications become Wayland requests instead:
+ *
+ *  B_QUIT_REQUESTED (close button)  -> xdg_toplevel.close
+ *  B_MINIMIZE                       -> native minimize/restore
+ *  B_ZOOM (zoom button)             -> maximize/restore (configure)
+ *  B_WINDOW_RESIZED (border drag)   -> configure with the new size
+ *  B_WINDOW_ACTIVATED               -> configure with the activated state
+ *
+ * SendMessageToClient() runs on the Desktop or window thread, often with
+ * window locks held, so it only queues commands; nothing here touches
+ * wlroots objects or calls back into the Desktop. The toplevel and the
+ * bridge handle are keys the consumers validate before use. */
+class WaylandServerWindow : public ServerWindow {
+public:
+	WaylandServerWindow(const char *title, ServerApp *app,
+			struct wlr_xdg_toplevel *toplevel, wayland_window *handle,
+			team_id clientTeam)
+		:
+		ServerWindow(title, app, -1, -1, -1),
+		fToplevel(toplevel),
+		fHandle(handle),
+		fClientWidth(0),
+		fClientHeight(0)
+	{
+		/* All Wayland windows share one ServerApp (app_server's team);
+		 * report the client process instead, so window lists per team
+		 * (Deskbar) group them under the app the registrar knows. */
+		if (clientTeam > 0)
+			_SetClientTeam(clientTeam);
+	}
+
+	/* Size of the client's last frame, so a resize the bridge made to
+	 * follow the client is not sent back to it as a new configure. */
+	void SetClientSize(int32 width, int32 height)
+	{
+		atomic_set(&fClientWidth, width);
+		atomic_set(&fClientHeight, height);
+	}
+
+	virtual status_t SendMessageToClient(const BMessage *message,
+			int32 target = B_NULL_TOKEN) const
+	{
+		(void)target;
+		switch (message->what) {
+			case B_QUIT_REQUESTED:
+			{
+				union koan_cmd_payload payload = {};
+				payload.toplevel_close.toplevel = fToplevel;
+				_Push(KOAN_CMD_TOPLEVEL_CLOSE, payload);
+				break;
+			}
+
+			case B_MINIMIZE:
+			{
+				bool minimize = true;
+				message->FindBool("minimize", &minimize);
+				if (gWaylandWindowBridge) {
+					gWaylandWindowBridge->QueueNativeAction(fHandle,
+						KOAN_NATIVE_MINIMIZE, minimize ? 1 : 0);
+				}
+				break;
+			}
+
+			case B_ZOOM:
+				if (gWaylandWindowBridge) {
+					gWaylandWindowBridge->QueueNativeAction(fHandle,
+						KOAN_NATIVE_ZOOM, 0);
+				}
+				break;
+
+			case B_WINDOW_RESIZED:
+			{
+				int32 width = 0, height = 0;
+				if (message->FindInt32("width", &width) != B_OK
+					|| message->FindInt32("height", &height) != B_OK)
+					break;
+				width++;
+				height++;
+				if (width == atomic_get(&fClientWidth)
+					&& height == atomic_get(&fClientHeight))
+					break;
+				union koan_cmd_payload payload = {};
+				payload.toplevel_configure.toplevel = fToplevel;
+				payload.toplevel_configure.width = width;
+				payload.toplevel_configure.height = height;
+				payload.toplevel_configure.maximized = -1;
+				payload.toplevel_configure.activated = -1;
+				_Push(KOAN_CMD_TOPLEVEL_CONFIGURE, payload);
+				break;
+			}
+
+			case B_WINDOW_ACTIVATED:
+			{
+				bool active = false;
+				message->FindBool("active", &active);
+				union koan_cmd_payload payload = {};
+				payload.toplevel_configure.toplevel = fToplevel;
+				payload.toplevel_configure.maximized = -1;
+				payload.toplevel_configure.activated = active ? 1 : 0;
+				_Push(KOAN_CMD_TOPLEVEL_CONFIGURE, payload);
+				break;
+			}
+
+			default:
+				/* Nothing else has a Wayland meaning yet. */
+				break;
+		}
+		return B_OK;
+	}
+
+private:
+	void _Push(enum koan_cmd_type type, const union koan_cmd_payload &payload)
+		const
+	{
+		/* Commands for the Wayland thread wake it through the queue's
+		 * pipe; no app_server wake-up is needed. */
+		struct koan_queue *queue = koan_adapter_queue();
+		if (queue)
+			koan_queue_push(queue, type, &payload, NULL);
+	}
+
+	struct wlr_xdg_toplevel *fToplevel;
+	wayland_window *fHandle;
+	mutable int32 fClientWidth;
+	mutable int32 fClientHeight;
+};
+
 WaylandWindowBridge::WaylandWindowBridge()
 	:
 	fLock("WaylandWindowBridge lock"),
@@ -62,6 +202,7 @@ WaylandWindowBridge::WaylandWindowBridge()
 	fNextViewToken(1)
 {
 	wl_list_init(&fWindows);
+	wl_list_init(&fClients);
 	memset(fSocketName, 0, sizeof(fSocketName));
 }
 
@@ -120,17 +261,22 @@ WaylandWindowBridge::Shutdown()
 		delete ww;
 	}
 	wl_list_init(&fWindows);
+	unregister_all_clients();
 
 	/* The shared client context outlives individual windows. Quit it
-	 * after every ServerWindow is gone so its window list is empty, then
-	 * wait for the message loop to exit before deleting it. */
+	 * after every ServerWindow is asked to quit, and wait for its loop.
+	 * ServerApp::Quit() deletes the object itself (on its own thread when
+	 * running, synchronously otherwise), so never delete it here: doing so
+	 * was a double delete that crashed app_server on shutdown whenever a
+	 * Wayland window had been open. Read the thread before Quit(), after
+	 * which the object may already be gone. */
 	if (fServerApp) {
-		fServerApp->Quit();
-		thread_id thread = fServerApp->Thread();
+		ServerApp *app = fServerApp;
+		fServerApp = NULL;
+		thread_id thread = app->Thread();
+		app->Quit();
 		if (thread >= B_OK)
 			wait_for_thread(thread, NULL);
-		delete fServerApp;
-		fServerApp = NULL;
 	}
 }
 
@@ -288,6 +434,13 @@ WaylandWindowBridge::s_create_window(void *userdata, struct koan_queue *queue,
 	 * the command, so the receiver must not dereference it. */
 	payload.create_window.title = toplevel->title
 		? strdup(toplevel->title) : NULL;
+	payload.create_window.app_id = toplevel->app_id
+		? strdup(toplevel->app_id) : NULL;
+	pid_t pid = 0;
+	if (toplevel->base && toplevel->base->client)
+		wl_client_get_credentials(toplevel->base->client->client, &pid,
+			NULL, NULL);
+	payload.create_window.pid = pid;
 
 	/* Push the command without blocking. app_server processes it on its
 	 * thread and replies via KOAN_CMD_WINDOW_READY, which the Wayland
@@ -296,6 +449,7 @@ WaylandWindowBridge::s_create_window(void *userdata, struct koan_queue *queue,
 	struct koan_command *queued = koan_queue_push(queue,
 		KOAN_CMD_CREATE_WINDOW, &payload, NULL);
 	free(payload.create_window.title);
+	free(payload.create_window.app_id);
 	if (!queued) {
 		wlr_log(WLR_ERROR, "Wayland bridge: failed to queue CREATE_WINDOW");
 		return;
@@ -430,6 +584,8 @@ WaylandWindowBridge::s_queue_processor(struct koan_command *cmd, void *userdata)
 		return bridge->process_set_buffer(cmd);
 	case KOAN_CMD_SET_VISIBILITY:
 		return bridge->process_set_visibility(cmd);
+	case KOAN_CMD_NATIVE_ACTION:
+		return bridge->process_native_action(cmd);
 	default:
 		wlr_log(WLR_ERROR, "Wayland bridge: unknown command type %d",
 			cmd->type);
@@ -480,18 +636,21 @@ WaylandWindowBridge::create_native_window(wayland_window *ww,
 	if (status != B_OK)
 		return status;
 
-	ServerWindow *server_window = new(std::nothrow) ServerWindow(
+	WaylandServerWindow *server_window = new(std::nothrow) WaylandServerWindow(
 		title && title[0] ? title : "Wayland Window",
-		fServerApp, -1, -1, -1);
+		fServerApp, ww->toplevel, ww, ww->pid);
 	if (!server_window)
 		return B_NO_MEMORY;
+	server_window->SetClientSize(width, height);
 
-	/* Offset from the screen corner so the border is visible. */
+	/* A normal titled window: the decorator draws the tab (title, close,
+	 * zoom, minimize) and the window joins native tab stacking. Clients
+	 * are asked to leave the frame to us (server-side decorations). Offset
+	 * from the screen corner so the tab is on screen. */
 	BRect frame(0, 0, width - 1, height - 1);
 	frame.OffsetBy(40, 40);
-	status = server_window->Init(frame, B_BORDERED_WINDOW_LOOK,
-		B_NORMAL_WINDOW_FEEL, B_NOT_RESIZABLE | B_NOT_MINIMIZABLE,
-		B_CURRENT_WORKSPACE);
+	status = server_window->Init(frame, B_TITLED_WINDOW_LOOK,
+		B_NORMAL_WINDOW_FEEL, 0, B_CURRENT_WORKSPACE);
 	if (status != B_OK) {
 		/* Init() may already have added the window to the app's list;
 		 * the destructor removes it again. */
@@ -602,6 +761,8 @@ WaylandWindowBridge::process_create_window(struct koan_command *cmd)
 	ww->server_window = NULL;
 	ww->window = NULL;
 	ww->visible = false;
+	ww->maximized = false;
+	ww->pid = cmd->payload.create_window.pid;
 
 	status_t status = create_native_window(ww, title, width, height);
 	if (status != B_OK) {
@@ -611,12 +772,17 @@ WaylandWindowBridge::process_create_window(struct koan_command *cmd)
 	}
 
 	wl_list_insert(&fWindows, &ww->link);
+	client_window_added(ww->pid, cmd->payload.create_window.app_id);
 	cmd->payload.create_window.window_out = ww;
 
 	/* CREATE_WINDOW is only queued once the toplevel is mapped, so the
 	 * native window starts visible. Re-maps are handled by the adapter's
 	 * SET_VISIBILITY command. */
 	if (fDesktop && ww->window && !ww->visible) {
+		/* What AS_SHOW_OR_HIDE_WINDOW does for a BWindow's Show(): the
+		 * show level starts at 1, and window_info reports it, so Deskbar
+		 * would list a window left at 1 as hidden ("No windows"). */
+		ww->window->SetShowLevel(0);
 		fDesktop->ShowWindow(ww->window);
 		ww->visible = true;
 	}
@@ -655,6 +821,7 @@ WaylandWindowBridge::process_destroy_window(struct koan_command *cmd)
 		return 0;
 
 	wl_list_remove(&ww->link);
+	client_window_removed(ww->pid);
 	destroy_native_window(ww);
 	delete ww;
 	return 0;
@@ -761,7 +928,10 @@ WaylandWindowBridge::process_set_buffer(struct koan_command *cmd)
 	}
 
 	/* Follow the client's size. ResizeWindowBy() takes the all-windows
-	 * write lock itself, as for AS_WINDOW_RESIZE. */
+	 * write lock itself, as for AS_WINDOW_RESIZE. Record the size first so
+	 * the resulting B_WINDOW_RESIZED is not sent back as a configure. */
+	static_cast<WaylandServerWindow *>(ww->server_window)->SetClientSize(
+		width, height);
 	BRect frame = native_window->Frame();
 	int32 dw = width - (frame.IntegerWidth() + 1);
 	int32 dh = height - (frame.IntegerHeight() + 1);
@@ -795,6 +965,256 @@ WaylandWindowBridge::process_set_buffer(struct koan_command *cmd)
 	return 0;
 }
 
+/* -------------------------------------------------------------------------- */
+/* Registrar / Deskbar                                                        */
+/* -------------------------------------------------------------------------- */
+
+/* "application/x-vnd.wayland.<app_id>", reduced to characters valid in a
+ * MIME type. Falls back to the executable's name. */
+static void
+wayland_signature(const char *app_id, const char *exe, BString &signature)
+{
+	const char *name = app_id && app_id[0] ? app_id : exe;
+	if (!name || !name[0])
+		name = "client";
+	signature = "application/x-vnd.wayland.";
+	for (const char *c = name; *c && signature.Length() < B_MIME_TYPE_LENGTH
+			- 1; c++) {
+		char ch = tolower((unsigned char)*c);
+		signature += isalnum((unsigned char)ch) || ch == '.' || ch == '-'
+			|| ch == '_' || ch == '+' ? ch : '-';
+	}
+}
+
+/* Path of a client's executable. /proc/<pid>/exe first; sandboxed clients
+ * (Firefox) make themselves non-dumpable, which hides it even from the same
+ * user, so fall back to argv[0] from /proc/<pid>/cmdline (always readable),
+ * resolved against PATH when it is not absolute. */
+static bool
+client_executable(int32 pid, char *path, size_t size)
+{
+	char procPath[64];
+	snprintf(procPath, sizeof(procPath), "/proc/%d/exe", (int)pid);
+	ssize_t length = readlink(procPath, path, size - 1);
+	if (length > 0) {
+		path[length] = '\0';
+		return true;
+	}
+
+	snprintf(procPath, sizeof(procPath), "/proc/%d/cmdline", (int)pid);
+	FILE *file = fopen(procPath, "r");
+	if (!file)
+		return false;
+	char argv0[PATH_MAX];
+	size_t read = fread(argv0, 1, sizeof(argv0) - 1, file);
+	fclose(file);
+	if (read == 0)
+		return false;
+	argv0[read] = '\0';     /* argv[0] ends at the first NUL */
+
+	if (argv0[0] == '/') {
+		strlcpy(path, argv0, size);
+		return access(path, X_OK) == 0;
+	}
+	const char *env = getenv("PATH");
+	BString dirs(env ? env : "/usr/bin:/bin");
+	int32 start = 0;
+	while (start <= dirs.Length()) {
+		int32 end = dirs.FindFirst(':', start);
+		if (end < 0)
+			end = dirs.Length();
+		BString dir;
+		dirs.CopyInto(dir, start, end - start);
+		snprintf(path, size, "%s/%s", dir.String(), argv0);
+		if (dir.Length() > 0 && access(path, X_OK) == 0)
+			return true;
+		start = end + 1;
+	}
+	return false;
+}
+
+void
+WaylandWindowBridge::client_window_added(int32 pid, const char *app_id)
+{
+	if (pid <= 0)
+		return;
+
+	wayland_client *client;
+	wl_list_for_each(client, &fClients, link) {
+		if (client->pid == pid) {
+			client->windows++;
+			return;
+		}
+	}
+
+	client = new(std::nothrow) wayland_client;
+	if (!client)
+		return;
+	client->pid = pid;
+	client->windows = 1;
+	client->registered = false;
+	wl_list_insert(&fClients, &client->link);
+
+	/* Register the process like a launched app, so Deskbar's team list
+	 * (be_roster) shows it and its windows (team == pid, see
+	 * WaylandServerWindow). The ref names the executable, which gives
+	 * Deskbar its name. */
+	char exePath[PATH_MAX];
+	if (!client_executable(pid, exePath, sizeof(exePath))) {
+		wlr_log(WLR_ERROR, "Wayland bridge: no executable for pid %d",
+			(int)pid);
+		return;
+	}
+
+	entry_ref ref;
+	if (get_ref_for_path(exePath, &ref) != B_OK) {
+		wlr_log(WLR_ERROR, "Wayland bridge: no entry_ref for %s", exePath);
+		return;
+	}
+
+	BString signature;
+	const char *leaf = strrchr(exePath, '/');
+	wayland_signature(app_id, leaf ? leaf + 1 : exePath, signature);
+
+	uint32 token = 0;
+	team_id otherTeam = -1;
+	status_t status = BRoster::Private().AddApplication(signature.String(),
+		&ref, B_MULTIPLE_LAUNCH, pid, pid, -1, true, &token, &otherTeam);
+	if (status != B_OK) {
+		wlr_log(WLR_ERROR, "Wayland bridge: registering %s (pid %d) failed: "
+			"%s", signature.String(), (int)pid, strerror(status));
+		return;
+	}
+	client->registered = true;
+}
+
+void
+WaylandWindowBridge::client_window_removed(int32 pid)
+{
+	wayland_client *client, *tmp;
+	wl_list_for_each_safe(client, tmp, &fClients, link) {
+		if (client->pid != pid)
+			continue;
+		if (--client->windows > 0)
+			return;
+		/* Last window gone: the app leaves Deskbar. */
+		if (client->registered)
+			BRoster::Private().RemoveApp(pid);
+		wl_list_remove(&client->link);
+		delete client;
+		return;
+	}
+}
+
+void
+WaylandWindowBridge::unregister_all_clients()
+{
+	wayland_client *client, *tmp;
+	wl_list_for_each_safe(client, tmp, &fClients, link) {
+		if (client->registered)
+			BRoster::Private().RemoveApp(client->pid);
+		wl_list_remove(&client->link);
+		delete client;
+	}
+	wl_list_init(&fClients);
+}
+
+void
+WaylandWindowBridge::QueueNativeAction(void *window, int32 action, int32 arg)
+{
+	struct koan_queue *queue = koan_adapter_queue();
+	if (!queue)
+		return;
+
+	union koan_cmd_payload payload = {};
+	payload.native_action.window = window;
+	payload.native_action.action = action;
+	payload.native_action.arg = arg;
+	if (koan_queue_push(queue, KOAN_CMD_NATIVE_ACTION, &payload, NULL))
+		_Wake();
+}
+
+int
+WaylandWindowBridge::process_native_action(struct koan_command *cmd)
+{
+	const struct koan_cmd_native_action *a = &cmd->payload.native_action;
+
+	BAutolock locker(fLock);
+
+	/* The window may have been destroyed since the action was queued. */
+	wayland_window *ww = NULL;
+	wayland_window *w;
+	wl_list_for_each(w, &fWindows, link) {
+		if (w == a->window) {
+			ww = w;
+			break;
+		}
+	}
+	if (!ww || !ww->window || !fDesktop)
+		return 0;
+
+	switch (a->action) {
+		case KOAN_NATIVE_MINIMIZE:
+			/* What a BWindow client does when it gets B_MINIMIZE. */
+			fDesktop->MinimizeWindow(ww->window, a->arg != 0);
+			break;
+		case KOAN_NATIVE_ZOOM:
+			zoom_window(ww);
+			break;
+		default:
+			break;
+	}
+	return 0;
+}
+
+/* Maximize/restore. The native window moves now; its size follows when the
+ * client commits a frame at the configured size (process_set_buffer()). */
+void
+WaylandWindowBridge::zoom_window(wayland_window *ww)
+{
+	::Window *window = ww->window;
+	BRect frame = window->Frame();
+	BRect target;
+
+	if (!ww->maximized) {
+		if (!fDesktop->LockSingleWindow())
+			return;
+		const ::Screen *screen = window->Screen();
+		BRect screenFrame = screen ? screen->Frame()
+			: BRect(0, 0, 1023, 767);
+		/* Keep the decorator (tab and borders) on screen. */
+		BRect footprint = frame;
+		if (window->Decorator())
+			footprint = window->Decorator()->GetFootprint().Frame();
+		fDesktop->UnlockSingleWindow();
+
+		target = screenFrame;
+		target.left += frame.left - footprint.left;
+		target.top += frame.top - footprint.top;
+		target.right -= footprint.right - frame.right;
+		target.bottom -= footprint.bottom - frame.bottom;
+		if (!target.IsValid())
+			return;
+		ww->restore_frame = frame;
+		ww->maximized = true;
+	} else {
+		target = ww->restore_frame;
+		ww->maximized = false;
+	}
+
+	fDesktop->MoveWindowBy(window, target.left - frame.left,
+		target.top - frame.top);
+
+	union koan_cmd_payload payload = {};
+	payload.toplevel_configure.toplevel = ww->toplevel;
+	payload.toplevel_configure.width = target.IntegerWidth() + 1;
+	payload.toplevel_configure.height = target.IntegerHeight() + 1;
+	payload.toplevel_configure.maximized = ww->maximized ? 1 : 0;
+	payload.toplevel_configure.activated = -1;
+	koan_queue_push(koan_adapter_queue(), KOAN_CMD_TOPLEVEL_CONFIGURE,
+		&payload, NULL);
+}
+
 int
 WaylandWindowBridge::process_set_visibility(struct koan_command *cmd)
 {
@@ -807,10 +1227,13 @@ WaylandWindowBridge::process_set_visibility(struct koan_command *cmd)
 	if (!ww || !ww->window || !fDesktop)
 		return 0;
 
+	/* Keep the show level in step, as AS_SHOW_OR_HIDE_WINDOW does. */
 	if (visible && !ww->visible) {
+		ww->window->SetShowLevel(0);
 		fDesktop->ShowWindow(ww->window);
 		ww->visible = true;
 	} else if (!visible && ww->visible) {
+		ww->window->SetShowLevel(1);
 		fDesktop->HideWindow(ww->window);
 		ww->visible = false;
 	}

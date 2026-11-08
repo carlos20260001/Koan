@@ -76,7 +76,10 @@ public:
 									{ return fHandlerMessenger; }
 
 			void				ScreenChanged(const BMessage* message);
-			status_t			SendMessageToClient(const BMessage* message,
+			// Every desktop -> client notification (B_QUIT_REQUESTED,
+			// B_MINIMIZE, B_ZOOM, B_WINDOW_RESIZED, B_WINDOW_ACTIVATED, ...)
+			// goes through here; windows without a BWindow client override it.
+	virtual	status_t			SendMessageToClient(const BMessage* message,
 									int32 target = B_NULL_TOKEN) const;
 
 	virtual	::Window*			MakeWindow(BRect frame, const char* name,
@@ -111,6 +114,13 @@ public:
 						// TODO: Change this
 	inline	void				UpdateCurrentDrawingRegion()
 									{ _UpdateCurrentDrawingRegion(); };
+
+protected:
+			// For windows whose client is not the owning ServerApp's team
+			// (Wayland toplevels share one ServerApp): the team reported in
+			// window lists and window_info, e.g. to Deskbar.
+			void				_SetClientTeam(team_id team)
+									{ fClientTeam = team; }
 
 private:
 			View*				_CreateView(BPrivate::LinkReceiver &link,

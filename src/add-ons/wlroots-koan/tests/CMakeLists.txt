@@ -14,7 +14,11 @@ set(_koan_test_xdg_xml
     "${CMAKE_CURRENT_SOURCE_DIR}/../protocol/stable/xdg-shell/xdg-shell.xml")
 set(_koan_test_xdg_header
     "${CMAKE_CURRENT_BINARY_DIR}/xdg-shell-client-protocol.h")
-# Only the client header: the interface tables are already in libwlroots.
+set(_koan_test_deco_xml
+    "${CMAKE_CURRENT_SOURCE_DIR}/../protocol/unstable/xdg-decoration/xdg-decoration-unstable-v1.xml")
+set(_koan_test_deco_header
+    "${CMAKE_CURRENT_BINARY_DIR}/xdg-decoration-unstable-v1-client-protocol.h")
+# Only client headers: the interface tables are already in libwlroots.
 add_custom_command(
     OUTPUT "${_koan_test_xdg_header}"
     COMMAND "${WAYLAND_SCANNER}" client-header
@@ -22,9 +26,17 @@ add_custom_command(
     DEPENDS "${_koan_test_xdg_xml}"
     VERBATIM
 )
+add_custom_command(
+    OUTPUT "${_koan_test_deco_header}"
+    COMMAND "${WAYLAND_SCANNER}" client-header
+        "${_koan_test_deco_xml}" "${_koan_test_deco_header}"
+    DEPENDS "${_koan_test_deco_xml}"
+    VERBATIM
+)
 add_executable(koan_xdg_client_test
     koan_xdg_client_test.c
     "${_koan_test_xdg_header}"
+    "${_koan_test_deco_header}"
 )
 target_include_directories(koan_xdg_client_test PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}/../server"

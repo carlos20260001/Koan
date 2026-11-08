@@ -29,6 +29,8 @@
 #include <wlr/types/wlr_seat.h>
 #include <wlr/types/wlr_subcompositor.h>
 #include <wlr/types/wlr_xdg_shell.h>
+#include <wlr/types/wlr_xdg_decoration_v1.h>
+#include <wlr/types/wlr_server_decoration.h>
 #include <wlr/types/wlr_shm.h>
 #include <wlr/util/log.h>
 
@@ -50,6 +52,13 @@ struct koan_server {
 	struct wlr_seat *seat;
 	struct wlr_cursor *cursor;
 	struct wlr_xdg_shell *xdg_shell;
+	/* app_server draws the window frame (title tab, controls, stacking):
+	 * ask clients not to draw their own. xdg-decoration for GTK4/Qt/most
+	 * clients, the KDE protocol for GTK3 (Firefox). */
+	struct wlr_xdg_decoration_manager_v1 *xdg_decoration_manager;
+	struct wlr_server_decoration_manager *kde_decoration_manager;
+	struct wl_list decorations;   /* struct koan_decoration.link */
+	struct wl_listener new_toplevel_decoration;
 	struct wlr_scene *scene;
 	struct wlr_scene_output_layout *scene_layout;
 	struct wlr_output_layout *output_layout;
@@ -133,6 +142,71 @@ static void koan_surface_handle_unmap(struct wl_listener *listener,
 		kt->toplevel->title ? kt->toplevel->title : "(null)");
 }
 
+/* -------------------------------------------------------------------------- */
+/* Server-side decorations                                                    */
+/* -------------------------------------------------------------------------- */
+
+struct koan_decoration {
+	struct wl_list link;
+	struct wlr_xdg_toplevel_decoration_v1 *decoration;
+	struct wl_listener destroy;
+	struct wl_listener request_mode;
+};
+
+/* wlr_xdg_toplevel_decoration_v1_set_mode() schedules a configure, which
+ * asserts the xdg surface is initialized; clients usually create the
+ * decoration before their first commit. Set the mode now if possible,
+ * otherwise koan_decorations_initial_commit() does it. */
+static void koan_decoration_apply(struct koan_decoration *kd) {
+	if (kd->decoration->toplevel->base->initialized)
+		wlr_xdg_toplevel_decoration_v1_set_mode(kd->decoration,
+			WLR_XDG_TOPLEVEL_DECORATION_V1_MODE_SERVER_SIDE);
+}
+
+static void koan_decoration_handle_request_mode(struct wl_listener *listener,
+		void *data) {
+	(void)data;
+	struct koan_decoration *kd = wl_container_of(listener, kd, request_mode);
+	/* Server side whatever the client asks: app_server owns the frame. */
+	koan_decoration_apply(kd);
+}
+
+static void koan_decoration_handle_destroy(struct wl_listener *listener,
+		void *data) {
+	(void)data;
+	struct koan_decoration *kd = wl_container_of(listener, kd, destroy);
+	wl_list_remove(&kd->destroy.link);
+	wl_list_remove(&kd->request_mode.link);
+	wl_list_remove(&kd->link);
+	free(kd);
+}
+
+static void koan_server_handle_new_toplevel_decoration(
+		struct wl_listener *listener, void *data) {
+	(void)listener;
+	struct wlr_xdg_toplevel_decoration_v1 *decoration = data;
+	struct koan_decoration *kd = calloc(1, sizeof(*kd));
+	if (!kd)
+		return;
+	kd->decoration = decoration;
+	kd->destroy.notify = koan_decoration_handle_destroy;
+	wl_signal_add(&decoration->events.destroy, &kd->destroy);
+	kd->request_mode.notify = koan_decoration_handle_request_mode;
+	wl_signal_add(&decoration->events.request_mode, &kd->request_mode);
+	wl_list_insert(&g_server.decorations, &kd->link);
+	koan_decoration_apply(kd);
+}
+
+/* The toplevel's initial commit initialized its xdg surface: apply the
+ * modes that could not be set when the decoration was created. */
+static void koan_decorations_initial_commit(struct wlr_xdg_toplevel *toplevel) {
+	struct koan_decoration *kd;
+	wl_list_for_each(kd, &g_server.decorations, link) {
+		if (kd->decoration->toplevel == toplevel)
+			koan_decoration_apply(kd);
+	}
+}
+
 /* Commits are tracked on every surface, not only on toplevel roots:
  * clients draw into subsurfaces (Firefox renders the whole window into one)
  * and a desynchronized subsurface commits on its own. */
@@ -173,6 +247,7 @@ static void koan_any_surface_handle_commit(struct wl_listener *listener,
 	 * the client waits forever and never attaches a buffer or maps.
 	 * 0x0 lets the client choose its own size. */
 	if (surface == root && toplevel->base->initial_commit) {
+		koan_decorations_initial_commit(toplevel);
 		wlr_xdg_toplevel_set_size(toplevel, 0, 0);
 		return;
 	}
@@ -392,6 +467,8 @@ struct wl_display *koan_server_create(void) {
 	wl_list_init(&server->toplevels);
 	wl_list_init(&server->new_input.link);
 	wl_list_init(&server->new_surface.link);
+	wl_list_init(&server->new_toplevel_decoration.link);
+	wl_list_init(&server->decorations);
 	wl_list_init(&server->new_xdg_toplevel.link);
 	wl_list_init(&server->new_xdg_popup.link);
 
@@ -517,6 +594,28 @@ struct wl_display *koan_server_create(void) {
 		koan_server_destroy(server->display);
 		return NULL;
 	}
+
+	/* Server-side decorations. Optional: without them clients just draw
+	 * their own frame inside the native window. */
+	server->xdg_decoration_manager =
+		wlr_xdg_decoration_manager_v1_create(server->display);
+	if (server->xdg_decoration_manager) {
+		server->new_toplevel_decoration.notify =
+			koan_server_handle_new_toplevel_decoration;
+		wl_signal_add(
+			&server->xdg_decoration_manager->events.new_toplevel_decoration,
+			&server->new_toplevel_decoration);
+	} else {
+		wlr_log(WLR_ERROR, "Koan: failed to create xdg-decoration manager");
+	}
+	server->kde_decoration_manager =
+		wlr_server_decoration_manager_create(server->display);
+	if (server->kde_decoration_manager)
+		wlr_server_decoration_manager_set_default_mode(
+			server->kde_decoration_manager,
+			WLR_SERVER_DECORATION_MANAGER_MODE_SERVER);
+	else
+		wlr_log(WLR_ERROR, "Koan: failed to create KDE decoration manager");
 	server->new_xdg_toplevel.notify = koan_server_handle_new_xdg_toplevel;
 	wl_signal_add(&server->xdg_shell->events.new_toplevel,
 		&server->new_xdg_toplevel);
@@ -637,6 +736,7 @@ void koan_server_destroy(struct wl_display *display) {
 	wl_list_remove(&server->new_xdg_popup.link);
 	wl_list_remove(&server->new_input.link);
 	wl_list_remove(&server->new_surface.link);
+	wl_list_remove(&server->new_toplevel_decoration.link);
 
 	if (server->seat)
 		wlr_seat_destroy(server->seat);

@@ -55,6 +55,8 @@ direction_for_type(enum koan_cmd_type type) {
 	case KOAN_CMD_KEYBOARD_MODIFIERS:
 	case KOAN_CMD_KEYBOARD_FOCUS:
 	case KOAN_CMD_WINDOW_READY:
+	case KOAN_CMD_TOPLEVEL_CLOSE:
+	case KOAN_CMD_TOPLEVEL_CONFIGURE:
 		return KOAN_QUEUE_TO_WAYLAND;
 	default:
 		return KOAN_QUEUE_TO_APP_SERVER;
@@ -70,9 +72,19 @@ static void *dup_payload(const union koan_cmd_payload *src,
 	switch (type) {
 	case KOAN_CMD_CREATE_WINDOW:
 		memcpy(dst, src, sizeof(*dst));
+		dst->create_window.title = NULL;
+		dst->create_window.app_id = NULL;
 		if (src->create_window.title) {
 			dst->create_window.title = strdup(src->create_window.title);
 			if (!dst->create_window.title) {
+				free(dst);
+				return NULL;
+			}
+		}
+		if (src->create_window.app_id) {
+			dst->create_window.app_id = strdup(src->create_window.app_id);
+			if (!dst->create_window.app_id) {
+				free(dst->create_window.title);
 				free(dst);
 				return NULL;
 			}
@@ -109,6 +121,7 @@ static void free_payload(union koan_cmd_payload *payload,
 	switch (type) {
 	case KOAN_CMD_CREATE_WINDOW:
 		free(payload->create_window.title);
+		free(payload->create_window.app_id);
 		break;
 	case KOAN_CMD_SET_TITLE:
 		free(payload->set_title.title);
@@ -126,6 +139,9 @@ static void free_payload(union koan_cmd_payload *payload,
 	case KOAN_CMD_KEYBOARD_KEY:
 	case KOAN_CMD_KEYBOARD_MODIFIERS:
 	case KOAN_CMD_KEYBOARD_FOCUS:
+	case KOAN_CMD_TOPLEVEL_CLOSE:
+	case KOAN_CMD_TOPLEVEL_CONFIGURE:
+	case KOAN_CMD_NATIVE_ACTION:
 		/* No heap-owned payload. */
 		break;
 	}
