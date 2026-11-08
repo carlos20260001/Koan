@@ -109,4 +109,7 @@ set_target_properties(web PROPERTIES
 	SOVERSION 1
 )
 
-install(TARGETS web DESTINATION /system/lib/)
+# Installed to /lib through SYSTEM_LIBS (build/profiles/base.cmake). Not
+# also to /system/lib: postinst turns /system/lib into a symlink to /lib,
+# so a second copy aliased the same file and broke dpkg upgrades
+# ("unable to open '/system/lib/libweb.so.1.0.0.dpkg-new'").

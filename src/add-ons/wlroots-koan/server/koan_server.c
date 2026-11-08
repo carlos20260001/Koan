@@ -58,6 +58,7 @@ struct koan_server {
 	struct wl_list toplevels;     /* struct koan_toplevel.link */
 
 	struct wl_listener new_input;
+	struct wl_listener new_surface;
 	struct wl_listener new_xdg_toplevel;
 	struct wl_listener new_xdg_popup;
 
@@ -93,7 +94,6 @@ struct koan_toplevel {
 	struct wlr_surface *surface;
 	struct wl_listener surface_map;
 	struct wl_listener surface_unmap;
-	struct wl_listener surface_commit;
 	struct wl_listener surface_destroy;
 };
 
@@ -102,7 +102,6 @@ static void koan_toplevel_destroy(struct koan_toplevel *kt) {
 		return;
 	wl_list_remove(&kt->surface_map.link);
 	wl_list_remove(&kt->surface_unmap.link);
-	wl_list_remove(&kt->surface_commit.link);
 	wl_list_remove(&kt->surface_destroy.link);
 	wl_list_remove(&kt->link);
 	free(kt);
@@ -125,17 +124,94 @@ static void koan_surface_handle_unmap(struct wl_listener *listener,
 		void *data) {
 	struct koan_toplevel *kt =
 		wl_container_of(listener, kt, surface_unmap);
+	/* Re-init after removal: destroy removes the link again, and
+	 * wl_list_remove() leaves NULL pointers behind. */
 	wl_list_remove(&kt->link);
+	wl_list_init(&kt->link);
 	koan_adapter_toplevel_unmapped(kt->toplevel);
 	wlr_log(WLR_INFO, "Koan adapter: xdg_toplevel unmapped (%s)",
 		kt->toplevel->title ? kt->toplevel->title : "(null)");
 }
 
-static void koan_surface_handle_commit(struct wl_listener *listener,
+/* Commits are tracked on every surface, not only on toplevel roots:
+ * clients draw into subsurfaces (Firefox renders the whole window into one)
+ * and a desynchronized subsurface commits on its own. */
+struct koan_surface {
+	struct wlr_surface *surface;
+	struct wl_listener commit;
+	struct wl_listener destroy;
+};
+
+static void koan_send_frame_done(struct wlr_surface *surface, int sx, int sy,
 		void *data) {
-	struct koan_toplevel *kt =
-		wl_container_of(listener, kt, surface_commit);
-	koan_adapter_toplevel_committed(kt->toplevel);
+	(void)sx;
+	(void)sy;
+	wlr_surface_send_frame_done(surface, data);
+}
+
+static void koan_any_surface_handle_commit(struct wl_listener *listener,
+		void *data) {
+	(void)data;
+	struct koan_surface *ks = wl_container_of(listener, ks, commit);
+	struct wlr_surface *surface = ks->surface;
+
+	/* A synchronized subsurface's state is applied with its parent's
+	 * commit, which delivers the whole tree. */
+	struct wlr_subsurface *subsurface =
+		wlr_subsurface_try_from_wlr_surface(surface);
+	if (subsurface && subsurface->synchronized)
+		return;
+
+	struct wlr_surface *root = wlr_surface_get_root_surface(surface);
+	struct wlr_xdg_toplevel *toplevel =
+		wlr_xdg_toplevel_try_from_wlr_surface(root);
+	if (!toplevel)
+		return;
+
+	/* wlroots does not configure new toplevels by itself: the compositor
+	 * must answer the initial (buffer-less) commit with a configure, or
+	 * the client waits forever and never attaches a buffer or maps.
+	 * 0x0 lets the client choose its own size. */
+	if (surface == root && toplevel->base->initial_commit) {
+		wlr_xdg_toplevel_set_size(toplevel, 0, 0);
+		return;
+	}
+	if (!root->mapped)
+		return;
+
+	koan_adapter_toplevel_committed(toplevel);
+
+	/* The pixels were copied out on commit, so every surface of the tree
+	 * may draw its next frame now. Clients that throttle on
+	 * wl_surface.frame (GTK, Firefox) otherwise stop after one frame. */
+	struct timespec now;
+	clock_gettime(CLOCK_MONOTONIC, &now);
+	wlr_surface_for_each_surface(root, koan_send_frame_done, &now);
+}
+
+static void koan_any_surface_handle_destroy(struct wl_listener *listener,
+		void *data) {
+	(void)data;
+	struct koan_surface *ks = wl_container_of(listener, ks, destroy);
+	wl_list_remove(&ks->commit.link);
+	wl_list_remove(&ks->destroy.link);
+	free(ks);
+}
+
+static void koan_server_handle_new_surface(struct wl_listener *listener,
+		void *data) {
+	(void)listener;
+	struct wlr_surface *surface = data;
+	struct koan_surface *ks = calloc(1, sizeof(*ks));
+	if (!ks) {
+		wlr_log(WLR_ERROR, "Koan: failed to track a new surface");
+		return;
+	}
+	ks->surface = surface;
+	ks->commit.notify = koan_any_surface_handle_commit;
+	wl_signal_add(&surface->events.commit, &ks->commit);
+	ks->destroy.notify = koan_any_surface_handle_destroy;
+	wl_signal_add(&surface->events.destroy, &ks->destroy);
 }
 
 static void koan_surface_handle_destroy(struct wl_listener *listener,
@@ -164,14 +240,15 @@ static void koan_server_handle_new_xdg_toplevel(struct wl_listener *listener,
 	kt->server = server;
 	kt->toplevel = toplevel;
 	kt->surface = surface;
+	/* Only mapped toplevels are on server->toplevels; keep the link valid
+	 * so unmap/destroy can remove it unconditionally. */
+	wl_list_init(&kt->link);
 
 	/* Surface lifecycle events. */
 	kt->surface_map.notify = koan_surface_handle_map;
 	wl_signal_add(&surface->events.map, &kt->surface_map);
 	kt->surface_unmap.notify = koan_surface_handle_unmap;
 	wl_signal_add(&surface->events.unmap, &kt->surface_unmap);
-	kt->surface_commit.notify = koan_surface_handle_commit;
-	wl_signal_add(&surface->events.commit, &kt->surface_commit);
 	kt->surface_destroy.notify = koan_surface_handle_destroy;
 	wl_signal_add(&surface->events.destroy, &kt->surface_destroy);
 }
@@ -270,6 +347,19 @@ static bool koan_server_create_output(struct koan_server *server) {
 		wlr_log(WLR_ERROR, "Koan output: initial commit failed");
 	wlr_output_state_finish(&state);
 
+	/* wlr_cursor_attach_output_layout() creates a wlr_output_cursor for
+	 * every output and wlr_output_cursor_set_buffer() asserts
+	 * output->renderer != NULL, aborting app_server at startup. Give the
+	 * output the server's renderer/allocator. This is done after the
+	 * initial commit so enabling the output does not allocate a primary
+	 * swapchain buffer Koan never presents. */
+	if (!wlr_output_init_render(output, server->allocator,
+			server->renderer)) {
+		wlr_log(WLR_ERROR, "Koan output: failed to initialise rendering");
+		wlr_output_destroy(output);
+		return false;
+	}
+
 	wlr_output_create_global(output, server->display);
 	wlr_output_layout_add(server->output_layout, output, 0, 0);
 	server->output = output;
@@ -301,6 +391,7 @@ struct wl_display *koan_server_create(void) {
 	struct koan_server *server = &g_server;
 	wl_list_init(&server->toplevels);
 	wl_list_init(&server->new_input.link);
+	wl_list_init(&server->new_surface.link);
 	wl_list_init(&server->new_xdg_toplevel.link);
 	wl_list_init(&server->new_xdg_popup.link);
 
@@ -394,6 +485,9 @@ struct wl_display *koan_server_create(void) {
 		koan_server_destroy(server->display);
 		return NULL;
 	}
+	server->new_surface.notify = koan_server_handle_new_surface;
+	wl_signal_add(&server->compositor->events.new_surface,
+		&server->new_surface);
 
 	/* Output layout for tracking screens. These are required by the
 	 * scene/cursor and the synthetic output; fail cleanly if any cannot
@@ -465,7 +559,22 @@ struct wl_display *koan_server_create(void) {
 const char *koan_server_add_socket(struct wl_display *display) {
 	if (!display)
 		return NULL;
-	const char *socket = wl_display_add_socket_auto(display);
+	/* The session (janus_session) exports WAYLAND_DISPLAY to every app it
+	 * starts, so bind exactly that name: clients only find the server
+	 * through it. wl_display_add_socket(display, NULL) uses
+	 * $WAYLAND_DISPLAY. Fall back to an automatic name if it is unset or
+	 * taken; clients then need WAYLAND_DISPLAY set by hand. */
+	const char *socket = NULL;
+	const char *wanted = getenv("WAYLAND_DISPLAY");
+	if (wanted != NULL && wanted[0] != '\0') {
+		if (wl_display_add_socket(display, NULL) == 0)
+			socket = wanted;
+		else
+			wlr_log(WLR_ERROR, "Failed to bind WAYLAND_DISPLAY=%s; "
+				"falling back to an automatic socket name", wanted);
+	}
+	if (!socket)
+		socket = wl_display_add_socket_auto(display);
 	if (!socket) {
 		wlr_log(WLR_ERROR, "Failed to add Wayland socket");
 		return NULL;
@@ -527,6 +636,7 @@ void koan_server_destroy(struct wl_display *display) {
 	wl_list_remove(&server->new_xdg_toplevel.link);
 	wl_list_remove(&server->new_xdg_popup.link);
 	wl_list_remove(&server->new_input.link);
+	wl_list_remove(&server->new_surface.link);
 
 	if (server->seat)
 		wlr_seat_destroy(server->seat);

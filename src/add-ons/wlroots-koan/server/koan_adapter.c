@@ -29,6 +29,7 @@
 
 #include <stdlib.h>
 #include <string.h>
+#include <drm_fourcc.h>
 #include <wlr/types/wlr_buffer.h>
 #include <wlr/types/wlr_compositor.h>
 #include <wlr/types/wlr_xdg_shell.h>
@@ -106,59 +107,108 @@ static void koan_toplevel_destroy(struct koan_toplevel *kt) {
 	free(kt);
 }
 
-/* Copy SHM buffer pixels into Koan-owned memory.
- * Returns allocated buffer (caller frees) or NULL on failure.
- * The wlroots buffer must be locked and begin_data_ptr_access()ed by the
- * caller before calling this; it is the caller's responsibility to end
- * data pointer access and unlock after. */
-static bool copy_buffer_pixels(struct wlr_buffer *buffer,
-			       int32_t width, int32_t height,
-			       void **data_out, int32_t *stride_out,
-			       uint32_t *format_out) {
-	void *data = NULL;
+/* The part of the surface tree app_server should show: the xdg window
+ * geometry (clients such as GTK/Firefox draw shadows outside it), clamped
+ * to the extents of the whole surface tree, in root-surface coordinates.
+ * Falls back to the tree extents. */
+static struct wlr_box window_box(struct wlr_xdg_toplevel *toplevel) {
+	struct wlr_box ext;
+	wlr_surface_get_extents(toplevel->base->surface, &ext);
+	struct wlr_box box = ext;
+	const struct wlr_box *g = &toplevel->base->geometry;
+	if (g->width > 0 && g->height > 0) {
+		int32_t x1 = g->x > ext.x ? g->x : ext.x;
+		int32_t y1 = g->y > ext.y ? g->y : ext.y;
+		int32_t x2 = g->x + g->width;
+		int32_t y2 = g->y + g->height;
+		if (x2 > ext.x + ext.width)
+			x2 = ext.x + ext.width;
+		if (y2 > ext.y + ext.height)
+			y2 = ext.y + ext.height;
+		if (x2 > x1 && y2 > y1) {
+			box.x = x1;
+			box.y = y1;
+			box.width = x2 - x1;
+			box.height = y2 - y1;
+		}
+	}
+	return box;
+}
+
+struct compose_target {
+	uint32_t *pixels;     /* premultiplied ARGB8888, box-sized */
+	struct wlr_box box;   /* in root-surface coordinates */
+};
+
+/* wlr_surface_for_each_surface() iterator: draw one surface of the tree
+ * over what is already composed (root first, children in stacking order).
+ * Clients put their content in subsurfaces (Firefox renders the whole
+ * window into one, the root only carries the transparent CSD frame), so
+ * the root buffer alone is not what the user should see. */
+static void compose_surface(struct wlr_surface *surface, int sx, int sy,
+			    void *data) {
+	struct compose_target *t = data;
+	if (!surface->buffer)
+		return;
+
+	struct wlr_buffer *buffer = &surface->buffer->base;
+	void *src = NULL;
 	uint32_t format = 0;
 	size_t stride = 0;
-
 	if (!wlr_buffer_begin_data_ptr_access(buffer,
-			WLR_BUFFER_DATA_PTR_ACCESS_READ,
-			&data, &format, &stride)) {
-		wlr_log(WLR_ERROR, "Koan adapter: failed to begin buffer data ptr "
-			"access");
-		return false;
-	}
+			WLR_BUFFER_DATA_PTR_ACCESS_READ, &src, &format, &stride))
+		return;
 
-	if (!data || stride == 0 || width <= 0 || height <= 0) {
+	bool opaque;
+	switch (format) {
+	case DRM_FORMAT_ARGB8888:
+		opaque = false;
+		break;
+	case DRM_FORMAT_XRGB8888:
+		opaque = true;
+		break;
+	default:
+		/* Every wl_shm client must support these two. */
 		wlr_buffer_end_data_ptr_access(buffer);
-		wlr_log(WLR_ERROR, "Koan adapter: invalid buffer (data=%p stride=%zu "
-			"width=%d height=%d)", data, stride, width, height);
-		return false;
+		wlr_log(WLR_ERROR, "Koan adapter: unsupported shm format 0x%08x",
+			format);
+		return;
 	}
 
-	/* Guard against integer overflow in allocation size. */
-	if ((int64_t)height * (int64_t)stride > INT32_MAX) {
-		wlr_buffer_end_data_ptr_access(buffer);
-		wlr_log(WLR_ERROR, "Koan adapter: buffer too large (%dx%d stride %d)",
-			width, height, (int)stride);
-		return false;
-	}
+	/* Buffer scale 1 and no viewporter: buffer pixels map 1:1 to surface
+	 * coordinates. Clip the buffer against the target box. */
+	int32_t x0 = sx < t->box.x ? t->box.x - sx : 0;
+	int32_t y0 = sy < t->box.y ? t->box.y - sy : 0;
+	int32_t x1 = buffer->width;
+	int32_t y1 = buffer->height;
+	if (sx + x1 > t->box.x + t->box.width)
+		x1 = t->box.x + t->box.width - sx;
+	if (sy + y1 > t->box.y + t->box.height)
+		y1 = t->box.y + t->box.height - sy;
 
-	size_t copy_bytes = (size_t)height * stride;
-	void *copy = malloc(copy_bytes);
-	if (!copy) {
-		wlr_buffer_end_data_ptr_access(buffer);
-		wlr_log(WLR_ERROR, "Koan adapter: failed to allocate %zu bytes for "
-			"buffer copy", copy_bytes);
-		return false;
+	for (int32_t y = y0; y < y1; y++) {
+		const uint32_t *in = (const uint32_t *)((const uint8_t *)src
+			+ (size_t)y * stride);
+		uint32_t *out = t->pixels + (size_t)(sy + y - t->box.y)
+			* t->box.width + (sx - t->box.x);
+		for (int32_t x = x0; x < x1; x++) {
+			uint32_t s = in[x];
+			uint32_t a = s >> 24;
+			if (opaque || a == 0xff) {
+				out[x] = s | 0xff000000u;
+			} else if (a != 0) {
+				/* Premultiplied "over": dst = src + dst * (1 - a). */
+				uint32_t d = out[x];
+				uint32_t inv = 255 - a;
+				uint32_t rb = ((d & 0x00ff00ffu) * inv + 0x00800080u) >> 8;
+				uint32_t ag = (((d >> 8) & 0x00ff00ffu) * inv + 0x00800080u)
+					>> 8;
+				out[x] = s + ((rb & 0x00ff00ffu) | ((ag & 0x00ff00ffu) << 8));
+			}
+		}
 	}
-
-	memcpy(copy, data, copy_bytes);
 
 	wlr_buffer_end_data_ptr_access(buffer);
-
-	*data_out = copy;
-	*stride_out = (int32_t)stride;
-	*format_out = format;
-	return true;
 }
 
 /* -------------------------------------------------------------------------- */
@@ -367,33 +417,36 @@ static void create_native_window(struct koan_toplevel *kt,
 	g_cbs.create_window(g_userdata, g_queue, kt->toplevel, width, height);
 }
 
-/* Deliver a committed buffer to app_server. If the native window doesn't
- * exist yet (creation pending), buffer the data for later delivery. */
+/* Deliver the toplevel's current content to app_server: the whole surface
+ * tree composed into its window geometry, in Koan-owned memory. If the
+ * native window doesn't exist yet (creation pending), keep the data for
+ * later delivery. */
 static void deliver_buffer(struct koan_toplevel *kt) {
 	struct wlr_surface *surface = kt->surface;
 	if (!surface || !surface->buffer)
 		return;
 
-	struct wlr_buffer *buffer = &surface->buffer->base;
-	if (!wlr_buffer_lock(buffer))
+	struct compose_target t = { NULL, window_box(kt->toplevel) };
+	if (t.box.width <= 0 || t.box.height <= 0)
 		return;
-
-	int32_t width = surface->current.buffer_width > 0
-		? surface->current.buffer_width : (int32_t)buffer->width;
-	int32_t height = surface->current.buffer_height > 0
-		? surface->current.buffer_height : (int32_t)buffer->height;
-
-	void *data = NULL;
-	int32_t stride = 0;
-	uint32_t format = 0;
-
-	if (!copy_buffer_pixels(buffer, width, height,
-				&data, &stride, &format)) {
-		wlr_buffer_unlock(buffer);
+	if ((int64_t)t.box.width * t.box.height * 4 > INT32_MAX) {
+		wlr_log(WLR_ERROR, "Koan adapter: window too large (%dx%d)",
+			t.box.width, t.box.height);
 		return;
 	}
+	t.pixels = calloc((size_t)t.box.width * t.box.height, sizeof(uint32_t));
+	if (!t.pixels) {
+		wlr_log(WLR_ERROR, "Koan adapter: failed to allocate %dx%d window",
+			t.box.width, t.box.height);
+		return;
+	}
+	wlr_surface_for_each_surface(surface, compose_surface, &t);
 
-	wlr_buffer_unlock(buffer);
+	void *data = t.pixels;
+	int32_t width = t.box.width;
+	int32_t height = t.box.height;
+	int32_t stride = width * 4;
+	uint32_t format = DRM_FORMAT_ARGB8888;
 
 	if (kt->native_window && g_cbs.set_buffer) {
 		/* Window exists: queue the buffer immediately. */
@@ -410,6 +463,21 @@ static void deliver_buffer(struct koan_toplevel *kt) {
 		kt->buffer_format = format;
 		kt->buffer_pending = true;
 	}
+}
+
+/* Size for a newly mapped toplevel's native window: its window geometry
+ * within the surface tree (a toplevel only maps with a buffer). The
+ * configured size is 0x0 because Koan lets clients pick their size. */
+static void initial_size(struct koan_toplevel *kt,
+			 int32_t *width, int32_t *height) {
+	struct wlr_box box = window_box(kt->toplevel);
+	if (box.width <= 0 || box.height <= 0) {
+		*width = 640;
+		*height = 480;
+		return;
+	}
+	*width = box.width;
+	*height = box.height;
 }
 
 /* Called by the server when a new xdg_toplevel is created. Subscribes to
@@ -444,10 +512,8 @@ void koan_adapter_toplevel_mapped(struct wlr_xdg_toplevel *toplevel) {
 		/* Re-map: ensure the window exists and is visible again. */
 		kt->mapped = true;
 		if (kt->native_window == NULL && !kt->create_pending) {
-			int32_t width = toplevel->current.width > 0
-				? toplevel->current.width : 640;
-			int32_t height = toplevel->current.height > 0
-				? toplevel->current.height : 480;
+			int32_t width, height;
+			initial_size(kt, &width, &height);
 			create_native_window(kt, width, height);
 		} else if (kt->native_window != NULL && g_cbs.set_visibility) {
 			g_cbs.set_visibility(g_userdata, g_queue,
@@ -468,10 +534,8 @@ void koan_adapter_toplevel_mapped(struct wlr_xdg_toplevel *toplevel) {
 
 	wl_list_insert(&g_toplevels, &kt->link);
 
-	int32_t width = toplevel->current.width > 0
-		? toplevel->current.width : 640;
-	int32_t height = toplevel->current.height > 0
-		? toplevel->current.height : 480;
+	int32_t width, height;
+	initial_size(kt, &width, &height);
 
 	create_native_window(kt, width, height);
 

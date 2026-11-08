@@ -23,6 +23,7 @@
 #include <pthread.h>
 #include <unistd.h>
 #include <errno.h>
+#include <fcntl.h>
 
 #include <wlr/util/log.h>
 
@@ -147,6 +148,20 @@ struct koan_queue *koan_queue_create(void) {
 
 	if (pipe(q->wake_pipe) != 0)
 		goto err_pipe;
+	/* Both ends non-blocking: the reader drains with read() until it
+	 * would block (a blocking read end hung the Wayland thread forever
+	 * after the first wake-up), and writers already tolerate EAGAIN when
+	 * the pipe is full of pending wake-ups. */
+	for (int i = 0; i < 2; i++) {
+		int flags = fcntl(q->wake_pipe[i], F_GETFL);
+		if (flags < 0 || fcntl(q->wake_pipe[i], F_SETFL,
+				flags | O_NONBLOCK) < 0
+				|| fcntl(q->wake_pipe[i], F_SETFD, FD_CLOEXEC) < 0) {
+			close(q->wake_pipe[0]);
+			close(q->wake_pipe[1]);
+			goto err_pipe;
+		}
+	}
 	q->wake_enabled = true;
 
 	return q;
@@ -210,8 +225,10 @@ struct koan_command *koan_queue_push(struct koan_queue *q,
 	memcpy(&cmd->payload, dup, sizeof(cmd->payload));
 	free(dup);
 
+	/* Append at the tail: consumers drain from the head, so commands
+	 * (frames, show/hide, destroy) are applied in the order pushed. */
 	pthread_mutex_lock(&q->mutex);
-	wl_list_insert(&q->pending, &cmd->link);
+	wl_list_insert(q->pending.prev, &cmd->link);
 	pthread_mutex_unlock(&q->mutex);
 
 	/* Wake the Wayland thread. */
