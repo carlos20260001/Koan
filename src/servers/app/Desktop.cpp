@@ -319,12 +319,8 @@ MouseFilter::Filter(BMessage* message, EventTarget** _target, int32* _viewToken,
 	if (message->FindPoint("where", &where) != B_OK)
 		return B_DISPATCH_MESSAGE;
 
-	// Inverse-transform physical input coordinates to logical space so
-	// window hit-testing and positioning work correctly with fractional
-	// display scaling. The message's "where" stays physical for the
-	// hardware cursor (fLastCursorPosition); consumers that need logical
-	// coordinates use the local "where" variable.
-	where = fDesktop->PhysicalToLogical(where);
+	// EventDispatcher has already converted "where" to logical (BeAPI)
+	// screen coordinates; do not convert it again.
 
 	int32 buttons;
 	if (message->FindInt32("buttons", &buttons) != B_OK)
@@ -1624,6 +1620,34 @@ Desktop::LogicalToPhysical(const BPoint& logical) const
 }
 
 
+/*!	Converts a logical (BeAPI screen) rect to the framebuffer rect the
+	pointing devices clamp to. Invalid rects (no confinement) pass through.
+*/
+BRect
+Desktop::LogicalToDeviceRect(const BRect& logical) const
+{
+	if (!logical.IsValid())
+		return logical;
+
+	int32 index = 0;
+	for (int32 i = 0; i < fVirtualScreen.CountScreens(); i++) {
+		if (fVirtualScreen.ScreenLogicalFrameAt(i).Contains(
+				logical.LeftTop())) {
+			index = i;
+			break;
+		}
+	}
+
+	Screen* screen = fVirtualScreen.ScreenAt(index);
+	if (screen == NULL)
+		return logical;
+
+	return ScreenScaleTransform::ToDeviceConfineRect(logical,
+		fVirtualScreen.ScreenFrameAt(index),
+		fVirtualScreen.ScreenLogicalFrameAt(index), screen->Scale());
+}
+
+
 status_t
 Desktop::LockDirectScreen(team_id team)
 {
@@ -2201,15 +2225,20 @@ Desktop::MoveWindowBy(Window* window, float x, float y, int32 workspace)
 
 	// NOTE: Having all windows locked should prevent any
 	// problems with locking the drawing engine here.
+	bool copied = false;
 	if (GetDrawingEngine()->LockParallelAccess()) {
-		GetDrawingEngine()->CopyRegion(&copyRegion, (int32)x, (int32)y);
+		copied = GetDrawingEngine()->CopyRegion(&copyRegion, (int32)x,
+			(int32)y);
 		GetDrawingEngine()->UnlockParallelAccess();
 	}
 
 	// in the dirty region, exclude the parts that we
-	// could move by blitting
-	copyRegion.OffsetBy((int32)x, (int32)y);
-	newDirtyRegion.Exclude(&copyRegion);
+	// could move by blitting (none when the move is not a whole number
+	// of framebuffer pixels at a fractional scale: repaint all of it)
+	if (copied) {
+		copyRegion.OffsetBy((int32)x, (int32)y);
+		newDirtyRegion.Exclude(&copyRegion);
+	}
 
 	MarkDirty(newDirtyRegion);
 	_SetBackground(background);
@@ -2870,8 +2899,12 @@ Desktop::AcquirePointerGrab(team_id team, int32 token, EventTarget* target,
 		constraint |= kPointerConstraintConfined;
 	if ((flags & B_POINTER_GRAB_RELATIVE) != 0)
 		constraint |= kPointerConstraintRelative;
-	if (gInputManager != NULL)
-		gInputManager->SetPointerConstraint(constraint, confineTo);
+	// confineTo is in BeAPI (logical) screen coordinates; input_server
+	// clamps in framebuffer pixels (see UpdateScreenBounds()).
+	if (gInputManager != NULL) {
+		gInputManager->SetPointerConstraint(constraint,
+			LogicalToDeviceRect(confineTo));
+	}
 
 	return B_OK;
 }

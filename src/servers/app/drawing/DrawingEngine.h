@@ -92,7 +92,9 @@ public:
 								int32 xOffset, int32 yOffset);
 
 	// drawing functions
-	virtual	void			CopyRegion(/*const*/ BRegion* region,
+	// Returns false, copying nothing, when the offset is not a whole number
+	// of framebuffer pixels at the current scale; the caller must repaint.
+	virtual	bool			CopyRegion(/*const*/ BRegion* region,
 								int32 xOffset, int32 yOffset);
 
 	virtual	void			InvertRect(BRect r);

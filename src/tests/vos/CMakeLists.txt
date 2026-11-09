@@ -26,6 +26,15 @@ Application(test_screen_scale_transform
 	INCLUDES ${CMAKE_SOURCE_DIR}/src/servers/app)
 UsePrivateHeaders(test_screen_scale_transform interface)
 
+# Fractional-scale render/hit-test consistency: device transform order,
+# region edge partition vs pointer hit-test, move blit vs repaint.
+Application(test_fractional_scaling
+	SOURCES test_fractional_scaling.cpp
+	LIBS agg
+	INCLUDES ${CMAKE_SOURCE_DIR}/src/servers/app
+		${CMAKE_SOURCE_DIR}/headers/libs/agg)
+UsePrivateHeaders(test_fractional_scaling interface)
+
 # XDG desktop-entry and MIME-default discovery.
 Application(test_xdg_discovery
 	SOURCES test_xdg_discovery.cpp

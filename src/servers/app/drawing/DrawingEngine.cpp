@@ -25,6 +25,7 @@
 #include "ServerBitmap.h"
 #include "ServerCursor.h"
 #include "RenderingBuffer.h"
+#include "ScreenScaleTransform.h"
 
 #include "drawing_support.h"
 
@@ -537,18 +538,27 @@ is_above(const BRect& a, const BRect& b)
 }
 
 
-void
+bool
 DrawingEngine::CopyRegion(/*const*/ BRegion* region, int32 xOffset,
 	int32 yOffset)
 {
 	// NOTE: region is already clipped
 	ASSERT_PARALLEL_LOCKED();
 
+	// With a fractional scale the content moves by offset * scale pixels;
+	// a whole-pixel copy would not match a repaint, so refuse it.
+	float scale = fPainter->Scale();
+	int32 physicalXOffset;
+	int32 physicalYOffset;
+	if (!ScreenScaleTransform::ToPhysicalOffset(xOffset, scale,
+			physicalXOffset)
+		|| !ScreenScaleTransform::ToPhysicalOffset(yOffset, scale,
+			physicalYOffset)) {
+		return false;
+	}
+
 	BRegion physicalRegion;
 	fPainter->ScaleRegion(*region, physicalRegion);
-	float scale = fPainter->Scale();
-	int32 physicalXOffset = (int32)roundf(xOffset * scale);
-	int32 physicalYOffset = (int32)roundf(yOffset * scale);
 
 	BRect frame = physicalRegion.Frame();
 	frame = frame | frame.OffsetByCopy(physicalXOffset, physicalYOffset);
@@ -561,7 +571,7 @@ DrawingEngine::CopyRegion(/*const*/ BRegion* region, int32 xOffset,
 	for (int32 i= 0; i < count; i++) {
 		nodes[i].init(physicalRegion.RectAt(i), count);
 		if (nodes[i].pointers == NULL)
-			return;
+			return false;
 	}
 
 	for (int32 i = 0; i < count; i++) {
@@ -633,6 +643,8 @@ DrawingEngine::CopyRegion(/*const*/ BRegion* region, int32 xOffset,
 				inDegreeZeroNodes.push(n->pointers[k]);
 		}
 	}
+
+	return true;
 }
 
 

@@ -515,10 +515,11 @@ EventDispatcher::GetMouse(BPoint& where, int32& buttons)
 	uint32 liveButtons;
 	BPoint liveWhere;
 	if (fStream != NULL && fStream->GetCurrentMouseState(liveWhere, liveButtons)) {
-		where = liveWhere;
+		where = fDesktop != NULL ? fDesktop->PhysicalToLogical(liveWhere)
+			: liveWhere;
 		buttons = (int32)liveButtons;
 	} else {
-		where = fLastCursorPosition;
+		where = _LogicalCursorPosition();
 		buttons = fLastButtons;
 	}
 }
@@ -911,6 +912,20 @@ EventDispatcher::_EventLoop()
 #endif
 				pointerEvent = true;
 
+				// The one physical -> logical conversion of the pointer:
+				// streams report framebuffer pixels (kept above in
+				// fLastCursorPosition for the hardware cursor); from here
+				// on "where" is in BeAPI (logical) screen coordinates for
+				// every consumer: filters, decorators, desktop listeners.
+				BPoint logicalWhere;
+				bool hasWhere = false;
+				if (fDesktop != NULL
+					&& event->FindPoint("where", &logicalWhere) == B_OK) {
+					logicalWhere = fDesktop->PhysicalToLogical(logicalWhere);
+					event->ReplacePoint("where", logicalWhere);
+					hasWhere = true;
+				}
+
 				EventTarget* grabTarget = fDesktop != NULL
 					? fDesktop->PointerGrabTarget() : NULL;
 
@@ -921,6 +936,16 @@ EventDispatcher::_EventLoop()
 					// hover; hit-testing belongs to the grabber, so
 					// the mouse filter must not redirect them.
 					mouseTarget = grabTarget;
+
+					// The mouse filter is skipped, so keep the state
+					// BView::GetMouse() reads (AS_GET_CURSOR_POSITION)
+					// current here.
+					if (hasWhere && fDesktop->LockAllWindows()) {
+						fDesktop->SetLastMouseState(logicalWhere,
+							event->GetInt32("buttons", 0),
+							fDesktop->WindowAt(logicalWhere));
+						fDesktop->UnlockAllWindows();
+					}
 				} else {
 					if (!fMouseFilter.IsSet())
 						break;

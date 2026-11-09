@@ -167,6 +167,7 @@ public:
 			// using the containing screen's scale factor.
 			BPoint				PhysicalToLogical(const BPoint& physical) const;
 			BPoint				LogicalToPhysical(const BPoint& logical) const;
+			BRect				LogicalToDeviceRect(const BRect& logical) const;
 
 	// Unconfirmed display change: the deadline lives here so that the
 	// revert does not depend on the client surviving.

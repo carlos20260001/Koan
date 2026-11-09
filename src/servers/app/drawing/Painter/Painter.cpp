@@ -13,6 +13,7 @@
 
 
 #include "Painter.h"
+#include "DeviceTransform.h"
 
 #include <new>
 
@@ -391,7 +392,7 @@ Painter::ScalePoint(const BPoint& point) const
 BRect
 Painter::ScaleRect(const BRect& rect) const
 {
-	return ScreenScaleTransform::ToPhysicalRect(rect, fScale);
+	return ScreenScaleTransform::ToPhysicalPartitionRect(rect, fScale);
 }
 
 
@@ -405,7 +406,7 @@ Painter::ScaleRegion(const BRegion& source, BRegion& destination) const
 
 	destination.MakeEmpty();
 	for (int32 i = 0; i < source.CountRects(); i++)
-		destination.Include(ScreenScaleTransform::ToPhysicalRect(
+		destination.Include(ScreenScaleTransform::ToPhysicalPartitionRect(
 			source.RectAt(i), fScale));
 }
 
@@ -452,24 +453,11 @@ void
 Painter::_UpdateTransform()
 {
 	fIdentityTransform = fUserTransform.IsIdentity() && fScale == 1.0f;
-	if (!fUserTransform.IsIdentity()) {
-		fTransform = agg::trans_affine_translation(
-			-fTransformOffsetX, -fTransformOffsetY);
-		fTransform *= agg::trans_affine(fUserTransform.sx,
+	fTransform = DeviceTransform::Compose(agg::trans_affine(fUserTransform.sx,
 			fUserTransform.shy, fUserTransform.shx, fUserTransform.sy,
-			fUserTransform.tx, fUserTransform.ty);
-		fTransform *= agg::trans_affine_translation(
-			fTransformOffsetX, fTransformOffsetY);
-	} else {
-		fTransform.reset();
-	}
-
-	if (fScale != 1.0f) {
-		agg::trans_affine scaleTransform
-			= agg::trans_affine_scaling(fScale);
-		scaleTransform *= fTransform;
-		fTransform = scaleTransform;
-	}
+			fUserTransform.tx, fUserTransform.ty),
+		fUserTransform.IsIdentity(), fTransformOffsetX, fTransformOffsetY,
+		fScale);
 }
 
 
