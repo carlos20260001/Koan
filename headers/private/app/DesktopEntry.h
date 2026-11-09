@@ -36,6 +36,11 @@ public:
 
 	const char*		GetString(const char* key, const char* defaultValue = "") const;
 
+	// Resolves Icon= to an image file per the Icon Theme Specification
+	// (hicolor theme, PNG, then /usr/share/pixmaps): an absolute Icon= is
+	// used as is; otherwise the smallest size >= size, else the largest.
+	status_t		FindIconPath(int32 size, BString* path) const;
+
 private:
 		void		Parse();
 		void		SetValue(const char* key, const char* value);

@@ -121,32 +121,42 @@ struct koan_cmd_set_visibility {
 	bool visible;
 };
 
-/* KOAN_CMD_POINTER_MOTION */
+/* Input from app_server's native window to the Wayland client. The
+ * toplevel is only a key: the Wayland thread checks it is still alive.
+ * Coordinates are logical pixels relative to the window content, i.e. the
+ * toplevel's xdg window geometry. Times are milliseconds. */
+
+/* KOAN_CMD_POINTER_MOTION (leave != 0: the pointer left the window) */
 struct koan_cmd_pointer_motion {
+	struct wlr_xdg_toplevel *toplevel;
 	uint32_t time;
-	wl_fixed_t sx;
-	wl_fixed_t sy;
+	double x;
+	double y;
+	int32_t leave;
 };
 
 /* KOAN_CMD_POINTER_BUTTON */
 struct koan_cmd_pointer_button {
+	struct wlr_xdg_toplevel *toplevel;
 	uint32_t time;
-	uint32_t button;
-	uint32_t state;     /* WL_POINTER_BUTTON_STATE_PRESSED / RELEASED */
+	uint32_t button;    /* Linux input code: BTN_LEFT, BTN_RIGHT, ... */
+	int32_t pressed;
 };
 
 /* KOAN_CMD_POINTER_AXIS */
 struct koan_cmd_pointer_axis {
+	struct wlr_xdg_toplevel *toplevel;
 	uint32_t time;
-	uint32_t axis;
-	wl_fixed_t value;
+	int32_t horizontal;
+	double steps;       /* wheel clicks, positive = down/right */
 };
 
 /* KOAN_CMD_KEYBOARD_KEY */
 struct koan_cmd_keyboard_key {
+	struct wlr_xdg_toplevel *toplevel;
 	uint32_t time;
-	uint32_t key;
-	uint32_t state;     /* WL_KEYBOARD_KEY_STATE_PRESSED / RELEASED */
+	uint32_t key;       /* Linux evdev key code */
+	int32_t pressed;
 };
 
 /* KOAN_CMD_KEYBOARD_MODIFIERS */
@@ -157,9 +167,10 @@ struct koan_cmd_keyboard_modifiers {
 	uint32_t group;
 };
 
-/* KOAN_CMD_KEYBOARD_FOCUS */
+/* KOAN_CMD_KEYBOARD_FOCUS: the native window was (de)activated. */
 struct koan_cmd_keyboard_focus {
 	struct wlr_xdg_toplevel *toplevel;
+	int32_t focused;
 };
 
 /* KOAN_CMD_WINDOW_READY */

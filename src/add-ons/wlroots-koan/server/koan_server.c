@@ -27,6 +27,9 @@
 #include <wlr/types/wlr_output_layout.h>
 #include <wlr/types/wlr_scene.h>
 #include <wlr/types/wlr_seat.h>
+#include <wlr/types/wlr_keyboard.h>
+#include <wlr/interfaces/wlr_keyboard.h>
+#include <xkbcommon/xkbcommon.h>
 #include <wlr/types/wlr_subcompositor.h>
 #include <wlr/types/wlr_xdg_shell.h>
 #include <wlr/types/wlr_xdg_decoration_v1.h>
@@ -48,8 +51,14 @@ struct koan_server {
 	struct wlr_compositor *compositor;
 	struct wlr_subcompositor *subcompositor;
 	struct wlr_data_device_manager *data_device_manager;
-	struct wlr_shm *shm;
 	struct wlr_seat *seat;
+	/* Keyboard input arrives from app_server (the native window's
+	 * B_KEY_DOWN/UP translated to evdev codes), not from a backend device:
+	 * a virtual keyboard keeps the xkb state and feeds the seat. */
+	struct wlr_keyboard keyboard;
+	bool keyboard_ready;
+	struct wl_listener keyboard_key;
+	struct wl_listener keyboard_modifiers;
 	struct wlr_cursor *cursor;
 	struct wlr_xdg_shell *xdg_shell;
 	/* app_server draws the window frame (title tab, controls, stacking):
@@ -237,6 +246,26 @@ static void koan_any_surface_handle_commit(struct wl_listener *listener,
 		return;
 
 	struct wlr_surface *root = wlr_surface_get_root_surface(surface);
+
+	/* xdg_popup: like a toplevel, the initial commit must be answered
+	 * with a configure (geometry from the client's positioner), or menus
+	 * and tooltips never open. Popups have no native window yet, so
+	 * their pixels do not reach app_server; still complete their frame
+	 * callbacks so clients drawing into them do not stall. */
+	struct wlr_xdg_popup *popup = wlr_xdg_popup_try_from_wlr_surface(root);
+	if (popup) {
+		if (surface == root && popup->base->initial_commit) {
+			wlr_xdg_surface_schedule_configure(popup->base);
+			return;
+		}
+		if (root->mapped) {
+			struct timespec now;
+			clock_gettime(CLOCK_MONOTONIC, &now);
+			wlr_surface_for_each_surface(root, koan_send_frame_done, &now);
+		}
+		return;
+	}
+
 	struct wlr_xdg_toplevel *toplevel =
 		wlr_xdg_toplevel_try_from_wlr_surface(root);
 	if (!toplevel)
@@ -351,13 +380,206 @@ static void koan_server_handle_new_input(struct wl_listener *listener,
 		break;
 	}
 
-	/* Advertise capabilities only for devices we actually implement.
-	 * Pointer input is forwarded via wlr_cursor. Keyboard is not yet
-	 * implemented, so do not advertise keyboard capability. */
-	if (server->seat != NULL) {
-		uint32_t caps = WL_SEAT_CAPABILITY_POINTER;
-		wlr_seat_set_capabilities(server->seat, caps);
+}
+
+/* -------------------------------------------------------------------------- */
+/* Input from app_server                                                      */
+/* -------------------------------------------------------------------------- */
+
+static const struct wlr_keyboard_impl koan_keyboard_impl = {
+	.name = "koan-keyboard",
+};
+
+static void koan_server_handle_keyboard_key(struct wl_listener *listener,
+		void *data) {
+	(void)listener;
+	struct wlr_keyboard_key_event *event = data;
+	wlr_seat_keyboard_notify_key(g_server.seat, event->time_msec,
+		event->keycode, event->state);
+}
+
+static void koan_server_handle_keyboard_modifiers(struct wl_listener *listener,
+		void *data) {
+	(void)listener;
+	(void)data;
+	wlr_seat_keyboard_notify_modifiers(g_server.seat,
+		&g_server.keyboard.modifiers);
+}
+
+/* Optional: without an xkb keymap the seat offers no keyboard. The layout
+ * comes from the usual XKB_DEFAULT_* variables (default: us). */
+static void koan_server_create_keyboard(struct koan_server *server) {
+	struct xkb_context *context = xkb_context_new(XKB_CONTEXT_NO_FLAGS);
+	if (!context) {
+		wlr_log(WLR_ERROR, "Koan: no xkb context; keyboard disabled");
+		return;
 	}
+	struct xkb_keymap *keymap = xkb_keymap_new_from_names(context, NULL,
+		XKB_KEYMAP_COMPILE_NO_FLAGS);
+	xkb_context_unref(context);
+	if (!keymap) {
+		wlr_log(WLR_ERROR, "Koan: no xkb keymap; keyboard disabled");
+		return;
+	}
+
+	wlr_keyboard_init(&server->keyboard, &koan_keyboard_impl,
+		"koan-keyboard");
+	bool ok = wlr_keyboard_set_keymap(&server->keyboard, keymap);
+	xkb_keymap_unref(keymap);
+	if (!ok) {
+		wlr_keyboard_finish(&server->keyboard);
+		wlr_log(WLR_ERROR, "Koan: setting the keymap failed; keyboard "
+			"disabled");
+		return;
+	}
+	/* Clients repeat keys themselves from this; app_server's own repeats
+	 * are dropped by the bridge. */
+	wlr_keyboard_set_repeat_info(&server->keyboard, 25, 600);
+
+	server->keyboard_key.notify = koan_server_handle_keyboard_key;
+	wl_signal_add(&server->keyboard.events.key, &server->keyboard_key);
+	server->keyboard_modifiers.notify = koan_server_handle_keyboard_modifiers;
+	wl_signal_add(&server->keyboard.events.modifiers,
+		&server->keyboard_modifiers);
+	wlr_seat_set_keyboard(server->seat, &server->keyboard);
+	server->keyboard_ready = true;
+}
+
+struct koan_find_surface {
+	struct wlr_surface *target;
+	double x, y;
+	bool found;
+};
+
+static void koan_find_surface_iter(struct wlr_surface *surface, int sx, int sy,
+		void *data) {
+	struct koan_find_surface *f = data;
+	if (surface == f->target) {
+		f->x = sx;
+		f->y = sy;
+		f->found = true;
+	}
+}
+
+/* Whether the seat's pointer focus is in this toplevel's surface tree, and
+ * where that surface sits relative to the root. */
+static bool koan_pointer_focus_in(struct wlr_xdg_toplevel *toplevel,
+		double *ox, double *oy) {
+	struct wlr_surface *focus = g_server.seat->pointer_state.focused_surface;
+	if (!focus || wlr_surface_get_root_surface(focus)
+			!= toplevel->base->surface)
+		return false;
+	struct koan_find_surface f = { focus, 0, 0, false };
+	wlr_surface_for_each_surface(toplevel->base->surface,
+		koan_find_surface_iter, &f);
+	*ox = f.x;
+	*oy = f.y;
+	return f.found;
+}
+
+void koan_server_pointer_motion(struct wlr_xdg_toplevel *toplevel,
+		uint32_t time, double x, double y) {
+	struct wlr_seat *seat = g_server.seat;
+	if (!seat || !toplevel->base->initialized)
+		return;
+
+	/* Window-content coordinates -> root surface coordinates. */
+	double rx = x + toplevel->base->geometry.x;
+	double ry = y + toplevel->base->geometry.y;
+
+	/* Implicit grab: while a button is held the surface that got the
+	 * press keeps the pointer, even outside it (drags, scrollbars). */
+	double ox, oy;
+	if (seat->pointer_state.button_count > 0
+			&& koan_pointer_focus_in(toplevel, &ox, &oy)) {
+		wlr_seat_pointer_notify_motion(seat, time, rx - ox, ry - oy);
+		wlr_seat_pointer_notify_frame(seat);
+		return;
+	}
+
+	double sx, sy;
+	struct wlr_surface *surface = wlr_xdg_surface_surface_at(toplevel->base,
+		rx, ry, &sx, &sy);
+	if (surface) {
+		if (seat->pointer_state.focused_surface != surface)
+			wlr_seat_pointer_notify_enter(seat, surface, sx, sy);
+		wlr_seat_pointer_notify_motion(seat, time, sx, sy);
+	} else if (koan_pointer_focus_in(toplevel, &ox, &oy)) {
+		/* Over the window but outside every surface (input region). */
+		wlr_seat_pointer_notify_clear_focus(seat);
+	}
+	wlr_seat_pointer_notify_frame(seat);
+}
+
+void koan_server_pointer_leave(struct wlr_xdg_toplevel *toplevel) {
+	struct wlr_seat *seat = g_server.seat;
+	double ox, oy;
+	if (!seat || seat->pointer_state.button_count > 0
+			|| !koan_pointer_focus_in(toplevel, &ox, &oy))
+		return;
+	wlr_seat_pointer_notify_clear_focus(seat);
+	wlr_seat_pointer_notify_frame(seat);
+}
+
+void koan_server_pointer_button(struct wlr_xdg_toplevel *toplevel,
+		uint32_t time, uint32_t button, bool pressed) {
+	struct wlr_seat *seat = g_server.seat;
+	double ox, oy;
+	if (!seat || !koan_pointer_focus_in(toplevel, &ox, &oy))
+		return;
+	wlr_seat_pointer_notify_button(seat, time, button, pressed
+		? WL_POINTER_BUTTON_STATE_PRESSED : WL_POINTER_BUTTON_STATE_RELEASED);
+	wlr_seat_pointer_notify_frame(seat);
+}
+
+void koan_server_pointer_axis(struct wlr_xdg_toplevel *toplevel,
+		uint32_t time, bool horizontal, double steps) {
+	struct wlr_seat *seat = g_server.seat;
+	double ox, oy;
+	if (!seat || !koan_pointer_focus_in(toplevel, &ox, &oy))
+		return;
+	/* One wheel click: 15 units (libinput's default), 120 in value120. */
+	wlr_seat_pointer_notify_axis(seat, time, horizontal
+			? WL_POINTER_AXIS_HORIZONTAL_SCROLL
+			: WL_POINTER_AXIS_VERTICAL_SCROLL,
+		steps * 15.0, (int32_t)(steps * 120.0), WL_POINTER_AXIS_SOURCE_WHEEL,
+		WL_POINTER_AXIS_RELATIVE_DIRECTION_IDENTICAL);
+	wlr_seat_pointer_notify_frame(seat);
+}
+
+void koan_server_keyboard_focus(struct wlr_xdg_toplevel *toplevel,
+		bool focused) {
+	struct wlr_seat *seat = g_server.seat;
+	if (!seat || !g_server.keyboard_ready || !toplevel->base->surface)
+		return;
+	struct wlr_surface *root = toplevel->base->surface;
+	if (focused) {
+		struct wlr_keyboard *kb = &g_server.keyboard;
+		wlr_seat_keyboard_notify_enter(seat, root, kb->keycodes,
+			kb->num_keycodes, &kb->modifiers);
+	} else if (seat->keyboard_state.focused_surface == root) {
+		/* Deactivation of a window that already lost focus to another
+		 * one must not take the focus away from the new window. */
+		wlr_seat_keyboard_notify_clear_focus(seat);
+	}
+}
+
+void koan_server_keyboard_key(struct wlr_xdg_toplevel *toplevel,
+		uint32_t time, uint32_t key, bool pressed) {
+	struct wlr_seat *seat = g_server.seat;
+	if (!seat || !g_server.keyboard_ready)
+		return;
+	/* Keys go to the active native window; make sure it has focus. */
+	if (seat->keyboard_state.focused_surface != toplevel->base->surface)
+		koan_server_keyboard_focus(toplevel, true);
+	struct wlr_keyboard_key_event event = {
+		.time_msec = time,
+		.keycode = key,
+		.update_state = true,
+		.state = pressed ? WL_KEYBOARD_KEY_STATE_PRESSED
+			: WL_KEYBOARD_KEY_STATE_RELEASED,
+	};
+	wlr_keyboard_notify_key(&g_server.keyboard, &event);
 }
 
 /* Drain app_server -> Wayland commands from the queue. Called when the
@@ -467,6 +689,9 @@ struct wl_display *koan_server_create(void) {
 	wl_list_init(&server->toplevels);
 	wl_list_init(&server->new_input.link);
 	wl_list_init(&server->new_surface.link);
+	wl_list_init(&server->keyboard_key.link);
+	wl_list_init(&server->keyboard_modifiers.link);
+	server->keyboard_ready = false;
 	wl_list_init(&server->new_toplevel_decoration.link);
 	wl_list_init(&server->decorations);
 	wl_list_init(&server->new_xdg_toplevel.link);
@@ -531,7 +756,9 @@ struct wl_display *koan_server_create(void) {
 		return NULL;
 	}
 
-	/* Expose wl_shm to clients so they can share memory buffers. */
+	/* Expose wl_shm (and linux-dmabuf, when the renderer has a DRM fd)
+	 * to clients. This is the only wl_shm global: creating another one
+	 * advertised wl_shm twice. */
 	if (!wlr_renderer_init_wl_display(server->renderer, server->display)) {
 		wlr_log(WLR_ERROR, "Failed to initialise renderer Wayland globals");
 		koan_queue_destroy(server->queue);
@@ -554,10 +781,8 @@ struct wl_display *koan_server_create(void) {
 	server->subcompositor = wlr_subcompositor_create(server->display);
 	server->data_device_manager =
 		wlr_data_device_manager_create(server->display);
-	server->shm = wlr_shm_create_with_renderer(server->display, 2,
-		server->renderer);
 	if (!server->compositor || !server->subcompositor ||
-			!server->data_device_manager || !server->shm) {
+			!server->data_device_manager) {
 		wlr_log(WLR_ERROR, "Failed to create core Wayland globals");
 		koan_server_destroy(server->display);
 		return NULL;
@@ -634,6 +859,13 @@ struct wl_display *koan_server_create(void) {
 	if (server->seat) {
 		server->new_input.notify = koan_server_handle_new_input;
 		wl_signal_add(&server->backend->events.new_input, &server->new_input);
+		koan_server_create_keyboard(server);
+		/* Pointer and keyboard input come from app_server's native
+		 * windows (koan_server_pointer_*, koan_server_keyboard_*). */
+		uint32_t caps = WL_SEAT_CAPABILITY_POINTER;
+		if (server->keyboard_ready)
+			caps |= WL_SEAT_CAPABILITY_KEYBOARD;
+		wlr_seat_set_capabilities(server->seat, caps);
 	} else {
 		wlr_log(WLR_ERROR, "Koan Wayland server: failed to create seat");
 	}
@@ -738,8 +970,14 @@ void koan_server_destroy(struct wl_display *display) {
 	wl_list_remove(&server->new_surface.link);
 	wl_list_remove(&server->new_toplevel_decoration.link);
 
+	wl_list_remove(&server->keyboard_key.link);
+	wl_list_remove(&server->keyboard_modifiers.link);
 	if (server->seat)
 		wlr_seat_destroy(server->seat);
+	if (server->keyboard_ready) {
+		wlr_keyboard_finish(&server->keyboard);
+		server->keyboard_ready = false;
+	}
 	if (server->cursor)
 		wlr_cursor_destroy(server->cursor);
 	/* Destroy the output before its layout and the display: its destroy

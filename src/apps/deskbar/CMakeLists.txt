@@ -25,7 +25,7 @@ Application(
 	ResourceSet.cpp
 	Switcher.cpp
 
-	LIBS tracker shared localestub
+	LIBS tracker shared translation localestub
 	RDEF Deskbar.rdef icons.rdef
 )
 

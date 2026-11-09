@@ -280,7 +280,14 @@ static void subsurface_handle_surface_client_commit(
 }
 
 void subsurface_handle_parent_commit(struct wlr_subsurface *subsurface) {
-	if (subsurface->synchronized && subsurface->has_cache) {
+	// Koan local change (upstream 0.20.2 tests subsurface->synchronized):
+	// a sub-surface that requested desync but has a synchronized ancestor
+	// is effectively synchronized, so its commit was cached in
+	// subsurface_handle_surface_client_commit(). wayland.xml (wl_subsurface)
+	// applies that cache when the parent's state is applied; testing the
+	// requested mode left it locked forever. Covered by
+	// tests/koan_protocol_test.c (compose: nested-sync-*).
+	if (subsurface_is_synchronized(subsurface) && subsurface->has_cache) {
 		wlr_surface_unlock_cached(subsurface->surface, subsurface->cached_seq);
 		subsurface->has_cache = false;
 	}

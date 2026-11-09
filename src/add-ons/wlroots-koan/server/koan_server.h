@@ -54,6 +54,22 @@ void koan_server_run(struct wl_display *display);
 bool koan_server_set_output_dimensions(int32_t width, int32_t height,
 				       float scale);
 
+/* Input from app_server's native window, on the Wayland thread. The
+ * toplevel must be known to be alive (the adapter checks). Coordinates are
+ * relative to the window content (the xdg window geometry). */
+struct wlr_xdg_toplevel;
+void koan_server_pointer_motion(struct wlr_xdg_toplevel *toplevel,
+				uint32_t time, double x, double y);
+void koan_server_pointer_leave(struct wlr_xdg_toplevel *toplevel);
+void koan_server_pointer_button(struct wlr_xdg_toplevel *toplevel,
+				uint32_t time, uint32_t button, bool pressed);
+void koan_server_pointer_axis(struct wlr_xdg_toplevel *toplevel,
+			      uint32_t time, bool horizontal, double steps);
+void koan_server_keyboard_focus(struct wlr_xdg_toplevel *toplevel,
+				bool focused);
+void koan_server_keyboard_key(struct wlr_xdg_toplevel *toplevel,
+			      uint32_t time, uint32_t key, bool pressed);
+
 /* Destroy the display, all clients, and all wlroots state. */
 void koan_server_destroy(struct wl_display *display);
 

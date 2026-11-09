@@ -18,6 +18,7 @@
 #include "WaylandWindow.h"
 
 #include <new>
+#include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -27,7 +28,9 @@
 #include <limits.h>
 
 #include <Entry.h>
+#include <Looper.h>
 #include <MessagePrivate.h>
+#include <MessengerPrivate.h>
 #include <PortLink.h>
 #include <Roster.h>
 #include <RosterPrivate.h>
@@ -45,6 +48,7 @@
 #include "Window.h"
 #include "View.h"
 #include "koan_server.h"
+#include "LinuxKeycodeMap.h"
 
 /* wlroots and libwayland declarations are C linkage: wlroots public headers
  * have no extern "C" guards of their own. */
@@ -57,6 +61,214 @@ extern "C" {
 #include <drm/drm_fourcc.h>
 
 WaylandWindowBridge *gWaylandWindowBridge = NULL;
+
+/* Queue a command for the Wayland thread; the push wakes it. */
+static void
+push_to_wayland(enum koan_cmd_type type, const union koan_cmd_payload &payload)
+{
+	struct koan_queue *queue = koan_adapter_queue();
+	if (queue)
+		koan_queue_push(queue, type, &payload, NULL);
+}
+
+/* -------------------------------------------------------------------------- */
+/* WaylandInputLooper                                                         */
+/* -------------------------------------------------------------------------- */
+
+/* Haiku keycode -> Linux evdev code: the inverse of input_server's table
+ * (LinuxKeycodeMap.h), so both directions stay one source of truth. */
+static uint8 sHaikuToEvdev[256];
+static pthread_once_t sHaikuToEvdevOnce = PTHREAD_ONCE_INIT;
+
+static void
+init_haiku_to_evdev()
+{
+	for (int evdev = 255; evdev > 0; evdev--) {
+		uint8 haiku = kEvdevToHaiku[evdev];
+		if (haiku != 0)
+			sHaikuToEvdev[haiku] = (uint8)evdev;  /* lowest evdev code wins */
+	}
+}
+
+static uint32
+haiku_to_evdev(int32 key)
+{
+	pthread_once(&sHaikuToEvdevOnce, init_haiku_to_evdev);
+	return key > 0 && key < 256 ? sHaikuToEvdev[key] : 0;
+}
+
+/* The "client" of a Wayland window. app_server's EventDispatcher delivers
+ * a window's input to its client looper port, as for any BWindow; for a
+ * Wayland toplevel that port belongs to this looper, which turns the
+ * messages into wl_seat events for the Wayland client:
+ *
+ *  B_MOUSE_MOVED/DOWN/UP ("screen_where", "buttons") -> motion, buttons,
+ *      leave (outside the content while no button is held)
+ *  B_MOUSE_WHEEL_CHANGED ("be:wheel_delta_x/y")      -> axis
+ *  B_KEY_DOWN/UP, B_UNMAPPED_KEY_DOWN/UP ("key")     -> evdev keys; every
+ *      key, modifiers included, arrives this way, so xkb in the Wayland
+ *      server derives the modifier state. Repeats are dropped: Wayland
+ *      clients repeat on their own (repeat info on wl_keyboard).
+ *
+ * Like a BWindow it learns its frame from B_WINDOW_MOVED/RESIZED (see
+ * WaylandServerWindow) and converts screen positions itself. */
+class WaylandInputLooper : public BLooper {
+public:
+	WaylandInputLooper(struct wlr_xdg_toplevel *toplevel)
+		:
+		BLooper("wayland input"),
+		fToplevel(toplevel),
+		fLeft(0), fTop(0), fWidth(0), fHeight(0),
+		fButtons(0),
+		fInside(false)
+	{
+	}
+
+	port_id Port()
+	{
+		BMessenger messenger(this);
+		return BMessenger::Private(messenger).Port();
+	}
+
+	void SetOrigin(int32 left, int32 top)
+	{
+		atomic_set(&fLeft, left);
+		atomic_set(&fTop, top);
+	}
+
+	void SetSize(int32 width, int32 height)
+	{
+		atomic_set(&fWidth, width);
+		atomic_set(&fHeight, height);
+	}
+
+	virtual void MessageReceived(BMessage *message)
+	{
+		switch (message->what) {
+			case B_MOUSE_MOVED:
+			case B_MOUSE_DOWN:
+			case B_MOUSE_UP:
+				_Mouse(message);
+				break;
+
+			case B_MOUSE_WHEEL_CHANGED:
+			{
+				float dx = 0, dy = 0;
+				message->FindFloat("be:wheel_delta_x", &dx);
+				message->FindFloat("be:wheel_delta_y", &dy);
+				uint32 time = _Time(message);
+				for (int horizontal = 0; horizontal < 2; horizontal++) {
+					float steps = horizontal ? dx : dy;
+					if (steps == 0)
+						continue;
+					union koan_cmd_payload payload = {};
+					payload.pointer_axis.toplevel = fToplevel;
+					payload.pointer_axis.time = time;
+					payload.pointer_axis.horizontal = horizontal;
+					payload.pointer_axis.steps = steps;
+					push_to_wayland(KOAN_CMD_POINTER_AXIS, payload);
+				}
+				break;
+			}
+
+			case B_KEY_DOWN:
+			case B_UNMAPPED_KEY_DOWN:
+			case B_KEY_UP:
+			case B_UNMAPPED_KEY_UP:
+			{
+				int32 repeat = 0;
+				if (message->FindInt32("be:key_repeat", &repeat) == B_OK
+					&& repeat > 0)
+					break;
+				int32 key = 0;
+				message->FindInt32("key", &key);
+				uint32 evdev = haiku_to_evdev(key);
+				if (evdev == 0)
+					break;
+				union koan_cmd_payload payload = {};
+				payload.keyboard_key.toplevel = fToplevel;
+				payload.keyboard_key.time = _Time(message);
+				payload.keyboard_key.key = evdev;
+				payload.keyboard_key.pressed = message->what == B_KEY_DOWN
+					|| message->what == B_UNMAPPED_KEY_DOWN;
+				push_to_wayland(KOAN_CMD_KEYBOARD_KEY, payload);
+				break;
+			}
+
+			default:
+				BLooper::MessageReceived(message);
+				break;
+		}
+	}
+
+private:
+	static uint32 _Time(BMessage *message)
+	{
+		bigtime_t when = 0;
+		if (message->FindInt64("when", &when) != B_OK)
+			when = system_time();
+		return (uint32)(when / 1000);
+	}
+
+	void _Mouse(BMessage *message)
+	{
+		BPoint where;
+		if (message->FindPoint("screen_where", &where) != B_OK
+			&& message->FindPoint("where", &where) != B_OK)
+			return;
+		int32 buttons = 0;
+		message->FindInt32("buttons", &buttons);
+		uint32 time = _Time(message);
+
+		double x = where.x - atomic_get(&fLeft);
+		double y = where.y - atomic_get(&fTop);
+		bool inside = x >= 0 && y >= 0 && x < atomic_get(&fWidth)
+			&& y < atomic_get(&fHeight);
+
+		union koan_cmd_payload payload = {};
+		payload.pointer_motion.toplevel = fToplevel;
+		payload.pointer_motion.time = time;
+		if (inside || fButtons != 0) {
+			/* A held button keeps the client informed outside the window
+			 * too (drags); the Wayland side keeps its implicit grab. */
+			payload.pointer_motion.x = x;
+			payload.pointer_motion.y = y;
+			push_to_wayland(KOAN_CMD_POINTER_MOTION, payload);
+		} else if (fInside) {
+			payload.pointer_motion.leave = 1;
+			push_to_wayland(KOAN_CMD_POINTER_MOTION, payload);
+		}
+		fInside = inside;
+
+		static const struct {
+			int32 mask;
+			uint32 button;
+		} kButtons[] = {
+			{ B_PRIMARY_MOUSE_BUTTON, 0x110 },   /* BTN_LEFT */
+			{ B_SECONDARY_MOUSE_BUTTON, 0x111 }, /* BTN_RIGHT */
+			{ B_TERTIARY_MOUSE_BUTTON, 0x112 },  /* BTN_MIDDLE */
+			{ 0x08, 0x113 },                     /* BTN_SIDE */
+			{ 0x10, 0x114 },                     /* BTN_EXTRA */
+		};
+		int32 changed = buttons ^ fButtons;
+		for (size_t i = 0; i < sizeof(kButtons) / sizeof(kButtons[0]); i++) {
+			if ((changed & kButtons[i].mask) == 0)
+				continue;
+			union koan_cmd_payload button = {};
+			button.pointer_button.toplevel = fToplevel;
+			button.pointer_button.time = time;
+			button.pointer_button.button = kButtons[i].button;
+			button.pointer_button.pressed = (buttons & kButtons[i].mask) != 0;
+			push_to_wayland(KOAN_CMD_POINTER_BUTTON, button);
+		}
+		fButtons = buttons;
+	}
+
+	struct wlr_xdg_toplevel *fToplevel;
+	int32 fLeft, fTop, fWidth, fHeight;     /* set from other threads */
+	int32 fButtons;                         /* looper thread only */
+	bool fInside;
+};
 
 /* -------------------------------------------------------------------------- */
 /* WaylandServerWindow                                                        */
@@ -77,13 +289,17 @@ WaylandWindowBridge *gWaylandWindowBridge = NULL;
  * bridge handle are keys the consumers validate before use. */
 class WaylandServerWindow : public ServerWindow {
 public:
+	/* Takes ownership of the running input looper; its port becomes this
+	 * window's client looper port, so the EventDispatcher sends the
+	 * window's input there. */
 	WaylandServerWindow(const char *title, ServerApp *app,
 			struct wlr_xdg_toplevel *toplevel, wayland_window *handle,
-			team_id clientTeam)
+			team_id clientTeam, WaylandInputLooper *input)
 		:
-		ServerWindow(title, app, -1, -1, -1),
+		ServerWindow(title, app, -1, input->Port(), -1),
 		fToplevel(toplevel),
 		fHandle(handle),
+		fInput(input),
 		fClientWidth(0),
 		fClientHeight(0)
 	{
@@ -92,6 +308,20 @@ public:
 		 * (Deskbar) group them under the app the registrar knows. */
 		if (clientTeam > 0)
 			_SetClientTeam(clientTeam);
+	}
+
+	virtual ~WaylandServerWindow()
+	{
+		if (fInput->Lock())
+			fInput->Quit();
+	}
+
+	/* The native frame, for input coordinates (later updates arrive as
+	 * B_WINDOW_MOVED/RESIZED). */
+	void SetFrame(BRect frame)
+	{
+		fInput->SetOrigin((int32)frame.left, (int32)frame.top);
+		fInput->SetSize(frame.IntegerWidth() + 1, frame.IntegerHeight() + 1);
 	}
 
 	/* Size of the client's last frame, so a resize the bridge made to
@@ -133,6 +363,14 @@ public:
 				}
 				break;
 
+			case B_WINDOW_MOVED:
+			{
+				BPoint where;
+				if (message->FindPoint("where", &where) == B_OK)
+					fInput->SetOrigin((int32)where.x, (int32)where.y);
+				break;
+			}
+
 			case B_WINDOW_RESIZED:
 			{
 				int32 width = 0, height = 0;
@@ -141,6 +379,7 @@ public:
 					break;
 				width++;
 				height++;
+				fInput->SetSize(width, height);
 				if (width == atomic_get(&fClientWidth)
 					&& height == atomic_get(&fClientHeight))
 					break;
@@ -163,6 +402,12 @@ public:
 				payload.toplevel_configure.maximized = -1;
 				payload.toplevel_configure.activated = active ? 1 : 0;
 				_Push(KOAN_CMD_TOPLEVEL_CONFIGURE, payload);
+				/* The active window gets the keyboard, as the Desktop's
+				 * focus window gets B_KEY_DOWN. */
+				union koan_cmd_payload focus = {};
+				focus.keyboard_focus.toplevel = fToplevel;
+				focus.keyboard_focus.focused = active ? 1 : 0;
+				_Push(KOAN_CMD_KEYBOARD_FOCUS, focus);
 				break;
 			}
 
@@ -177,15 +422,12 @@ private:
 	void _Push(enum koan_cmd_type type, const union koan_cmd_payload &payload)
 		const
 	{
-		/* Commands for the Wayland thread wake it through the queue's
-		 * pipe; no app_server wake-up is needed. */
-		struct koan_queue *queue = koan_adapter_queue();
-		if (queue)
-			koan_queue_push(queue, type, &payload, NULL);
+		push_to_wayland(type, payload);
 	}
 
 	struct wlr_xdg_toplevel *fToplevel;
 	wayland_window *fHandle;
+	WaylandInputLooper *fInput;  /* owned; quit in the destructor */
 	mutable int32 fClientWidth;
 	mutable int32 fClientHeight;
 };
@@ -636,11 +878,25 @@ WaylandWindowBridge::create_native_window(wayland_window *ww,
 	if (status != B_OK)
 		return status;
 
+	/* The window's input goes to this looper (its "client"), which
+	 * forwards it to the Wayland client. */
+	WaylandInputLooper *input = new(std::nothrow) WaylandInputLooper(
+		ww->toplevel);
+	if (!input)
+		return B_NO_MEMORY;
+	if (input->Run() < B_OK) {
+		delete input;
+		return B_ERROR;
+	}
+
 	WaylandServerWindow *server_window = new(std::nothrow) WaylandServerWindow(
 		title && title[0] ? title : "Wayland Window",
-		fServerApp, ww->toplevel, ww, ww->pid);
-	if (!server_window)
+		fServerApp, ww->toplevel, ww, ww->pid, input);
+	if (!server_window) {
+		if (input->Lock())
+			input->Quit();
 		return B_NO_MEMORY;
+	}
 	server_window->SetClientSize(width, height);
 
 	/* A normal titled window: the decorator draws the tab (title, close,
@@ -649,6 +905,7 @@ WaylandWindowBridge::create_native_window(wayland_window *ww,
 	 * from the screen corner so the tab is on screen. */
 	BRect frame(0, 0, width - 1, height - 1);
 	frame.OffsetBy(40, 40);
+	server_window->SetFrame(frame);
 	status = server_window->Init(frame, B_TITLED_WINDOW_LOOK,
 		B_NORMAL_WINDOW_FEEL, 0, B_CURRENT_WORKSPACE);
 	if (status != B_OK) {
@@ -970,7 +1227,8 @@ WaylandWindowBridge::process_set_buffer(struct koan_command *cmd)
 /* -------------------------------------------------------------------------- */
 
 /* "application/x-vnd.wayland.<app_id>", reduced to characters valid in a
- * MIME type. Falls back to the executable's name. */
+ * MIME type. Falls back to the executable's name. Deskbar recognizes this
+ * prefix; keep both in sync. */
 static void
 wayland_signature(const char *app_id, const char *exe, BString &signature)
 {
@@ -980,7 +1238,10 @@ wayland_signature(const char *app_id, const char *exe, BString &signature)
 	signature = "application/x-vnd.wayland.";
 	for (const char *c = name; *c && signature.Length() < B_MIME_TYPE_LENGTH
 			- 1; c++) {
-		char ch = tolower((unsigned char)*c);
+		/* Case is kept: the app_id names the client's desktop entry
+		 * (<app_id>.desktop, case-sensitive), which Deskbar looks up for
+		 * the name and icon. Signatures compare case-insensitively. */
+		char ch = *c;
 		signature += isalnum((unsigned char)ch) || ch == '.' || ch == '-'
 			|| ch == '_' || ch == '+' ? ch : '-';
 	}

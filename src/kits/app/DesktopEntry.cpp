@@ -9,6 +9,9 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
+
+#include <StringList.h>
 
 static bool
 desktop_list_contains(const char* list, const char* desktop)
@@ -258,4 +261,87 @@ DesktopEntry::ShouldShow() const
 		}
 	}
 	return true;
+}
+
+
+// Icon Theme Specification lookup, limited to what the desktop needs: the
+// hicolor fallback theme in PNG and the legacy pixmaps directory.
+static void
+icon_base_directories(BStringList& bases)
+{
+	const char* dataHome = getenv("XDG_DATA_HOME");
+	const char* home = getenv("HOME");
+	if (dataHome != NULL && *dataHome != '\0')
+		bases.Add(BString(dataHome) << "/icons");
+	else if (home != NULL && *home != '\0')
+		bases.Add(BString(home) << "/.local/share/icons");
+	if (home != NULL && *home != '\0')
+		bases.Add(BString(home) << "/.icons");
+
+	BString dataDirs(getenv("XDG_DATA_DIRS") != NULL
+		? getenv("XDG_DATA_DIRS") : "/usr/local/share:/usr/share");
+	int32 start = 0;
+	while (start <= dataDirs.Length()) {
+		int32 end = dataDirs.FindFirst(':', start);
+		if (end < 0)
+			end = dataDirs.Length();
+		if (end > start) {
+			BString dir;
+			dataDirs.CopyInto(dir, start, end - start);
+			bases.Add(dir << "/icons");
+		}
+		start = end + 1;
+	}
+}
+
+
+status_t
+DesktopEntry::FindIconPath(int32 size, BString* path) const
+{
+	if (path == NULL)
+		return B_BAD_VALUE;
+	const char* icon = fIcon.String();
+	if (*icon == '\0')
+		return B_ENTRY_NOT_FOUND;
+
+	if (icon[0] == '/') {
+		path->SetTo(icon);
+		return access(icon, R_OK) == 0 ? B_OK : B_ENTRY_NOT_FOUND;
+	}
+
+	static const int32 kSizes[] = { 16, 22, 24, 32, 48, 64, 96, 128, 256 };
+	const int32 sizeCount = sizeof(kSizes) / sizeof(kSizes[0]);
+
+	// Try sizes from the best fit upwards, then the smaller ones downwards.
+	int32 first = 0;
+	while (first < sizeCount && kSizes[first] < size)
+		first++;
+	int32 order[sizeof(kSizes) / sizeof(kSizes[0])];
+	int32 count = 0;
+	for (int32 i = first; i < sizeCount; i++)
+		order[count++] = kSizes[i];
+	for (int32 i = first - 1; i >= 0; i--)
+		order[count++] = kSizes[i];
+
+	BStringList bases;
+	icon_base_directories(bases);
+	for (int32 i = 0; i < count; i++) {
+		for (int32 b = 0; b < bases.CountStrings(); b++) {
+			BString candidate(bases.StringAt(b));
+			candidate << "/hicolor/" << order[i] << "x" << order[i]
+				<< "/apps/" << icon << ".png";
+			if (access(candidate.String(), R_OK) == 0) {
+				*path = candidate;
+				return B_OK;
+			}
+		}
+	}
+
+	BString pixmap("/usr/share/pixmaps/");
+	pixmap << icon << ".png";
+	if (access(pixmap.String(), R_OK) == 0) {
+		*path = pixmap;
+		return B_OK;
+	}
+	return B_ENTRY_NOT_FOUND;
 }

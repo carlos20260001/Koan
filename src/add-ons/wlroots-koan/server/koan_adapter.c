@@ -37,6 +37,7 @@
 
 #include "koan_adapter.h"
 #include "koan_queue.h"
+#include "koan_server.h"
 
 /* -------------------------------------------------------------------------- */
 /* Adapter state                                                              */
@@ -347,6 +348,63 @@ static int process_app_server_command(struct koan_command *cmd, void *userdata) 
 					kt->buffer_pending = false;
 				}
 			}
+		}
+		break;
+
+	/* Input from the native window. find_toplevel() keeps a stale key
+	 * (window gone meanwhile) from reaching wlroots. */
+	case KOAN_CMD_POINTER_MOTION:
+		{
+			const struct koan_cmd_pointer_motion *m =
+				&cmd->payload.pointer_motion;
+			struct koan_toplevel *kt = find_toplevel(m->toplevel);
+			if (!kt || !kt->mapped)
+				break;
+			if (m->leave)
+				koan_server_pointer_leave(kt->toplevel);
+			else
+				koan_server_pointer_motion(kt->toplevel, m->time, m->x, m->y);
+		}
+		break;
+
+	case KOAN_CMD_POINTER_BUTTON:
+		{
+			const struct koan_cmd_pointer_button *b =
+				&cmd->payload.pointer_button;
+			struct koan_toplevel *kt = find_toplevel(b->toplevel);
+			if (kt && kt->mapped)
+				koan_server_pointer_button(kt->toplevel, b->time, b->button,
+					b->pressed != 0);
+		}
+		break;
+
+	case KOAN_CMD_POINTER_AXIS:
+		{
+			const struct koan_cmd_pointer_axis *a = &cmd->payload.pointer_axis;
+			struct koan_toplevel *kt = find_toplevel(a->toplevel);
+			if (kt && kt->mapped)
+				koan_server_pointer_axis(kt->toplevel, a->time,
+					a->horizontal != 0, a->steps);
+		}
+		break;
+
+	case KOAN_CMD_KEYBOARD_KEY:
+		{
+			const struct koan_cmd_keyboard_key *k = &cmd->payload.keyboard_key;
+			struct koan_toplevel *kt = find_toplevel(k->toplevel);
+			if (kt && kt->mapped)
+				koan_server_keyboard_key(kt->toplevel, k->time, k->key,
+					k->pressed != 0);
+		}
+		break;
+
+	case KOAN_CMD_KEYBOARD_FOCUS:
+		{
+			const struct koan_cmd_keyboard_focus *f =
+				&cmd->payload.keyboard_focus;
+			struct koan_toplevel *kt = find_toplevel(f->toplevel);
+			if (kt && kt->mapped)
+				koan_server_keyboard_focus(kt->toplevel, f->focused != 0);
 		}
 		break;
 

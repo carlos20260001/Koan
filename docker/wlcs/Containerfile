@@ -1,0 +1,14 @@
+# Optional test image for the WLCS conformance run against wlroots-koan
+# (docs/analysis/wayland-conformance-testing-audit.md, Milestone 4).
+# Adds only what WLCS needs on top of the OS builder image; the OS build
+# never uses it.
+#
+#   podman build -t localhost/koan-wlcs-test:latest -f docker/wlcs/Containerfile docker/wlcs
+#
+# Then see docker/wlcs/run-wlcs.sh.
+FROM localhost/vitruvian_build:latest
+
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends \
+      googletest libgtest-dev libgmock-dev libboost-dev \
+ && rm -rf /var/lib/apt/lists/*

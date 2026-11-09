@@ -16,6 +16,9 @@
  *   5. a subsurface (where Firefox draws its whole window) is composed
  *      over the root, both through the parent's commit (synchronized) and
  *      on its own commit (desynchronized), and gets its frame callback;
+ *   5b. input from app_server reaches the right surface: pointer enter at
+ *      the local position (subsurface or root), button, wheel, keyboard
+ *      focus and keys; input for a stale toplevel is ignored;
  *   6. app_server's window actions reach the client: a configure with
  *      size and maximized/activated states, and close; an action for a
  *      toplevel that no longer exists is ignored;
@@ -35,6 +38,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/mman.h>
+#include <linux/input-event-codes.h>
 #include <unistd.h>
 
 #include <wayland-client.h>
@@ -169,6 +173,7 @@ struct client {
 	struct wl_compositor *compositor;
 	struct wl_shm *shm;
 	struct wl_subcompositor *subcompositor;
+	struct wl_seat *seat;
 	struct xdg_wm_base *wm_base;
 	struct zxdg_decoration_manager_v1 *decoration_manager;
 };
@@ -186,6 +191,8 @@ struct toplevel {
 	uint32_t decoration_mode;   /* 0 until configured */
 };
 
+static const struct wl_seat_listener sSeatListener;
+
 static void
 registry_global(void *data, struct wl_registry *registry, uint32_t name,
 	const char *interface, uint32_t version)
@@ -198,6 +205,12 @@ registry_global(void *data, struct wl_registry *registry, uint32_t name,
 			&wl_compositor_interface, 4);
 	else if (strcmp(interface, wl_shm_interface.name) == 0 && c->shm == NULL)
 		c->shm = wl_registry_bind(registry, name, &wl_shm_interface, 1);
+	else if (strcmp(interface, wl_seat_interface.name) == 0
+			&& c->seat == NULL) {
+		/* Listen right away: capabilities is sent on bind. */
+		c->seat = wl_registry_bind(registry, name, &wl_seat_interface, 5);
+		wl_seat_add_listener(c->seat, &sSeatListener, NULL);
+	}
 	else if (strcmp(interface, wl_subcompositor_interface.name) == 0
 			&& c->subcompositor == NULL)
 		c->subcompositor = wl_registry_bind(registry, name,
@@ -290,6 +303,177 @@ decoration_configure(void *data,
 static const struct zxdg_toplevel_decoration_v1_listener sDecorationListener = {
 	.configure = decoration_configure,
 };
+
+/* What the client's seat saw. */
+static struct {
+	uint32_t caps;
+	struct wl_surface *pointer_surface;
+	double px, py;            /* last enter/motion position */
+	uint32_t last_button;
+	uint32_t button_state;
+	int buttons;
+	double axis;
+	bool keymap;
+	struct wl_surface *keyboard_surface;
+	uint32_t last_key;
+	uint32_t key_state;
+	int keys;
+} sSeat;
+
+static void seat_capabilities(void *data, struct wl_seat *seat, uint32_t caps)
+{
+	(void)data;
+	(void)seat;
+	sSeat.caps = caps;
+}
+
+static void seat_name(void *data, struct wl_seat *seat, const char *name)
+{
+	(void)data;
+	(void)seat;
+	(void)name;
+}
+
+static const struct wl_seat_listener sSeatListener = {
+	.capabilities = seat_capabilities,
+	.name = seat_name,
+};
+
+static void pointer_enter(void *data, struct wl_pointer *pointer,
+	uint32_t serial, struct wl_surface *surface, wl_fixed_t x, wl_fixed_t y)
+{
+	(void)data; (void)pointer; (void)serial;
+	sSeat.pointer_surface = surface;
+	sSeat.px = wl_fixed_to_double(x);
+	sSeat.py = wl_fixed_to_double(y);
+}
+
+static void pointer_leave(void *data, struct wl_pointer *pointer,
+	uint32_t serial, struct wl_surface *surface)
+{
+	(void)data; (void)pointer; (void)serial; (void)surface;
+	sSeat.pointer_surface = NULL;
+}
+
+static void pointer_motion(void *data, struct wl_pointer *pointer,
+	uint32_t time, wl_fixed_t x, wl_fixed_t y)
+{
+	(void)data; (void)pointer; (void)time;
+	sSeat.px = wl_fixed_to_double(x);
+	sSeat.py = wl_fixed_to_double(y);
+}
+
+static void pointer_button(void *data, struct wl_pointer *pointer,
+	uint32_t serial, uint32_t time, uint32_t button, uint32_t state)
+{
+	(void)data; (void)pointer; (void)serial; (void)time;
+	sSeat.last_button = button;
+	sSeat.button_state = state;
+	sSeat.buttons++;
+}
+
+static void pointer_axis(void *data, struct wl_pointer *pointer,
+	uint32_t time, uint32_t axis, wl_fixed_t value)
+{
+	(void)data; (void)pointer; (void)time;
+	if (axis == WL_POINTER_AXIS_VERTICAL_SCROLL)
+		sSeat.axis += wl_fixed_to_double(value);
+}
+
+static void pointer_frame(void *data, struct wl_pointer *pointer)
+{
+	(void)data; (void)pointer;
+}
+
+static void pointer_axis_source(void *data, struct wl_pointer *pointer,
+	uint32_t source)
+{
+	(void)data; (void)pointer; (void)source;
+}
+
+static void pointer_axis_stop(void *data, struct wl_pointer *pointer,
+	uint32_t time, uint32_t axis)
+{
+	(void)data; (void)pointer; (void)time; (void)axis;
+}
+
+static void pointer_axis_discrete(void *data, struct wl_pointer *pointer,
+	uint32_t axis, int32_t discrete)
+{
+	(void)data; (void)pointer; (void)axis; (void)discrete;
+}
+
+static const struct wl_pointer_listener sPointerListener = {
+	.enter = pointer_enter,
+	.leave = pointer_leave,
+	.motion = pointer_motion,
+	.button = pointer_button,
+	.axis = pointer_axis,
+	.frame = pointer_frame,
+	.axis_source = pointer_axis_source,
+	.axis_stop = pointer_axis_stop,
+	.axis_discrete = pointer_axis_discrete,
+};
+
+static void keyboard_keymap(void *data, struct wl_keyboard *keyboard,
+	uint32_t format, int32_t fd, uint32_t size)
+{
+	(void)data; (void)keyboard; (void)size;
+	sSeat.keymap = format == WL_KEYBOARD_KEYMAP_FORMAT_XKB_V1;
+	close(fd);
+}
+
+static void keyboard_enter(void *data, struct wl_keyboard *keyboard,
+	uint32_t serial, struct wl_surface *surface, struct wl_array *keys)
+{
+	(void)data; (void)keyboard; (void)serial; (void)keys;
+	sSeat.keyboard_surface = surface;
+}
+
+static void keyboard_leave(void *data, struct wl_keyboard *keyboard,
+	uint32_t serial, struct wl_surface *surface)
+{
+	(void)data; (void)keyboard; (void)serial; (void)surface;
+	sSeat.keyboard_surface = NULL;
+}
+
+static void keyboard_key(void *data, struct wl_keyboard *keyboard,
+	uint32_t serial, uint32_t time, uint32_t key, uint32_t state)
+{
+	(void)data; (void)keyboard; (void)serial; (void)time;
+	sSeat.last_key = key;
+	sSeat.key_state = state;
+	sSeat.keys++;
+}
+
+static void keyboard_modifiers(void *data, struct wl_keyboard *keyboard,
+	uint32_t serial, uint32_t depressed, uint32_t latched, uint32_t locked,
+	uint32_t group)
+{
+	(void)data; (void)keyboard; (void)serial; (void)depressed;
+	(void)latched; (void)locked; (void)group;
+}
+
+static void keyboard_repeat_info(void *data, struct wl_keyboard *keyboard,
+	int32_t rate, int32_t delay)
+{
+	(void)data; (void)keyboard; (void)rate; (void)delay;
+}
+
+static const struct wl_keyboard_listener sKeyboardListener = {
+	.keymap = keyboard_keymap,
+	.enter = keyboard_enter,
+	.leave = keyboard_leave,
+	.key = keyboard_key,
+	.modifiers = keyboard_modifiers,
+	.repeat_info = keyboard_repeat_info,
+};
+
+static bool
+push(enum koan_cmd_type type, union koan_cmd_payload *payload)
+{
+	return koan_queue_push(koan_adapter_queue(), type, payload, NULL) != NULL;
+}
 
 static const struct xdg_toplevel_listener sToplevelListener = {
 	.configure = toplevel_configure,
@@ -442,6 +626,16 @@ main(void)
 		"missing wl_compositor, wl_shm, wl_subcompositor, xdg_wm_base or "
 		"zxdg_decoration_manager_v1 global");
 	xdg_wm_base_add_listener(c.wm_base, &sWmBaseListener, NULL);
+	CHECK(c.seat != NULL, "missing wl_seat global");
+	CHECK((sSeat.caps & WL_SEAT_CAPABILITY_POINTER)
+		&& (sSeat.caps & WL_SEAT_CAPABILITY_KEYBOARD),
+		"the seat does not offer both pointer and keyboard");
+	struct wl_pointer *pointer = wl_seat_get_pointer(c.seat);
+	wl_pointer_add_listener(pointer, &sPointerListener, NULL);
+	struct wl_keyboard *keyboard = wl_seat_get_keyboard(c.seat);
+	wl_keyboard_add_listener(keyboard, &sKeyboardListener, NULL);
+	CHECK(settle(&c), "pointer/keyboard roundtrip failed");
+	CHECK(sSeat.keymap, "the keyboard sent no xkb keymap");
 
 	/* 1. Initial commit must be answered with a configure. */
 	struct toplevel mapped;
@@ -525,6 +719,88 @@ main(void)
 	CHECK(child_frame_done,
 		"the subsurface's frame callback never completed; Firefox stops "
 		"drawing its content after one frame");
+
+	/* 5b. Input from app_server. Window-content coordinates: the
+	 * subsurface covers x < SUB_W at the content origin. */
+	struct wlr_xdg_toplevel *key = atomic_load(&sCreatedToplevel);
+	union koan_cmd_payload in = {0};
+	in.pointer_motion.toplevel = key;
+	in.pointer_motion.time = 1;
+	in.pointer_motion.x = 5;
+	in.pointer_motion.y = 7;
+	CHECK(push(KOAN_CMD_POINTER_MOTION, &in), "queue POINTER_MOTION");
+	CHECK(settle(&c), "roundtrip after pointer motion failed");
+	CHECK(sSeat.pointer_surface == child && sSeat.px == 5 && sSeat.py == 7,
+		"pointer did not enter the subsurface at its local position");
+
+	memset(&in, 0, sizeof(in));
+	in.pointer_motion.toplevel = key;
+	in.pointer_motion.time = 2;
+	in.pointer_motion.x = SUB_W + 3;
+	in.pointer_motion.y = 7;
+	CHECK(push(KOAN_CMD_POINTER_MOTION, &in), "queue POINTER_MOTION");
+	CHECK(settle(&c), "roundtrip after pointer motion failed");
+	CHECK(sSeat.pointer_surface == mapped.surface
+		&& sSeat.px == GEOM_X + SUB_W + 3 && sSeat.py == GEOM_Y + 7,
+		"pointer did not move onto the root surface in root coordinates "
+		"(window geometry offset)");
+
+	memset(&in, 0, sizeof(in));
+	in.pointer_button.toplevel = key;
+	in.pointer_button.time = 3;
+	in.pointer_button.button = BTN_LEFT;
+	in.pointer_button.pressed = 1;
+	CHECK(push(KOAN_CMD_POINTER_BUTTON, &in), "queue POINTER_BUTTON");
+	in.pointer_button.pressed = 0;
+	CHECK(push(KOAN_CMD_POINTER_BUTTON, &in), "queue POINTER_BUTTON");
+	memset(&in, 0, sizeof(in));
+	in.pointer_axis.toplevel = key;
+	in.pointer_axis.time = 4;
+	in.pointer_axis.steps = 2;
+	CHECK(push(KOAN_CMD_POINTER_AXIS, &in), "queue POINTER_AXIS");
+	CHECK(settle(&c), "roundtrip after buttons failed");
+	CHECK(sSeat.buttons == 2 && sSeat.last_button == BTN_LEFT
+		&& sSeat.button_state == WL_POINTER_BUTTON_STATE_RELEASED,
+		"left click did not reach the client as press + release");
+	CHECK(sSeat.axis == 30.0, "two wheel clicks did not scroll by 30");
+
+	memset(&in, 0, sizeof(in));
+	in.keyboard_focus.toplevel = key;
+	in.keyboard_focus.focused = 1;
+	CHECK(push(KOAN_CMD_KEYBOARD_FOCUS, &in), "queue KEYBOARD_FOCUS");
+	memset(&in, 0, sizeof(in));
+	in.keyboard_key.toplevel = key;
+	in.keyboard_key.time = 5;
+	in.keyboard_key.key = KEY_A;
+	in.keyboard_key.pressed = 1;
+	CHECK(push(KOAN_CMD_KEYBOARD_KEY, &in), "queue KEYBOARD_KEY");
+	in.keyboard_key.pressed = 0;
+	CHECK(push(KOAN_CMD_KEYBOARD_KEY, &in), "queue KEYBOARD_KEY");
+	CHECK(settle(&c), "roundtrip after keys failed");
+	CHECK(sSeat.keyboard_surface == mapped.surface,
+		"keyboard focus did not reach the toplevel");
+	CHECK(sSeat.keys == 2 && sSeat.last_key == KEY_A
+		&& sSeat.key_state == WL_KEYBOARD_KEY_STATE_RELEASED,
+		"key A did not reach the client as press + release");
+
+	/* A stale toplevel key must not move anything. */
+	memset(&in, 0, sizeof(in));
+	in.pointer_motion.toplevel =
+		(struct wlr_xdg_toplevel *)&sNativeWindowToken;
+	in.pointer_motion.x = 1;
+	in.pointer_motion.y = 1;
+	CHECK(push(KOAN_CMD_POINTER_MOTION, &in), "queue stale motion");
+	CHECK(settle(&c), "server died on input for a stale toplevel");
+	CHECK(sSeat.px == GEOM_X + SUB_W + 3, "input for a stale toplevel moved "
+		"the pointer");
+
+	/* Leaving the window clears pointer focus. */
+	memset(&in, 0, sizeof(in));
+	in.pointer_motion.toplevel = key;
+	in.pointer_motion.leave = 1;
+	CHECK(push(KOAN_CMD_POINTER_MOTION, &in), "queue pointer leave");
+	CHECK(settle(&c), "roundtrip after pointer leave failed");
+	CHECK(sSeat.pointer_surface == NULL, "pointer leave was not delivered");
 
 	/* 6. Window actions from app_server. */
 	union koan_cmd_payload action = {0};

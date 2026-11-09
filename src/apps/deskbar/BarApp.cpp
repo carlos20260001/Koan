@@ -64,8 +64,11 @@ All rights reserved.
 #include <Mime.h>
 #include <Path.h>
 #include <Roster.h>
+#include <TranslationUtils.h>
+#include <View.h>
 
 #include <DeskbarPrivate.h>
+#include <MimeAppsParser.h>
 #include <RosterPrivate.h>
 #include "tracker_private.h"
 
@@ -946,6 +949,74 @@ TBarApp::FetchWindowIcon(bool local, bool minimized)
 }
 
 
+// Wayland clients are registered by app_server under
+// "application/x-vnd.wayland.<app_id>" with their executable as ref, which
+// has neither a proper name nor an icon. Their desktop entry
+// (<app_id>.desktop) has both.
+static const char* kWaylandSignaturePrefix = "application/x-vnd.wayland.";
+
+static bool
+wayland_desktop_entry(const char* signature, BString& path)
+{
+	size_t prefixLength = strlen(kWaylandSignaturePrefix);
+	if (signature == NULL
+		|| strncasecmp(signature, kWaylandSignaturePrefix, prefixLength) != 0
+		|| signature[prefixLength] == '\0') {
+		return false;
+	}
+
+	MimeAppsParser parser;
+	BString id(signature + prefixLength);
+	id << ".desktop";
+	if (parser.FindDesktopEntry(id.String(), &path) == B_OK)
+		return true;
+	BString lower(id);
+	lower.ToLower();
+	return lower != id && parser.FindDesktopEntry(lower.String(), &path)
+		== B_OK;
+}
+
+
+// Draws the desktop entry's icon image scaled into icon (B_RGBA32).
+static status_t
+wayland_desktop_entry_icon(const char* signature, BBitmap* icon)
+{
+	BString path;
+	if (!wayland_desktop_entry(signature, path))
+		return B_ENTRY_NOT_FOUND;
+	DesktopEntry entry(path.String());
+	BString iconPath;
+	if (!entry.IsValid() || entry.FindIconPath(icon->Bounds().IntegerWidth()
+			+ 1, &iconPath) != B_OK) {
+		return B_ENTRY_NOT_FOUND;
+	}
+
+	BBitmap* image = BTranslationUtils::GetBitmap(iconPath.String());
+	if (image == NULL)
+		return B_ERROR;
+
+	BBitmap canvas(icon->Bounds(), B_BITMAP_ACCEPTS_VIEWS, B_RGBA32);
+	BView* view = new BView(icon->Bounds(), "icon", B_FOLLOW_NONE, 0);
+	canvas.AddChild(view);
+	if (!canvas.Lock()) {
+		delete image;
+		return B_ERROR;
+	}
+	view->SetDrawingMode(B_OP_COPY);
+	view->SetHighColor(B_TRANSPARENT_COLOR);
+	view->FillRect(view->Bounds());
+	view->SetDrawingMode(B_OP_ALPHA);
+	view->SetBlendingMode(B_PIXEL_ALPHA, B_ALPHA_COMPOSITE);
+	view->DrawBitmap(image, image->Bounds(), view->Bounds(),
+		B_FILTER_BITMAP_BILINEAR);
+	view->Sync();
+	canvas.Unlock();
+	delete image;
+
+	return icon->ImportBits(&canvas);
+}
+
+
 void
 TBarApp::AddTeam(team_id team, uint32 flags, const char* sig, entry_ref* ref)
 {
@@ -1004,6 +1075,13 @@ TBarApp::_AddTeamLocked(team_id team, uint32 flags, const char* sig,
 		|| BLocaleRoster::Default()->GetLocalizedFileName(name, *ref)
 			!= B_OK) {
 		name = ref->name;
+	}
+
+	BString desktopEntryPath;
+	if (wayland_desktop_entry(sig, desktopEntryPath)) {
+		DesktopEntry entry(desktopEntryPath.String());
+		if (entry.IsValid() && entry.Name()[0] != '\0')
+			name = entry.Name();
 	}
 
 	BarTeamInfo* barInfo = new BarTeamInfo(new BList(), flags, strdup(sig),
@@ -1178,6 +1256,12 @@ TBarApp::_CacheTeamIcon(BarTeamInfo* barInfo, int32 size, BBitmap** _icon)
 	int32 composed = be_control_look->ComposeIconSize(size).IntegerWidth() + 1;
 	BRect iconRect = BRect(0, 0, composed - 1, composed - 1);
 	BBitmap* icon = new BBitmap(iconRect, B_RGBA32);
+
+	// Wayland clients: the icon of their desktop entry
+	if (wayland_desktop_entry_icon(barInfo->sig, icon) == B_OK) {
+		barInfo->iconCache[index] = *_icon = icon;
+		return B_OK;
+	}
 
 	// icon wasn't in cache, get it from be_roster and cache it
 	app_info appInfo;
