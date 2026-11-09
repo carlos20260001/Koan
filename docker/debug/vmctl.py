@@ -135,9 +135,12 @@ def drag(x1, y1, x2, y2, keys=()):
     time.sleep(1.0)  # app_server picks up input lazily under load
     qmp("input-send-event", events=[{"type": "btn",
         "data": {"button": "left", "down": True}}])
-    steps = 12
+    # Small steps, like a real mouse: Stack & Tile reads the previous
+    # event's position while the window already follows the new one, so
+    # big jumps leave the probe outside the dragged title bar.
+    steps = max(12, int(max(abs(x2 - x1), abs(y2 - y1)) / 4))
     for i in range(1, steps + 1):
-        time.sleep(0.08)
+        time.sleep(0.02)
         move(x1 + (x2 - x1) * i // steps, y1 + (y2 - y1) * i // steps)
     time.sleep(0.5)
     qmp("input-send-event", events=[{"type": "btn",
