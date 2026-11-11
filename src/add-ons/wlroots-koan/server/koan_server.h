@@ -1,4 +1,9 @@
 /*
+ * SPDX-License-Identifier: MIT
+ * Copyright © 2026 carlos20260001
+ */
+
+/*
  * Koan Wayland server lifecycle.
  *
  * Owns the Wayland display endpoint (Unix domain socket), initialises wlroots
@@ -65,6 +70,11 @@ void koan_server_pointer_button(struct wlr_xdg_toplevel *toplevel,
 				uint32_t time, uint32_t button, bool pressed);
 void koan_server_pointer_axis(struct wlr_xdg_toplevel *toplevel,
 			      uint32_t time, bool horizontal, double steps);
+/* An xdg_popup was mapped or unmapped: give a grabbing popup the keyboard,
+ * or hand it back to what opened it. Wayland thread only. */
+struct wlr_xdg_popup;
+void koan_server_popup_keyboard(struct wlr_xdg_popup *popup, bool mapped);
+
 void koan_server_keyboard_focus(struct wlr_xdg_toplevel *toplevel,
 				bool focused);
 void koan_server_keyboard_key(struct wlr_xdg_toplevel *toplevel,

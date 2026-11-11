@@ -11,6 +11,11 @@
 #   --sanitize=NAME             Instrument the whole tree with a sanitizer:
 #                                 thread (TSan) or address (ASan). Not the
 #                                 default; intended for stress/debug builds.
+#   --with-wlroots              Build the wlroots-koan Wayland server into
+#   --without-wlroots             app_server (VOS_WITH_WLROOTS). Default: the
+#                                 VOS_WITH_WLROOTS environment variable
+#                                 (ON/OFF/1/0) if set, else the tree's
+#                                 cached value, else OFF.
 
 set -e
 
@@ -25,6 +30,13 @@ SSHDEBUG=0
 BUILDTOOLS_ONLY=0
 BUILDTOOLS_DIR=""
 SANITIZE=""
+case "${VOS_WITH_WLROOTS:-}" in
+    ON|on|1|TRUE|true|YES|yes) WITH_WLROOTS=ON ;;
+    OFF|off|0|FALSE|false|NO|no) WITH_WLROOTS=OFF ;;
+    "") WITH_WLROOTS="" ;;
+    *) echo "Error: VOS_WITH_WLROOTS must be ON or OFF (got $VOS_WITH_WLROOTS)." >&2
+       exit 1 ;;
+esac
 
 for arg in "$@"; do
     case "$arg" in
@@ -55,8 +67,14 @@ for arg in "$@"; do
         --sanitize=*)
             SANITIZE="${arg#*=}"
             ;;
+        --with-wlroots)
+            WITH_WLROOTS=ON
+            ;;
+        --without-wlroots)
+            WITH_WLROOTS=OFF
+            ;;
         --help|-h)
-            head -n 17 "$0" | grep "^#" | sed 's/^# \?//'
+            head -n 22 "$0" | grep "^#" | sed 's/^# \?//'
             exit 0
             ;;
         *)
@@ -248,6 +266,11 @@ CMAKE_OPTS="$CMAKE_OPTS -DBUILDTOOLS_DIR=$BUILDTOOLS_DIR"
 CMAKE_OPTS="$CMAKE_OPTS -DHOST_KERNEL=$hostkernel"
 CMAKE_OPTS="$CMAKE_OPTS -DKERNEL_RELEASE=$guestkernel"
 CMAKE_OPTS="$CMAKE_OPTS -DVITRUVIAN_TARGET_ARCH=$TARGET_ARCH"
+
+# Before VOS_CMAKE_EXTRA_OPTS, so an explicit -D there still wins.
+if [ -n "$WITH_WLROOTS" ]; then
+    CMAKE_OPTS="$CMAKE_OPTS -DVOS_WITH_WLROOTS=$WITH_WLROOTS"
+fi
 
 # Extra CMake options passed via environment (e.g. -DCMAKE_C_COMPILER_LAUNCHER=ccache)
 if [ -n "${VOS_CMAKE_EXTRA_OPTS:-}" ]; then

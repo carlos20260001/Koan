@@ -34,10 +34,12 @@
 #include <PortLink.h>
 #include <Roster.h>
 #include <RosterPrivate.h>
+#include <WindowPrivate.h>
 
 #include "AppServer.h"
 #include "BitmapManager.h"
 #include "Desktop.h"
+#include "DesktopListener.h"
 #include "Decorator.h"
 #include "DrawState.h"
 #include "DrawingEngine.h"
@@ -114,14 +116,25 @@ haiku_to_evdev(int32 key)
  * WaylandServerWindow) and converts screen positions itself. */
 class WaylandInputLooper : public BLooper {
 public:
-	WaylandInputLooper(struct wlr_xdg_toplevel *toplevel)
+	/* popup: the looper of an xdg_popup's window. Its positions are
+	 * offset into the toplevel's content coordinates (SetContentOffset),
+	 * where Koan's hit-test finds the popup surface on top. */
+	WaylandInputLooper(struct wlr_xdg_toplevel *toplevel, bool popup = false)
 		:
 		BLooper("wayland input"),
 		fToplevel(toplevel),
 		fLeft(0), fTop(0), fWidth(0), fHeight(0),
+		fOffsetX(0), fOffsetY(0),
 		fButtons(0),
-		fInside(false)
+		fInside(false),
+		fPopup(popup)
 	{
+	}
+
+	void SetContentOffset(int32 x, int32 y)
+	{
+		atomic_set(&fOffsetX, x);
+		atomic_set(&fOffsetY, y);
 	}
 
 	port_id Port()
@@ -150,6 +163,17 @@ public:
 			case B_MOUSE_UP:
 				_Mouse(message);
 				break;
+
+			case kMsgWaylandTestFence:
+			{
+				/* Every input message the EventDispatcher sent before the
+				 * fence is already forwarded: tell koan_test_v1. */
+				union koan_cmd_payload part = {};
+				part.test_fence.serial
+					= (uint32)message->GetInt32("koan:serial", 0);
+				push_to_wayland(KOAN_CMD_TEST_FENCE_PART, part);
+				break;
+			}
 
 			case B_MOUSE_WHEEL_CHANGED:
 			{
@@ -224,11 +248,21 @@ private:
 		double y = where.y - atomic_get(&fTop);
 		bool inside = x >= 0 && y >= 0 && x < atomic_get(&fWidth)
 			&& y < atomic_get(&fHeight);
+		x += atomic_get(&fOffsetX);
+		y += atomic_get(&fOffsetY);
 
 		union koan_cmd_payload payload = {};
 		payload.pointer_motion.toplevel = fToplevel;
 		payload.pointer_motion.time = time;
-		if (inside || fButtons != 0) {
+		if (fPopup && !inside && fInside && fButtons == 0) {
+			/* Leaving a popup, maybe onto its own toplevel, whose looper
+			 * reports the new position too: a leave from here could
+			 * arrive after that and clear the new focus. One last motion
+			 * lets Koan's hit-test pick what is there instead. */
+			payload.pointer_motion.x = x;
+			payload.pointer_motion.y = y;
+			push_to_wayland(KOAN_CMD_POINTER_MOTION, payload);
+		} else if (inside || fButtons != 0) {
 			/* A held button keeps the client informed outside the window
 			 * too (drags); the Wayland side keeps its implicit grab. */
 			payload.pointer_motion.x = x;
@@ -266,8 +300,10 @@ private:
 
 	struct wlr_xdg_toplevel *fToplevel;
 	int32 fLeft, fTop, fWidth, fHeight;     /* set from other threads */
+	int32 fOffsetX, fOffsetY;               /* set from other threads */
 	int32 fButtons;                         /* looper thread only */
 	bool fInside;
+	bool fPopup;
 };
 
 /* -------------------------------------------------------------------------- */
@@ -294,14 +330,15 @@ public:
 	 * window's input there. */
 	WaylandServerWindow(const char *title, ServerApp *app,
 			struct wlr_xdg_toplevel *toplevel, wayland_window *handle,
-			team_id clientTeam, WaylandInputLooper *input)
+			team_id clientTeam, WaylandInputLooper *input, bool popup = false)
 		:
 		ServerWindow(title, app, -1, input->Port(), -1),
 		fToplevel(toplevel),
 		fHandle(handle),
 		fInput(input),
 		fClientWidth(0),
-		fClientHeight(0)
+		fClientHeight(0),
+		fPopup(popup)
 	{
 		/* All Wayland windows share one ServerApp (app_server's team);
 		 * report the client process instead, so window lists per team
@@ -324,6 +361,15 @@ public:
 		fInput->SetSize(frame.IntegerWidth() + 1, frame.IntegerHeight() + 1);
 	}
 
+	wayland_window *Handle() const { return fHandle; }
+	bool IsPopup() const { return fPopup; }
+
+	/* A popup's position in its toplevel's content (input offset). */
+	void SetContentOffset(int32 x, int32 y)
+	{
+		fInput->SetContentOffset(x, y);
+	}
+
 	/* Size of the client's last frame, so a resize the bridge made to
 	 * follow the client is not sent back to it as a new configure. */
 	void SetClientSize(int32 width, int32 height)
@@ -336,6 +382,22 @@ public:
 			int32 target = B_NULL_TOKEN) const
 	{
 		(void)target;
+		if (fPopup) {
+			/* A popup's window has no xdg_toplevel of its own: fToplevel
+			 * is its parent's, which must not be closed, configured or
+			 * (de)activated by what happens to the popup window. Only
+			 * keep the input geometry current. */
+			BPoint where;
+			int32 width = 0, height = 0;
+			if (message->what == B_WINDOW_MOVED
+				&& message->FindPoint("where", &where) == B_OK)
+				fInput->SetOrigin((int32)where.x, (int32)where.y);
+			else if (message->what == B_WINDOW_RESIZED
+				&& message->FindInt32("width", &width) == B_OK
+				&& message->FindInt32("height", &height) == B_OK)
+				fInput->SetSize(width + 1, height + 1);
+			return B_OK;
+		}
 		switch (message->what) {
 			case B_QUIT_REQUESTED:
 			{
@@ -430,7 +492,146 @@ private:
 	WaylandInputLooper *fInput;  /* owned; quit in the destructor */
 	mutable int32 fClientWidth;
 	mutable int32 fClientHeight;
+	bool fPopup;
 };
+
+/* -------------------------------------------------------------------------- */
+/* WaylandDesktopListener                                                     */
+/* -------------------------------------------------------------------------- */
+
+/* What the Desktop does to native windows that Wayland popups must follow:
+ *
+ *  WindowMoved (a toplevel)  -> its popup windows move along
+ *  MouseDown outside every Wayland client surface (a window frame, a
+ *      native window, the desktop) -> menus close (xdg_popup.grab: "the
+ *      compositor ... dismisses the popup" on such a click). Clicks on a
+ *      client's content reach Koan, whose popup grab handles them.
+ *
+ * Called from Desktop/EventDispatcher code with window locks held: only
+ * queue commands, never take the bridge lock or call into the Desktop. */
+class WaylandDesktopListener : public DesktopListener {
+public:
+	WaylandDesktopListener(WaylandWindowBridge *bridge) : fBridge(bridge) {}
+
+	virtual int32 Identifier() { return 'wlbr'; }
+	virtual void ListenerRegistered(Desktop *desktop) { (void)desktop; }
+	virtual void ListenerUnregistered() {}
+	virtual bool HandleMessage(Window *sender, BPrivate::LinkReceiver &link,
+		BPrivate::LinkSender &reply)
+	{
+		(void)sender; (void)link; (void)reply;
+		return false;
+	}
+	virtual void WindowAdded(Window *window) { (void)window; }
+	virtual void WindowRemoved(Window *window) { (void)window; }
+	virtual bool KeyPressed(uint32 what, int32 key, int32 modifiers)
+	{
+		(void)what; (void)key; (void)modifiers;
+		return false;
+	}
+	virtual void MouseEvent(BMessage *message) { (void)message; }
+
+	virtual void MouseDown(Window *window, BMessage *message,
+		const BPoint &where)
+	{
+		(void)message;
+		if (!fBridge->HasPopups() || window == NULL)
+			return;
+		WaylandServerWindow *sw
+			= dynamic_cast<WaylandServerWindow *>(window->ServerWindow());
+		if (sw && (sw->IsPopup() || window->Frame().Contains(where)))
+			return;
+		union koan_cmd_payload none = {};
+		push_to_wayland(KOAN_CMD_DISMISS_POPUPS, none);
+	}
+
+	virtual void MouseUp(Window *window, BMessage *message,
+		const BPoint &where)
+	{
+		(void)window; (void)message; (void)where;
+	}
+	virtual void MouseMoved(Window *window, BMessage *message,
+		const BPoint &where)
+	{
+		(void)window; (void)message; (void)where;
+	}
+
+	virtual void WindowMoved(Window *window)
+	{
+		if (!fBridge->HasPopups() || window == NULL)
+			return;
+		WaylandServerWindow *sw
+			= dynamic_cast<WaylandServerWindow *>(window->ServerWindow());
+		if (sw && !sw->IsPopup())
+			fBridge->QueueNativeAction(sw->Handle(),
+				KOAN_NATIVE_FOLLOW_POPUPS, 0);
+	}
+
+	virtual void WindowResized(Window *window) { (void)window; }
+	virtual void WindowActivated(Window *window) { (void)window; }
+	virtual void WindowSentBehind(Window *window, Window *behindOf)
+	{
+		(void)window; (void)behindOf;
+	}
+	virtual void WindowWorkspacesChanged(Window *window, uint32 workspaces)
+	{
+		(void)window; (void)workspaces;
+	}
+	virtual void WindowHidden(Window *window, bool fromMinimize)
+	{
+		(void)window; (void)fromMinimize;
+	}
+	virtual void WindowMinimized(Window *window, bool minimize)
+	{
+		(void)window; (void)minimize;
+	}
+	virtual void WindowTabLocationChanged(Window *window, float location,
+		bool isShifting)
+	{
+		(void)window; (void)location; (void)isShifting;
+	}
+	virtual void SizeLimitsChanged(Window *window, int32 minWidth,
+		int32 maxWidth, int32 minHeight, int32 maxHeight)
+	{
+		(void)window; (void)minWidth; (void)maxWidth; (void)minHeight;
+		(void)maxHeight;
+	}
+	virtual void WindowLookChanged(Window *window, window_look look)
+	{
+		(void)window; (void)look;
+	}
+	virtual void WindowFeelChanged(Window *window, window_feel feel)
+	{
+		(void)window; (void)feel;
+	}
+	virtual bool SetDecoratorSettings(Window *window,
+		const BMessage &settings)
+	{
+		(void)window; (void)settings;
+		return false;
+	}
+	virtual void GetDecoratorSettings(Window *window, BMessage &settings)
+	{
+		(void)window; (void)settings;
+	}
+
+private:
+	WaylandWindowBridge *fBridge;
+};
+
+void
+WaylandWindowBridge::SetDesktop(Desktop *desktop)
+{
+	fDesktop = desktop;
+	if (!desktop || fListener)
+		return;
+	fListener = new(std::nothrow) WaylandDesktopListener(this);
+	/* Notifications walk the listener list under the window lock. */
+	if (fListener && desktop->LockAllWindows()) {
+		desktop->RegisterListener(fListener);
+		desktop->UnlockAllWindows();
+	}
+}
 
 WaylandWindowBridge::WaylandWindowBridge()
 	:
@@ -441,7 +642,11 @@ WaylandWindowBridge::WaylandWindowBridge()
 	fDisplay(NULL),
 	fDesktop(NULL),
 	fServerApp(NULL),
-	fNextViewToken(1)
+	fNextViewToken(1),
+	fTestWhere(0, 0),
+	fPopupCount(0),
+	fListener(NULL),
+	fTestButtons(0)
 {
 	wl_list_init(&fWindows);
 	wl_list_init(&fClients);
@@ -471,6 +676,11 @@ WaylandWindowBridge::Init()
 		set_size: s_set_size,
 		set_buffer: s_set_buffer,
 		set_visibility: s_set_visibility,
+		request_state: s_request_state,
+		request_minimize: s_request_minimize,
+		create_popup: s_create_popup,
+		move_popup: s_move_popup,
+		wake_app_server: s_wake_app_server,
 	};
 	koan_adapter_set_window_callbacks(&cbs, NULL, this);
 
@@ -487,6 +697,13 @@ WaylandWindowBridge::Shutdown()
 	 * wl_display_run(), so it must be stopped with wl_display_terminate()
 	 * rather than the app_server wake port. */
 	StopDispatchThread();
+
+	if (fListener && fDesktop && fDesktop->LockAllWindows()) {
+		fDesktop->UnregisterListener(fListener);
+		fDesktop->UnlockAllWindows();
+		delete fListener;
+		fListener = NULL;
+	}
 
 	if (fDisplay) {
 		koan_server_destroy(fDisplay);
@@ -802,6 +1019,47 @@ WaylandWindowBridge::s_set_visibility(void *userdata, struct koan_queue *queue,
 	bridge->_Wake();
 }
 
+/* The client asked to (un)maximize or (un)set fullscreen. Decide on the
+ * app_server thread, like the zoom button (process_native_action()). */
+void
+WaylandWindowBridge::s_request_state(void *userdata, struct koan_queue *queue,
+		void *window, int32_t maximized, int32_t fullscreen)
+{
+	(void)queue;
+	WaylandWindowBridge *bridge = (WaylandWindowBridge *)userdata;
+	if (!bridge || !window)
+		return;
+	if (maximized >= 0) {
+		bridge->QueueNativeAction(window, KOAN_NATIVE_SET_MAXIMIZED,
+			maximized);
+	}
+	if (fullscreen >= 0) {
+		bridge->QueueNativeAction(window, KOAN_NATIVE_SET_FULLSCREEN,
+			fullscreen);
+	}
+}
+
+/* koan_test_v1 queued a command outside the window callbacks. */
+void
+WaylandWindowBridge::s_wake_app_server(void *userdata)
+{
+	WaylandWindowBridge *bridge = (WaylandWindowBridge *)userdata;
+	if (bridge)
+		bridge->_Wake();
+}
+
+/* xdg_toplevel.set_minimized: minimize like the decorator's button
+ * (process_native_action(), app_server thread). */
+void
+WaylandWindowBridge::s_request_minimize(void *userdata,
+		struct koan_queue *queue, void *window)
+{
+	(void)queue;
+	WaylandWindowBridge *bridge = (WaylandWindowBridge *)userdata;
+	if (bridge && window)
+		bridge->QueueNativeAction(window, KOAN_NATIVE_MINIMIZE, 1);
+}
+
 /* -------------------------------------------------------------------------- */
 /* Command processors (app_server thread)                                     */
 /* -------------------------------------------------------------------------- */
@@ -828,6 +1086,16 @@ WaylandWindowBridge::s_queue_processor(struct koan_command *cmd, void *userdata)
 		return bridge->process_set_visibility(cmd);
 	case KOAN_CMD_NATIVE_ACTION:
 		return bridge->process_native_action(cmd);
+	case KOAN_CMD_CREATE_POPUP:
+		return bridge->process_create_popup(cmd);
+	case KOAN_CMD_MOVE_POPUP:
+		return bridge->process_move_popup(cmd);
+	case KOAN_CMD_TEST_PLACE:
+		return bridge->process_test_place(cmd);
+	case KOAN_CMD_TEST_POINTER:
+		return bridge->process_test_pointer(cmd);
+	case KOAN_CMD_TEST_FENCE:
+		return bridge->process_test_fence(cmd);
 	default:
 		wlr_log(WLR_ERROR, "Wayland bridge: unknown command type %d",
 			cmd->type);
@@ -869,7 +1137,8 @@ WaylandWindowBridge::EnsureServerApp()
 
 status_t
 WaylandWindowBridge::create_native_window(wayland_window *ww,
-		const char *title, int32_t width, int32_t height)
+		const char *title, int32_t width, int32_t height,
+		const BRect *popupFrame, int32 offsetX, int32 offsetY)
 {
 	if (!fDesktop)
 		return B_ERROR;
@@ -881,9 +1150,10 @@ WaylandWindowBridge::create_native_window(wayland_window *ww,
 	/* The window's input goes to this looper (its "client"), which
 	 * forwards it to the Wayland client. */
 	WaylandInputLooper *input = new(std::nothrow) WaylandInputLooper(
-		ww->toplevel);
+		ww->toplevel, popupFrame != NULL);
 	if (!input)
 		return B_NO_MEMORY;
+	input->SetContentOffset(offsetX, offsetY);
 	if (input->Run() < B_OK) {
 		delete input;
 		return B_ERROR;
@@ -891,7 +1161,7 @@ WaylandWindowBridge::create_native_window(wayland_window *ww,
 
 	WaylandServerWindow *server_window = new(std::nothrow) WaylandServerWindow(
 		title && title[0] ? title : "Wayland Window",
-		fServerApp, ww->toplevel, ww, ww->pid, input);
+		fServerApp, ww->toplevel, ww, ww->pid, input, popupFrame != NULL);
 	if (!server_window) {
 		if (input->Lock())
 			input->Quit();
@@ -905,9 +1175,22 @@ WaylandWindowBridge::create_native_window(wayland_window *ww,
 	 * from the screen corner so the tab is on screen. */
 	BRect frame(0, 0, width - 1, height - 1);
 	frame.OffsetBy(40, 40);
+	window_look look = B_TITLED_WINDOW_LOOK;
+	window_feel feel = B_NORMAL_WINDOW_FEEL;
+	uint32 flags = 0;
+	if (popupFrame != NULL) {
+		/* Like a native menu (BMenuWindow): no frame, above every
+		 * window, never takes the focus, so the toplevel stays active
+		 * and keeps its popup (deactivation dismisses popups). */
+		frame = *popupFrame;
+		look = B_NO_BORDER_WINDOW_LOOK;
+		feel = kMenuWindowFeel;
+		flags = B_NOT_MOVABLE | B_NOT_CLOSABLE | B_NOT_ZOOMABLE
+			| B_NOT_MINIMIZABLE | B_NOT_RESIZABLE | B_AVOID_FOCUS;
+	}
 	server_window->SetFrame(frame);
-	status = server_window->Init(frame, B_TITLED_WINDOW_LOOK,
-		B_NORMAL_WINDOW_FEEL, 0, B_CURRENT_WORKSPACE);
+	status = server_window->Init(frame, look, feel, flags,
+		B_CURRENT_WORKSPACE);
 	if (status != B_OK) {
 		/* Init() may already have added the window to the app's list;
 		 * the destructor removes it again. */
@@ -968,6 +1251,7 @@ WaylandWindowBridge::create_native_window(wayland_window *ww,
 
 	ww->server_window = server_window;
 	ww->window = window;
+	ww->input = BMessenger(input);
 
 	wlr_log(WLR_INFO, "Wayland bridge: created native window %dx%d", width,
 		height);
@@ -1019,6 +1303,12 @@ WaylandWindowBridge::process_create_window(struct koan_command *cmd)
 	ww->window = NULL;
 	ww->visible = false;
 	ww->maximized = false;
+	ww->fullscreen = false;
+	ww->fullscreen_restore_look = B_TITLED_WINDOW_LOOK;
+	ww->is_popup = false;
+	ww->popup = NULL;
+	ww->popup_x = 0;
+	ww->popup_y = 0;
 	ww->pid = cmd->payload.create_window.pid;
 
 	status_t status = create_native_window(ww, title, width, height);
@@ -1078,7 +1368,10 @@ WaylandWindowBridge::process_destroy_window(struct koan_command *cmd)
 		return 0;
 
 	wl_list_remove(&ww->link);
-	client_window_removed(ww->pid);
+	if (!ww->is_popup)
+		client_window_removed(ww->pid);
+	else
+		atomic_add(&fPopupCount, -1);
 	destroy_native_window(ww);
 	delete ww;
 	return 0;
@@ -1422,10 +1715,341 @@ WaylandWindowBridge::process_native_action(struct koan_command *cmd)
 		case KOAN_NATIVE_ZOOM:
 			zoom_window(ww);
 			break;
+		case KOAN_NATIVE_SET_MAXIMIZED:
+			/* xdg_toplevel.set_/unset_maximized: the zoom button's
+			 * maximize/restore, but idempotent; a fullscreen window keeps
+			 * its frame. xdg-shell needs a configure either way. */
+			if ((a->arg != 0) != ww->maximized && !ww->fullscreen)
+				zoom_window(ww);
+			else
+				configure_current_state(ww);
+			break;
+		case KOAN_NATIVE_FOLLOW_POPUPS:
+			follow_popups(ww);
+			break;
+		case KOAN_NATIVE_SET_FULLSCREEN:
+			if ((a->arg != 0) != ww->fullscreen)
+				fullscreen_window(ww, a->arg != 0);
+			else
+				configure_current_state(ww);
+			break;
 		default:
 			break;
 	}
 	return 0;
+}
+
+/* -------------------------------------------------------------------------- */
+/* xdg_popup windows                                                          */
+/* -------------------------------------------------------------------------- */
+
+void
+WaylandWindowBridge::s_create_popup(void *userdata, struct koan_queue *queue,
+		struct wlr_xdg_popup *popup, struct wlr_xdg_toplevel *toplevel,
+		int32_t x, int32_t y, int32_t width, int32_t height)
+{
+	WaylandWindowBridge *bridge = (WaylandWindowBridge *)userdata;
+	if (!bridge || !queue)
+		return;
+	union koan_cmd_payload payload = {};
+	payload.create_popup.popup = popup;
+	payload.create_popup.toplevel = toplevel;
+	payload.create_popup.x = x;
+	payload.create_popup.y = y;
+	payload.create_popup.width = width;
+	payload.create_popup.height = height;
+	if (koan_queue_push(queue, KOAN_CMD_CREATE_POPUP, &payload, NULL))
+		bridge->_Wake();
+}
+
+void
+WaylandWindowBridge::s_move_popup(void *userdata, struct koan_queue *queue,
+		void *window, int32_t x, int32_t y)
+{
+	WaylandWindowBridge *bridge = (WaylandWindowBridge *)userdata;
+	if (!bridge || !queue)
+		return;
+	union koan_cmd_payload payload = {};
+	payload.move_popup.window = window;
+	payload.move_popup.x = x;
+	payload.move_popup.y = y;
+	if (koan_queue_push(queue, KOAN_CMD_MOVE_POPUP, &payload, NULL))
+		bridge->_Wake();
+}
+
+/* A menu, tooltip or popover: a borderless native window at its place
+ * relative to the toplevel's content, above all windows, never focused.
+ * Its input goes to the toplevel's key in the toplevel's content
+ * coordinates; Koan's hit-test finds the popup surface there. */
+int
+WaylandWindowBridge::process_create_popup(struct koan_command *cmd)
+{
+	const struct koan_cmd_create_popup *p = &cmd->payload.create_popup;
+	union koan_cmd_payload ready = {};
+	ready.popup_ready.popup = p->popup;
+	ready.popup_ready.window = NULL;
+
+	BAutolock locker(fLock);
+	wayland_window *parent = find_window_by_toplevel(p->toplevel);
+	wayland_window *ww = NULL;
+	if (parent && parent->window && parent->visible && fDesktop
+		&& p->width > 0 && p->height > 0)
+		ww = new(std::nothrow) wayland_window;
+	if (ww) {
+		ww->toplevel = p->toplevel;
+		ww->server_window = NULL;
+		ww->window = NULL;
+		ww->visible = false;
+		ww->maximized = false;
+		ww->fullscreen = false;
+		ww->fullscreen_restore_look = B_NO_BORDER_WINDOW_LOOK;
+		ww->pid = parent->pid;
+		ww->is_popup = true;
+		ww->popup = p->popup;
+
+		BPoint origin = parent->window->Frame().LeftTop();
+		BRect frame(0, 0, p->width - 1, p->height - 1);
+		frame.OffsetTo(origin.x + p->x, origin.y + p->y);
+		if (create_native_window(ww, "Wayland popup", p->width, p->height,
+				&frame, p->x, p->y) != B_OK) {
+			delete ww;
+			ww = NULL;
+		}
+	}
+	if (ww) {
+		ww->popup_x = p->x;
+		ww->popup_y = p->y;
+		atomic_add(&fPopupCount, 1);
+		wl_list_insert(&fWindows, &ww->link);
+		ww->window->SetShowLevel(0);
+		fDesktop->ShowWindow(ww->window);
+		ww->visible = true;
+		ready.popup_ready.window = ww;
+	} else {
+		wlr_log(WLR_ERROR, "Wayland bridge: no window for a popup (parent "
+			"%s)", parent ? "not shown" : "unknown");
+	}
+	koan_queue_push(koan_adapter_queue(), KOAN_CMD_POPUP_READY, &ready, NULL);
+	return 0;
+}
+
+int
+WaylandWindowBridge::process_move_popup(struct koan_command *cmd)
+{
+	const struct koan_cmd_move_popup *p = &cmd->payload.move_popup;
+	BAutolock locker(fLock);
+	wayland_window *ww = NULL, *w;
+	wl_list_for_each(w, &fWindows, link) {
+		if (w == p->window && w->is_popup) {
+			ww = w;
+			break;
+		}
+	}
+	wayland_window *parent = ww ? find_window_by_toplevel(ww->toplevel) : NULL;
+	if (!ww || !ww->window || !parent || !parent->window || !fDesktop)
+		return 0;
+	BPoint origin = parent->window->Frame().LeftTop();
+	BRect frame = ww->window->Frame();
+	fDesktop->MoveWindowBy(ww->window, origin.x + p->x - frame.left,
+		origin.y + p->y - frame.top);
+	ww->popup_x = p->x;
+	ww->popup_y = p->y;
+	static_cast<WaylandServerWindow *>(ww->server_window)
+		->SetContentOffset(p->x, p->y);
+	return 0;
+}
+
+/* The toplevel's native window moved (dragged, zoomed, fullscreen): keep
+ * its popups at their place in its content. */
+void
+WaylandWindowBridge::follow_popups(wayland_window *parent)
+{
+	if (!parent->window || parent->is_popup || !fDesktop)
+		return;
+	BPoint origin = parent->window->Frame().LeftTop();
+	struct wayland_window *w;
+	wl_list_for_each(w, &fWindows, link) {
+		if (!w->is_popup || w->toplevel != parent->toplevel || !w->window)
+			continue;
+		BRect frame = w->window->Frame();
+		float dx = origin.x + w->popup_x - frame.left;
+		float dy = origin.y + w->popup_y - frame.top;
+		if (dx != 0 || dy != 0)
+			fDesktop->MoveWindowBy(w->window, dx, dy);
+	}
+}
+
+/* -------------------------------------------------------------------------- */
+/* koan_test_v1 (server/koan_test.c; only with /run/koan-test-control)        */
+/* -------------------------------------------------------------------------- */
+
+/* Place a window the way the user would drag it: the native window moves,
+ * the Desktop repaints and re-targets the pointer. */
+int
+WaylandWindowBridge::process_test_place(struct koan_command *cmd)
+{
+	const struct koan_cmd_test_place *p = &cmd->payload.test_place;
+	BAutolock locker(fLock);
+	wayland_window *ww = find_window_by_toplevel(p->toplevel);
+	if (!ww || !ww->window || !fDesktop) {
+		wlr_log(WLR_ERROR, "koan-test: place for a toplevel without a "
+			"native window");
+		return 0;
+	}
+	BRect frame = ww->window->Frame();
+	fDesktop->MoveWindowBy(ww->window, p->x - frame.left, p->y - frame.top);
+	return 0;
+}
+
+static int32
+evdev_to_be_button(uint32 button)
+{
+	switch (button) {
+		case 0x110: return B_PRIMARY_MOUSE_BUTTON;    /* BTN_LEFT */
+		case 0x111: return B_SECONDARY_MOUSE_BUTTON;  /* BTN_RIGHT */
+		case 0x112: return B_TERTIARY_MOUSE_BUTTON;   /* BTN_MIDDLE */
+		case 0x113: return 0x08;                      /* BTN_SIDE */
+		case 0x114: return 0x10;                      /* BTN_EXTRA */
+		default: return 0;
+	}
+}
+
+/* A mouse event as LibEvdevEventStream makes it, entering the
+ * EventDispatcher like device input: hit-testing, click-to-focus and the
+ * window's input looper all run as for a real mouse. */
+int
+WaylandWindowBridge::process_test_pointer(struct koan_command *cmd)
+{
+	const struct koan_cmd_test_pointer *p = &cmd->payload.test_pointer;
+	if (!fDesktop)
+		return 0;
+	uint32 what = B_MOUSE_MOVED;
+	if (p->button == 0) {
+		fTestWhere = BPoint(p->x, p->y);
+	} else {
+		int32 mask = evdev_to_be_button(p->button);
+		if (mask == 0)
+			return 0;
+		if (p->pressed)
+			fTestButtons |= mask;
+		else
+			fTestButtons &= ~mask;
+		what = p->pressed ? B_MOUSE_DOWN : B_MOUSE_UP;
+	}
+	BMessage *event = new(std::nothrow) BMessage(what);
+	if (!event)
+		return 0;
+	event->AddPoint("where", fTestWhere);
+	event->AddInt32("buttons", fTestButtons);
+	event->AddInt32("modifiers", 0);
+	event->AddInt64("when", system_time());
+	if (what == B_MOUSE_DOWN)
+		event->AddInt32("clicks", 1);
+	fDesktop->EventDispatcher().InjectEvent(event);
+	return 0;
+}
+
+/* Start a sync fence behind the injected input: the EventDispatcher hands
+ * it back (TestFenceReached) once everything before it is dispatched. */
+int
+WaylandWindowBridge::process_test_fence(struct koan_command *cmd)
+{
+	uint32_t serial = cmd->payload.test_fence.serial;
+	BMessage *fence = fDesktop && fWakeTarget.IsValid()
+		? new(std::nothrow) BMessage(kEventStreamFence) : NULL;
+	if (!fence) {
+		union koan_cmd_payload begin = {};
+		begin.test_fence.serial = serial;
+		begin.test_fence.parts = 0;
+		push_to_wayland(KOAN_CMD_TEST_FENCE_BEGIN, begin);
+		return 0;
+	}
+	fence->AddMessenger("target", fWakeTarget);
+	fence->AddInt32("koan:serial", (int32)serial);
+	fDesktop->EventDispatcher().InjectEvent(fence);
+	return 0;
+}
+
+/* Each input looper forwards its window's input in order; a fence message
+ * behind it is answered once that input reached the Wayland queue. */
+void
+WaylandWindowBridge::TestFenceReached(BMessage *fence)
+{
+	int32 serial = fence->GetInt32("koan:serial", 0);
+	int32 parts = 0;
+	{
+		BAutolock locker(fLock);
+		struct wayland_window *ww;
+		wl_list_for_each(ww, &fWindows, link) {
+			BMessage part(kMsgWaylandTestFence);
+			part.AddInt32("koan:serial", serial);
+			if (ww->input.IsValid() && ww->input.SendMessage(&part) == B_OK)
+				parts++;
+		}
+	}
+	union koan_cmd_payload begin = {};
+	begin.test_fence.serial = (uint32)serial;
+	begin.test_fence.parts = parts;
+	push_to_wayland(KOAN_CMD_TEST_FENCE_BEGIN, begin);
+}
+
+/* Answer a state request that changes nothing with the current state. */
+void
+WaylandWindowBridge::configure_current_state(wayland_window *ww)
+{
+	union koan_cmd_payload payload = {};
+	payload.toplevel_configure.toplevel = ww->toplevel;
+	payload.toplevel_configure.maximized = ww->maximized ? 1 : 0;
+	payload.toplevel_configure.activated = -1;
+	payload.toplevel_configure.fullscreen = ww->fullscreen
+		? KOAN_STATE_ENTER : KOAN_STATE_LEAVE;
+	koan_queue_push(koan_adapter_queue(), KOAN_CMD_TOPLEVEL_CONFIGURE,
+		&payload, NULL);
+}
+
+/* Fullscreen: the native window drops its decorator and covers the screen;
+ * leaving restores the look and the frame. As with zoom_window(), the window
+ * moves now and its size follows the client's next frame at the configured
+ * size (process_set_buffer()). */
+void
+WaylandWindowBridge::fullscreen_window(wayland_window *ww, bool enter)
+{
+	::Window *window = ww->window;
+	BRect frame = window->Frame();
+	BRect target;
+
+	if (enter) {
+		if (!fDesktop->LockSingleWindow())
+			return;
+		const ::Screen *screen = window->Screen();
+		BRect screenFrame = screen ? screen->Frame()
+			: BRect(0, 0, 1023, 767);
+		ww->fullscreen_restore_look = window->Look();
+		fDesktop->UnlockSingleWindow();
+
+		ww->fullscreen_restore_frame = frame;
+		ww->fullscreen = true;
+		target = screenFrame;
+		fDesktop->SetWindowLook(window, B_NO_BORDER_WINDOW_LOOK);
+	} else {
+		target = ww->fullscreen_restore_frame;
+		ww->fullscreen = false;
+		fDesktop->SetWindowLook(window, ww->fullscreen_restore_look);
+	}
+
+	fDesktop->MoveWindowBy(window, target.left - frame.left,
+		target.top - frame.top);
+
+	union koan_cmd_payload payload = {};
+	payload.toplevel_configure.toplevel = ww->toplevel;
+	payload.toplevel_configure.width = target.IntegerWidth() + 1;
+	payload.toplevel_configure.height = target.IntegerHeight() + 1;
+	payload.toplevel_configure.maximized = -1;
+	payload.toplevel_configure.activated = -1;
+	payload.toplevel_configure.fullscreen = enter
+		? KOAN_STATE_ENTER : KOAN_STATE_LEAVE;
+	koan_queue_push(koan_adapter_queue(), KOAN_CMD_TOPLEVEL_CONFIGURE,
+		&payload, NULL);
 }
 
 /* Maximize/restore. The native window moves now; its size follows when the
@@ -1507,7 +2131,8 @@ WaylandWindowBridge::find_window_by_toplevel(struct wlr_xdg_toplevel *toplevel)
 {
 	struct wayland_window *w;
 	wl_list_for_each(w, &fWindows, link) {
-		if (w->toplevel == toplevel)
+		/* Popup windows carry their toplevel's key for input only. */
+		if (w->toplevel == toplevel && !w->is_popup)
 			return w;
 	}
 	return NULL;

@@ -196,8 +196,26 @@ static void destroy_xdg_popup_grab(struct wlr_xdg_popup_grab *xdg_grab) {
 
 	wl_list_remove(&xdg_grab->seat_destroy.link);
 
-	struct wlr_xdg_popup *popup, *tmp;
-	wl_list_for_each_safe(popup, tmp, &xdg_grab->popups, grab_link) {
+	// Koan local change: detach the popups from this grab before
+	// destroying them. Upstream 0.20.2 destroys them while they still
+	// point at the grab, so reset_xdg_popup() looked the grab up again,
+	// found it empty and destroyed it a second time (double
+	// wl_list_remove): app_server crashed when the seat was destroyed
+	// with a grabbing menu open. Destroyed newest first, so a nested menu
+	// goes before the one it came from. Covered by
+	// tests/koan_protocol_test.c (input: shutdown-with-grabbing-popup).
+	struct wl_list popups;
+	wl_list_init(&popups);
+	wl_list_insert_list(&popups, &xdg_grab->popups);
+	wl_list_init(&xdg_grab->popups);
+	struct wlr_xdg_popup *popup;
+	wl_list_for_each(popup, &popups, grab_link) {
+		popup->seat = NULL;
+	}
+	while (!wl_list_empty(&popups)) {
+		popup = wl_container_of(popups.next, popup, grab_link);
+		wl_list_remove(&popup->grab_link);
+		wl_list_init(&popup->grab_link);
 		wlr_xdg_popup_destroy(popup);
 	}
 

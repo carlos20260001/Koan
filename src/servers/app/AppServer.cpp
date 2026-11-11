@@ -331,6 +331,12 @@ AppServer::MessageReceived(BMessage* message)
 			if (gWaylandWindowBridge)
 				gWaylandWindowBridge->WaylandWakeup();
 			break;
+
+		case kEventStreamFence:
+			/* koan_test_v1 sync: the EventDispatcher passed the fence. */
+			if (gWaylandWindowBridge)
+				gWaylandWindowBridge->TestFenceReached(message);
+			break;
 #endif
 
 		default:

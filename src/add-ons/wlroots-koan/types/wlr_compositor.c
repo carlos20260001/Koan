@@ -78,6 +78,15 @@ static void surface_handle_attach(struct wl_client *client,
 		return;
 	}
 
+	// Koan local change: let the role refuse the attach (see
+	// wlr_surface_role.client_attach).
+	if (buffer_resource != NULL && surface->role != NULL &&
+			surface->role->client_attach != NULL &&
+			(surface->role->no_object || surface->role_resource != NULL) &&
+			!surface->role->client_attach(surface)) {
+		return;
+	}
+
 	surface->pending.committed |= WLR_SURFACE_STATE_BUFFER;
 	set_pending_buffer_resource(surface, buffer_resource);
 

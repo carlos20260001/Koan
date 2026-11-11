@@ -21,6 +21,8 @@
 
 /* Message code the Wayland dispatch thread uses to wake app_server. */
 static const uint32 kMsgWaylandWake = 'wlwk';
+/* koan_test_v1 sync passing a window's input looper ("koan:serial"). */
+static const uint32 kMsgWaylandTestFence = 'wltf';
 
 #include <Locker.h>
 #include <Message.h>
@@ -29,6 +31,7 @@ static const uint32 kMsgWaylandWake = 'wlwk';
 #include <PortLink.h>
 #include <Rect.h>
 #include <String.h>
+#include <Window.h>
 #include <OS.h>
 
 #include "koan_adapter.h"
@@ -50,7 +53,16 @@ struct wayland_window {
 	bool visible;
 	bool maximized;
 	BRect restore_frame;                /* native frame before maximizing */
+	bool fullscreen;
+	BRect fullscreen_restore_frame;     /* native frame before fullscreen */
+	window_look fullscreen_restore_look;
 	int32 pid;                          /* client process, 0 if unknown */
+	BMessenger input;                   /* the window's WaylandInputLooper */
+	/* An xdg_popup's window: toplevel is then its root toplevel's key
+	 * (input goes there, in its coordinates) and popup its own key. */
+	bool is_popup;
+	struct wlr_xdg_popup *popup;
+	int32 popup_x, popup_y;             /* in the toplevel's content */
 };
 
 /* A Wayland client process with native windows, registered with the
@@ -71,7 +83,9 @@ public:
 	status_t Init();
 
 	/* Set the desktop that owns Wayland windows. */
-	void SetDesktop(Desktop *desktop) { fDesktop = desktop; }
+	/* Also registers the bridge's DesktopListener (popups follow their
+	 * window; clicks outside every client close menus). */
+	void SetDesktop(Desktop *desktop);
 
 	/* Set the looper the Wayland thread wakes when commands are queued.
 	 * This is app_server itself; the bridge does not own it. A BMessenger
@@ -104,6 +118,14 @@ public:
 	 * drained. */
 	void QueueNativeAction(void *window, int32 action, int32 arg);
 
+	/* koan_test_v1: the EventDispatcher passed a sync fence (a
+	 * kEventStreamFence message); pass it through every input looper. */
+	void TestFenceReached(BMessage *fence);
+
+	/* Whether any popup window exists (any thread; the listener skips
+	 * its queue pushes otherwise). */
+	bool HasPopups() const { return atomic_get((int32 *)&fPopupCount) > 0; }
+
 private:
 	/* koan_window_callbacks implementations (called from Wayland thread,
 	 * push commands to the queue). */
@@ -121,6 +143,16 @@ private:
 			int32_t stride, uint32_t format);
 	static void s_set_visibility(void *userdata, struct koan_queue *queue,
 			void *window, bool visible);
+	static void s_request_state(void *userdata, struct koan_queue *queue,
+			void *window, int32_t maximized, int32_t fullscreen);
+	static void s_request_minimize(void *userdata, struct koan_queue *queue,
+			void *window);
+	static void s_wake_app_server(void *userdata);
+	static void s_create_popup(void *userdata, struct koan_queue *queue,
+			struct wlr_xdg_popup *popup, struct wlr_xdg_toplevel *toplevel,
+			int32_t x, int32_t y, int32_t width, int32_t height);
+	static void s_move_popup(void *userdata, struct koan_queue *queue,
+			void *window, int32_t x, int32_t y);
 
 	/* Command queue processors (called from app_server thread). */
 	int process_create_window(struct koan_command *cmd);
@@ -130,7 +162,14 @@ private:
 	int process_set_buffer(struct koan_command *cmd);
 	int process_set_visibility(struct koan_command *cmd);
 	int process_native_action(struct koan_command *cmd);
+	int process_create_popup(struct koan_command *cmd);
+	int process_move_popup(struct koan_command *cmd);
+	int process_test_place(struct koan_command *cmd);
+	int process_test_pointer(struct koan_command *cmd);
+	int process_test_fence(struct koan_command *cmd);
 	void zoom_window(wayland_window *ww);
+	void fullscreen_window(wayland_window *ww, bool enter);
+	void configure_current_state(wayland_window *ww);
 
 	/* Deskbar/registrar bookkeeping (app_server thread, fLock held). */
 	void client_window_added(int32 pid, const char *app_id);
@@ -150,8 +189,12 @@ private:
 	wayland_window *find_window_by_server_window(ServerWindow *server_window);
 
 	status_t EnsureServerApp();
+	/* popupFrame non-NULL: an xdg_popup's window at that screen frame,
+	 * whose input is offset by (offsetX, offsetY) into its toplevel's
+	 * content coordinates. */
 	status_t create_native_window(wayland_window *ww, const char *title,
-			int32_t width, int32_t height);
+			int32_t width, int32_t height, const BRect *popupFrame = NULL,
+			int32 offsetX = 0, int32 offsetY = 0);
 	void destroy_native_window(wayland_window *ww);
 	void update_buffer(wayland_window *ww, void *data, int32_t width,
 			int32_t height, int32_t stride, uint32_t format);
@@ -168,6 +211,11 @@ private:
 	Desktop *fDesktop;
 	ServerApp *fServerApp;        /* shared client context for all windows */
 	int32 fNextViewToken;         /* top-view tokens in fServerApp's space */
+	BPoint fTestWhere;            /* koan_test_v1 pointer (app_server thread) */
+	int32 fPopupCount;            /* popup windows (atomic) */
+	class WaylandDesktopListener *fListener;
+	void follow_popups(wayland_window *ww);
+	int32 fTestButtons;
 	char fSocketName[64];
 };
 

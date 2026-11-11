@@ -1,6 +1,9 @@
 /*
+ * SPDX-License-Identifier: MIT
+ *
  * Copyright © 2012 Intel Corporation
  * Copyright © 2012, 2013, 2014 Collabora, Ltd.
+ * Copyright © 2026 carlos20260001
  *
  * Permission is hereby granted, free of charge, to any person obtaining
  * a copy of this software and associated documentation files (the
@@ -33,9 +36,11 @@
  *   tests/roles-test.c       Copyright © 2014 Collabora, Ltd.
  *   tests/subsurface-test.c  Copyright © 2012 Collabora, Ltd.
  *
- * all under the MIT (Expat) license above. They are rewritten as plain
- * libwayland clients for the Koan server; no Weston harness code is used.
- * The remaining code is Koan's own and is offered under the same terms.
+ * all under the MIT (Expat) license above, Weston's license (its
+ * COPYING: "the version of the MIT 'Expat' License used by X.org"), with
+ * the same wording as those files. They are rewritten as plain libwayland
+ * clients for the Koan server; no Weston harness code is used. The
+ * remaining code is Koan's own and is offered under the same terms.
  */
 
 /*
@@ -52,7 +57,7 @@
  * FAILED or was BLOCKED.
  *
  * Usage: koan_protocol_test
- *   [core|lifecycle|bad-buffer|subsurface|compose|xdg]
+ *   [core|lifecycle|bad-buffer|subsurface|compose|xdg|data|input|testctl]
  *
  *   core        registry inventory and invalid-request handling: the
  *               offending client gets the right protocol error, a second
@@ -75,6 +80,12 @@
  *               the parent's commit, parent destroyed with pending state.
  *   xdg         xdg_popup: initial configure, positioner geometry, map,
  *               destroy. Display is NOT_IMPLEMENTED (no bridge yet).
+ *   data        clipboard selection between two clients: offered to the
+ *               client that gets keyboard focus, delivered to the focused
+ *               client, ignored with an invalid serial.
+ *   input       pointer coordinates from app_server map to the surface
+ *               the native window shows, also after a sub-surface that
+ *               widened the window unmaps.
  *
  * lifecycle and bad-buffer run in their own process (separate ctest
  * entries) so a crash is attributed to them alone.
@@ -97,6 +108,8 @@
 #include <wlr/util/log.h>
 
 #include "xdg-shell-client-protocol.h"
+#include "koan-test-v1-client-protocol.h"
+#include "koan_test.h"
 
 #include "koan_adapter.h"
 #include "koan_queue.h"
@@ -165,12 +178,17 @@ fake_create_window(void *userdata, struct koan_queue *queue,
 	atomic_store(&sCreatedToplevel, toplevel);
 }
 
+/* Native windows app_server was told to destroy, and the last one. */
+static atomic_int sDestroyWindowCount;
+static _Atomic(void *) sDestroyedWindow;
+
 static void
 fake_destroy_window(void *userdata, struct koan_queue *queue, void *window)
 {
 	(void)userdata;
 	(void)queue;
-	(void)window;
+	atomic_store(&sDestroyedWindow, window);
+	atomic_fetch_add(&sDestroyWindowCount, 1);
 }
 
 static void
@@ -239,6 +257,89 @@ fake_set_visibility(void *userdata, struct koan_queue *queue, void *window,
 	(void)visible;
 }
 
+/* app_server's answer to a state request: grant it, with the screen-sized
+ * frame zoom_window() / fullscreen use (here a fixed 800x600 screen). */
+static atomic_int sStateRequests;
+
+static void
+fake_request_state(void *userdata, struct koan_queue *queue, void *window,
+	int32_t maximized, int32_t fullscreen)
+{
+	(void)userdata;
+	(void)window;
+	atomic_fetch_add(&sStateRequests, 1);
+	union koan_cmd_payload reply = {0};
+	reply.toplevel_configure.toplevel = atomic_load(&sCreatedToplevel);
+	reply.toplevel_configure.maximized = maximized;
+	reply.toplevel_configure.activated = -1;
+	if (fullscreen >= 0) {
+		reply.toplevel_configure.fullscreen = fullscreen
+			? KOAN_STATE_ENTER : KOAN_STATE_LEAVE;
+	}
+	if (maximized == 1 || fullscreen == 1) {
+		reply.toplevel_configure.width = 800;
+		reply.toplevel_configure.height = 600;
+	}
+	koan_queue_push(queue, KOAN_CMD_TOPLEVEL_CONFIGURE, &reply, NULL);
+}
+
+/* app_server's minimize: counted, nothing else (no reply in xdg-shell). */
+static atomic_int sMinimizeRequests;
+
+static void
+fake_request_minimize(void *userdata, struct koan_queue *queue, void *window)
+{
+	(void)userdata;
+	(void)queue;
+	(void)window;
+	atomic_fetch_add(&sMinimizeRequests, 1);
+}
+
+/* testctl mode: create the koan_test_v1 global in server_start(). */
+static bool sTestControl;
+
+/* app_server's popup windows: the last create_popup request. */
+static pthread_mutex_t sPopupLock = PTHREAD_MUTEX_INITIALIZER;
+static struct {
+	int creates;
+	int moves;
+	struct wlr_xdg_popup *popup;
+	struct wlr_xdg_toplevel *toplevel;
+	int32_t x, y, width, height;
+} sPopupWm;
+
+static void
+fake_create_popup(void *userdata, struct koan_queue *queue,
+	struct wlr_xdg_popup *popup, struct wlr_xdg_toplevel *toplevel,
+	int32_t x, int32_t y, int32_t width, int32_t height)
+{
+	(void)userdata;
+	(void)queue;
+	pthread_mutex_lock(&sPopupLock);
+	sPopupWm.creates++;
+	sPopupWm.popup = popup;
+	sPopupWm.toplevel = toplevel;
+	sPopupWm.x = x;
+	sPopupWm.y = y;
+	sPopupWm.width = width;
+	sPopupWm.height = height;
+	pthread_mutex_unlock(&sPopupLock);
+}
+
+static void
+fake_move_popup(void *userdata, struct koan_queue *queue, void *window,
+	int32_t x, int32_t y)
+{
+	(void)userdata;
+	(void)queue;
+	(void)window;
+	pthread_mutex_lock(&sPopupLock);
+	sPopupWm.moves++;
+	sPopupWm.x = x;
+	sPopupWm.y = y;
+	pthread_mutex_unlock(&sPopupLock);
+}
+
 static struct koan_window_callbacks sCallbacks = {
 	.create_window = fake_create_window,
 	.destroy_window = fake_destroy_window,
@@ -246,6 +347,10 @@ static struct koan_window_callbacks sCallbacks = {
 	.set_size = fake_set_size,
 	.set_buffer = fake_set_buffer,
 	.set_visibility = fake_set_visibility,
+	.request_state = fake_request_state,
+	.request_minimize = fake_request_minimize,
+	.create_popup = fake_create_popup,
+	.move_popup = fake_move_popup,
 };
 
 /* ---- server ------------------------------------------------------------ */
@@ -273,6 +378,9 @@ server_start(struct server *s)
 		&sNativeWindowToken);
 	s->display = koan_server_create();
 	if (s->display == NULL)
+		return false;
+	/* app_server creates it when /run/koan-test-control is present. */
+	if (sTestControl && !koan_test_control_create(s->display))
 		return false;
 	s->socket = koan_server_add_socket(s->display);
 	if (s->socket == NULL || !koan_server_start())
@@ -314,6 +422,8 @@ struct conn {
 	struct wl_shm *shm;
 	struct xdg_wm_base *wm_base;
 	struct wl_seat *seat;
+	struct wl_output *output;   /* bound so wl_surface.enter can name it */
+	struct wl_data_device_manager *data_device_manager;
 	uint32_t seat_caps;
 	struct global globals[MAX_GLOBALS];
 	int global_count;
@@ -385,6 +495,14 @@ registry_global(void *data, struct wl_registry *registry, uint32_t name,
 		c->wm_base = wl_registry_bind(registry, name,
 			&xdg_wm_base_interface, 1);
 		xdg_wm_base_add_listener(c->wm_base, &sWmBaseListener, NULL);
+	} else if (strcmp(interface, wl_data_device_manager_interface.name) == 0
+		&& c->data_device_manager == NULL) {
+		c->data_device_manager = wl_registry_bind(registry, name,
+			&wl_data_device_manager_interface, min_u32(version, 3));
+	} else if (strcmp(interface, wl_output_interface.name) == 0
+		&& c->output == NULL) {
+		c->output = wl_registry_bind(registry, name, &wl_output_interface,
+			min_u32(version, 2));
 	} else if (strcmp(interface, wl_seat_interface.name) == 0
 		&& c->seat == NULL) {
 		c->seat = wl_registry_bind(registry, name, &wl_seat_interface,
@@ -875,6 +993,57 @@ bad_surface_destroyed_before_role(struct conn *c)
 	wl_surface_destroy(child);
 }
 
+/* xdg-shell.xml (xdg_surface): creating an xdg_surface from a wl_surface
+ * that has a buffer attached or committed is a client error. The error is
+ * xdg_wm_base.invalid_surface_state (the request is on xdg_wm_base; WLCS
+ * XdgSurfaceStableTest expects the same). */
+static void
+bad_xdg_surface_from_committed_buffer(struct conn *c)
+{
+	struct wl_surface *surface = wl_compositor_create_surface(c->compositor);
+	int fd = make_shm_fd(16 * 16 * 4);
+	struct wl_shm_pool *pool = wl_shm_create_pool(c->shm, fd, 16 * 16 * 4);
+	close(fd);
+	struct wl_buffer *buffer = wl_shm_pool_create_buffer(pool, 0, 16, 16,
+		16 * 4, WL_SHM_FORMAT_ARGB8888);
+	wl_surface_attach(surface, buffer, 0, 0);
+	wl_surface_commit(surface);
+	wl_display_roundtrip(c->display);
+	xdg_wm_base_get_xdg_surface(c->wm_base, surface);
+}
+
+static void
+bad_xdg_surface_from_attached_buffer(struct conn *c)
+{
+	struct wl_surface *surface = wl_compositor_create_surface(c->compositor);
+	int fd = make_shm_fd(16 * 16 * 4);
+	struct wl_shm_pool *pool = wl_shm_create_pool(c->shm, fd, 16 * 16 * 4);
+	close(fd);
+	struct wl_buffer *buffer = wl_shm_pool_create_buffer(pool, 0, 16, 16,
+		16 * 4, WL_SHM_FORMAT_ARGB8888);
+	wl_surface_attach(surface, buffer, 0, 0);
+	xdg_wm_base_get_xdg_surface(c->wm_base, surface);
+}
+
+/* xdg-shell.xml (xdg_surface): "any attempts by a client to attach or
+ * manipulate a buffer prior to the first xdg_surface.configure call must
+ * also be treated as errors" -- on the attach itself, without a commit
+ * (WLCS XdgSurfaceStableTest.attaching_buffer_to_unconfigured_...). */
+static void
+bad_attach_before_first_configure(struct conn *c)
+{
+	struct wl_surface *surface = wl_compositor_create_surface(c->compositor);
+	struct xdg_surface *xdg = xdg_wm_base_get_xdg_surface(c->wm_base,
+		surface);
+	xdg_surface_get_toplevel(xdg);
+	int fd = make_shm_fd(16 * 16 * 4);
+	struct wl_shm_pool *pool = wl_shm_create_pool(c->shm, fd, 16 * 16 * 4);
+	close(fd);
+	struct wl_buffer *buffer = wl_shm_pool_create_buffer(pool, 0, 16, 16,
+		16 * 4, WL_SHM_FORMAT_ARGB8888);
+	wl_surface_attach(surface, buffer, 0, 0);
+}
+
 struct negative_case {
 	const char *name;
 	bad_request request;
@@ -940,6 +1109,15 @@ static const struct negative_case kNegativeCases[] = {
 		"wl_subsurface", WL_SUBSURFACE_ERROR_BAD_SURFACE },
 	/* The error is on the wl_surface the client just destroyed, so the
 	 * client only sees the code. */
+	{ "xdg-surface-from-committed-buffer",
+		bad_xdg_surface_from_committed_buffer,
+		"xdg_wm_base", XDG_WM_BASE_ERROR_INVALID_SURFACE_STATE },
+	{ "xdg-surface-from-attached-buffer",
+		bad_xdg_surface_from_attached_buffer,
+		"xdg_wm_base", XDG_WM_BASE_ERROR_INVALID_SURFACE_STATE },
+	{ "xdg-attach-before-first-configure",
+		bad_attach_before_first_configure,
+		"xdg_surface", XDG_SURFACE_ERROR_UNCONFIGURED_BUFFER },
 	{ "surface-destroyed-before-role-object",
 		bad_surface_destroyed_before_role,
 		kDestroyedObject, WL_SURFACE_ERROR_DEFUNCT_ROLE_OBJECT },
@@ -994,6 +1172,89 @@ test_negative(const char *socket)
 	conn_close(&witness);
 }
 
+/* wl_output v4 sends name and description on bind (wayland.xml). A NULL
+ * string cannot be marshalled: the server logged "error marshalling
+ * arguments for name" and disconnected the client, which is how Chromium
+ * (--ozone-platform=wayland) failed to start. */
+struct output_info {
+	char name[64];
+	char description[128];
+	bool done;
+};
+
+static void output_geometry(void *data, struct wl_output *o, int32_t x,
+	int32_t y, int32_t pw, int32_t ph, int32_t subpixel, const char *make,
+	const char *model, int32_t transform)
+{
+	(void)data; (void)o; (void)x; (void)y; (void)pw; (void)ph;
+	(void)subpixel; (void)make; (void)model; (void)transform;
+}
+
+static void output_mode(void *data, struct wl_output *o, uint32_t flags,
+	int32_t w, int32_t h, int32_t refresh)
+{
+	(void)data; (void)o; (void)flags; (void)w; (void)h; (void)refresh;
+}
+
+static void output_done(void *data, struct wl_output *o)
+{
+	(void)o;
+	((struct output_info *)data)->done = true;
+}
+
+static void output_scale(void *data, struct wl_output *o, int32_t factor)
+{
+	(void)data; (void)o; (void)factor;
+}
+
+static void output_name(void *data, struct wl_output *o, const char *name)
+{
+	(void)o;
+	snprintf(((struct output_info *)data)->name,
+		sizeof(((struct output_info *)data)->name), "%s", name);
+}
+
+static void output_description(void *data, struct wl_output *o,
+	const char *description)
+{
+	(void)o;
+	snprintf(((struct output_info *)data)->description,
+		sizeof(((struct output_info *)data)->description), "%s", description);
+}
+
+static const struct wl_output_listener sOutputListener = {
+	.geometry = output_geometry,
+	.mode = output_mode,
+	.done = output_done,
+	.scale = output_scale,
+	.name = output_name,
+	.description = output_description,
+};
+
+static void
+test_output_v4(const char *socket)
+{
+	struct conn c;
+	int count = 0;
+	const struct global *g = conn_open(&c, socket)
+		? find_global(&c, "wl_output", &count) : NULL;
+	if (g == NULL || g->version < 4) {
+		result(ST_BLOCKED, "output-v4-name", "no wl_output v4");
+		conn_close(&c);
+		return;
+	}
+	struct output_info info = {0};
+	struct wl_output *output = wl_registry_bind(c.registry, g->name,
+		&wl_output_interface, 4);
+	wl_output_add_listener(output, &sOutputListener, &info);
+	bool ok = settle(&c) && wl_display_get_error(c.display) == 0;
+	result(ok && info.done && info.name[0] != '\0'
+			&& info.description[0] != '\0' ? ST_PASS : ST_FAIL,
+		"output-v4-name", "%s; name '%s', description '%s'",
+		ok ? "connected" : "DISCONNECTED", info.name, info.description);
+	conn_close(&c);
+}
+
 static int
 run_core(void)
 {
@@ -1007,6 +1268,7 @@ run_core(void)
 
 	test_registry(s.socket);
 	test_negative(s.socket);
+	test_output_v4(s.socket);
 
 	server_stop(&s);
 	result(ST_PASS, "server-shutdown", "terminated and destroyed");
@@ -1051,6 +1313,87 @@ struct toplevel {
 	struct xdg_toplevel *xdg_toplevel;
 	uint32_t configure_serial;
 	bool configured;
+	int configures;             /* xdg_surface.configure events seen */
+	int outputs_entered;
+	int32_t width, height;      /* last xdg_toplevel.configure */
+	bool maximized, fullscreen, activated;
+};
+
+static void
+toplevel_configure(void *data, struct xdg_toplevel *xdg_toplevel,
+	int32_t width, int32_t height, struct wl_array *states)
+{
+	(void)xdg_toplevel;
+	struct toplevel *t = data;
+	t->width = width;
+	t->height = height;
+	t->maximized = t->fullscreen = t->activated = false;
+	uint32_t *state;
+	wl_array_for_each(state, states) {
+		if (*state == XDG_TOPLEVEL_STATE_MAXIMIZED)
+			t->maximized = true;
+		else if (*state == XDG_TOPLEVEL_STATE_FULLSCREEN)
+			t->fullscreen = true;
+		else if (*state == XDG_TOPLEVEL_STATE_ACTIVATED)
+			t->activated = true;
+	}
+}
+
+static void
+toplevel_close(void *data, struct xdg_toplevel *xdg_toplevel)
+{
+	(void)data;
+	(void)xdg_toplevel;
+}
+
+static void
+toplevel_configure_bounds(void *data, struct xdg_toplevel *xdg_toplevel,
+	int32_t width, int32_t height)
+{
+	(void)data;
+	(void)xdg_toplevel;
+	(void)width;
+	(void)height;
+}
+
+static void
+toplevel_wm_capabilities(void *data, struct xdg_toplevel *xdg_toplevel,
+	struct wl_array *capabilities)
+{
+	(void)data;
+	(void)xdg_toplevel;
+	(void)capabilities;
+}
+
+static const struct xdg_toplevel_listener sToplevelListener = {
+	.configure = toplevel_configure,
+	.close = toplevel_close,
+	.configure_bounds = toplevel_configure_bounds,
+	.wm_capabilities = toplevel_wm_capabilities,
+};
+
+static void
+surface_enter(void *data, struct wl_surface *surface,
+	struct wl_output *output)
+{
+	(void)surface;
+	(void)output;
+	((struct toplevel *)data)->outputs_entered++;
+}
+
+static void
+surface_leave(void *data, struct wl_surface *surface,
+	struct wl_output *output)
+{
+	(void)surface;
+	(void)output;
+	((struct toplevel *)data)->outputs_entered--;
+}
+
+/* wl_compositor is bound at version 4: only enter/leave can arrive. */
+static const struct wl_surface_listener sSurfaceListener = {
+	.enter = surface_enter,
+	.leave = surface_leave,
 };
 
 static void
@@ -1061,6 +1404,7 @@ xdg_surface_configure(void *data, struct xdg_surface *xdg_surface,
 	struct toplevel *t = data;
 	t->configure_serial = serial;
 	t->configured = true;
+	t->configures++;
 }
 
 static const struct xdg_surface_listener sXdgSurfaceListener = {
@@ -1477,9 +1821,11 @@ map_toplevel(struct conn *c, struct toplevel *t, uint32_t color)
 {
 	memset(t, 0, sizeof(*t));
 	t->surface = wl_compositor_create_surface(c->compositor);
+	wl_surface_add_listener(t->surface, &sSurfaceListener, t);
 	t->xdg_surface = xdg_wm_base_get_xdg_surface(c->wm_base, t->surface);
 	xdg_surface_add_listener(t->xdg_surface, &sXdgSurfaceListener, t);
 	t->xdg_toplevel = xdg_surface_get_toplevel(t->xdg_surface);
+	xdg_toplevel_add_listener(t->xdg_toplevel, &sToplevelListener, t);
 	wl_surface_commit(t->surface);
 	if (!settle(c) || !t->configured)
 		return false;
@@ -1507,6 +1853,19 @@ attach_color(struct conn *c, struct wl_surface *surface, int w, int h,
 	wl_surface_damage(surface, 0, 0, w, h);
 }
 
+/* Dispatches until *counter reaches target or about a second passes. */
+static bool
+wait_for_count(struct conn *c, const int *counter, int target)
+{
+	for (int i = 0; i < 500 && *counter < target; i++) {
+		if (wl_display_roundtrip(c->display) < 0)
+			return false;
+		if (*counter < target)
+			usleep(2000);
+	}
+	return *counter >= target;
+}
+
 static void
 test_frame_loop(struct conn *c, struct toplevel *t)
 {
@@ -1521,8 +1880,7 @@ test_frame_loop(struct conn *c, struct toplevel *t)
 		wl_callback_add_listener(cb, &sFrameListener, &wait);
 		wl_surface_commit(t->surface);
 		/* Like a throttled client: wait for this frame's callback. */
-		for (int r = 0; ok && wait.done <= i && r < 8; r++)
-			ok = wl_display_roundtrip(c->display) >= 0;
+		ok = wait_for_count(c, &wait.done, i + 1);
 	}
 	int delivered = atomic_load(&sSetBufferCount) - before;
 	uint32_t last = ((kFrames - 1) & 1) ? COLOR_ROOT : COLOR_CHILD;
@@ -1531,6 +1889,46 @@ test_frame_loop(struct conn *c, struct toplevel *t)
 	result(ok ? ST_PASS : ST_FAIL, "frame-callback-loop",
 		"%d/%d callbacks, %d frames delivered, last pixel 0x%08x",
 		wait.done, kFrames, delivered, frame_pixel(0, 0));
+}
+
+/*
+ * A frame callback must not be answered as part of the commit that
+ * requested it: a client that requests a frame on every callback (Firefox
+ * does) would then loop without ever sleeping. It has to come later, at
+ * the output's pace. Same requirement as WLCS
+ * FrameSubmission.when_client_endlessly_requests_frame_then_callbacks_are_throttled.
+ */
+static void
+test_frame_throttle(struct conn *c, struct toplevel *t)
+{
+	const int kRounds = 20;
+	int immediate = 0;
+	struct frame_wait wait = {0};
+	bool ok = true;
+	for (int i = 0; ok && i < kRounds; i++) {
+		struct wl_callback *cb = wl_surface_frame(t->surface);
+		wl_callback_add_listener(cb, &sFrameListener, &wait);
+		wl_surface_commit(t->surface);
+		/* One roundtrip: the server has processed the commit. */
+		ok = wl_display_roundtrip(c->display) >= 0;
+		if (wait.done > i)
+			immediate++;
+		ok = ok && wait_for_count(c, &wait.done, i + 1);
+	}
+	result(ok && immediate == 0 ? ST_PASS : ST_FAIL,
+		"frame-callback-throttled",
+		"%d of %d callbacks were answered within the commit's own "
+		"roundtrip; %d arrived in total", immediate, kRounds, wait.done);
+}
+
+static void
+test_surface_enter(struct conn *c, struct toplevel *t)
+{
+	bool ok = settle(c);
+	result(ok && t->outputs_entered == 1 ? ST_PASS : ST_FAIL,
+		"surface-enters-output",
+		"mapped toplevel is on %d outputs (expected 1 wl_surface.enter)",
+		t->outputs_entered);
 }
 
 static void
@@ -1642,7 +2040,9 @@ run_compose(void)
 		server_stop(&s);
 		return summary();
 	}
+	test_surface_enter(&c, &t);
 	test_frame_loop(&c, &t);
+	test_frame_throttle(&c, &t);
 	test_nested_sync(&c, &t);
 
 	struct conn after;
@@ -1737,6 +2137,877 @@ popup_create(struct conn *c, struct toplevel *parent, struct popup *p)
 	wl_surface_commit(p->surface);
 }
 
+/* ---- data: clipboard selection ---------------------------------------- */
+
+#define SELECTION_MIME "text/plain;charset=utf-8"
+
+/* One client's view of the seat: keyboard focus and the selection. */
+struct data_client {
+	struct conn c;
+	struct toplevel t;
+	struct wlr_xdg_toplevel *server_toplevel; /* key for focus commands */
+	struct wl_keyboard *keyboard;
+	struct wl_data_device *device;
+	uint32_t enter_serial;
+	bool focused;
+	struct wl_data_offer *pending_offer;      /* introduced, mimes coming */
+	bool pending_has_mime;
+	struct wl_data_offer *selection;          /* current selection offer */
+	bool selection_has_mime;
+	int selection_events;
+};
+
+static void
+dk_keymap(void *data, struct wl_keyboard *k, uint32_t format, int32_t fd,
+	uint32_t size)
+{
+	(void)data;
+	(void)k;
+	(void)format;
+	(void)size;
+	close(fd);
+}
+
+static void
+dk_enter(void *data, struct wl_keyboard *k, uint32_t serial,
+	struct wl_surface *surface, struct wl_array *keys)
+{
+	(void)k;
+	(void)surface;
+	(void)keys;
+	struct data_client *d = data;
+	d->enter_serial = serial;
+	d->focused = true;
+}
+
+static void
+dk_leave(void *data, struct wl_keyboard *k, uint32_t serial,
+	struct wl_surface *surface)
+{
+	(void)k;
+	(void)serial;
+	(void)surface;
+	((struct data_client *)data)->focused = false;
+}
+
+static void
+dk_key(void *data, struct wl_keyboard *k, uint32_t serial, uint32_t time,
+	uint32_t key, uint32_t state)
+{
+	(void)data;
+	(void)k;
+	(void)serial;
+	(void)time;
+	(void)key;
+	(void)state;
+}
+
+static void
+dk_modifiers(void *data, struct wl_keyboard *k, uint32_t serial,
+	uint32_t depressed, uint32_t latched, uint32_t locked, uint32_t group)
+{
+	(void)data;
+	(void)k;
+	(void)serial;
+	(void)depressed;
+	(void)latched;
+	(void)locked;
+	(void)group;
+}
+
+static void
+dk_repeat_info(void *data, struct wl_keyboard *k, int32_t rate,
+	int32_t delay)
+{
+	(void)data;
+	(void)k;
+	(void)rate;
+	(void)delay;
+}
+
+static const struct wl_keyboard_listener sDataKeyboardListener = {
+	.keymap = dk_keymap,
+	.enter = dk_enter,
+	.leave = dk_leave,
+	.key = dk_key,
+	.modifiers = dk_modifiers,
+	.repeat_info = dk_repeat_info,
+};
+
+static void
+offer_offer(void *data, struct wl_data_offer *offer, const char *mime)
+{
+	struct data_client *d = data;
+	if (strcmp(mime, SELECTION_MIME) != 0)
+		return;
+	if (offer == d->pending_offer)
+		d->pending_has_mime = true;
+	if (offer == d->selection)
+		d->selection_has_mime = true;
+}
+
+static void
+offer_source_actions(void *data, struct wl_data_offer *offer, uint32_t a)
+{
+	(void)data;
+	(void)offer;
+	(void)a;
+}
+
+static void
+offer_action(void *data, struct wl_data_offer *offer, uint32_t a)
+{
+	(void)data;
+	(void)offer;
+	(void)a;
+}
+
+static const struct wl_data_offer_listener sOfferListener = {
+	.offer = offer_offer,
+	.source_actions = offer_source_actions,
+	.action = offer_action,
+};
+
+static void
+dd_data_offer(void *data, struct wl_data_device *device,
+	struct wl_data_offer *offer)
+{
+	(void)device;
+	struct data_client *d = data;
+	d->pending_offer = offer;
+	d->pending_has_mime = false;
+	wl_data_offer_add_listener(offer, &sOfferListener, d);
+}
+
+static void
+dd_enter(void *data, struct wl_data_device *device, uint32_t serial,
+	struct wl_surface *surface, wl_fixed_t x, wl_fixed_t y,
+	struct wl_data_offer *offer)
+{
+	(void)data;
+	(void)device;
+	(void)serial;
+	(void)surface;
+	(void)x;
+	(void)y;
+	(void)offer;
+}
+
+static void
+dd_leave(void *data, struct wl_data_device *device)
+{
+	(void)data;
+	(void)device;
+}
+
+static void
+dd_motion(void *data, struct wl_data_device *device, uint32_t time,
+	wl_fixed_t x, wl_fixed_t y)
+{
+	(void)data;
+	(void)device;
+	(void)time;
+	(void)x;
+	(void)y;
+}
+
+static void
+dd_drop(void *data, struct wl_data_device *device)
+{
+	(void)data;
+	(void)device;
+}
+
+static void
+dd_selection(void *data, struct wl_data_device *device,
+	struct wl_data_offer *offer)
+{
+	(void)device;
+	struct data_client *d = data;
+	if (d->selection != NULL && d->selection != offer)
+		wl_data_offer_destroy(d->selection);
+	d->selection = offer;
+	d->selection_has_mime = offer != NULL && offer == d->pending_offer
+		&& d->pending_has_mime;
+	d->selection_events++;
+}
+
+static const struct wl_data_device_listener sDataDeviceListener = {
+	.data_offer = dd_data_offer,
+	.enter = dd_enter,
+	.leave = dd_leave,
+	.motion = dd_motion,
+	.drop = dd_drop,
+	.selection = dd_selection,
+};
+
+static void
+source_target(void *data, struct wl_data_source *s, const char *mime)
+{
+	(void)data;
+	(void)s;
+	(void)mime;
+}
+
+static void
+source_send(void *data, struct wl_data_source *s, const char *mime,
+	int32_t fd)
+{
+	(void)data;
+	(void)s;
+	(void)mime;
+	close(fd);
+}
+
+static void
+source_cancelled(void *data, struct wl_data_source *s)
+{
+	(void)data;
+	(void)s;
+}
+
+static const struct wl_data_source_listener sSourceListener = {
+	.target = source_target,
+	.send = source_send,
+	.cancelled = source_cancelled,
+};
+
+static bool
+data_client_open(struct data_client *d, const char *socket, uint32_t color)
+{
+	memset(d, 0, sizeof(*d));
+	atomic_store(&sCreatedToplevel, NULL);
+	if (!conn_open(&d->c, socket) || d->c.wm_base == NULL
+		|| d->c.seat == NULL || d->c.data_device_manager == NULL
+		|| (d->c.seat_caps & WL_SEAT_CAPABILITY_KEYBOARD) == 0)
+		return false;
+	d->keyboard = wl_seat_get_keyboard(d->c.seat);
+	wl_keyboard_add_listener(d->keyboard, &sDataKeyboardListener, d);
+	d->device = wl_data_device_manager_get_data_device(
+		d->c.data_device_manager, d->c.seat);
+	wl_data_device_add_listener(d->device, &sDataDeviceListener, d);
+	if (!map_toplevel(&d->c, &d->t, color))
+		return false;
+	d->server_toplevel = atomic_load(&sCreatedToplevel);
+	return d->server_toplevel != NULL;
+}
+
+/* app_server (de)activating a native window. */
+static void
+push_focus(struct wlr_xdg_toplevel *toplevel, bool focused)
+{
+	union koan_cmd_payload focus = {0};
+	focus.keyboard_focus.toplevel = toplevel;
+	focus.keyboard_focus.focused = focused;
+	koan_queue_push(koan_adapter_queue(), KOAN_CMD_KEYBOARD_FOCUS, &focus,
+		NULL);
+}
+
+static bool
+settle_both(struct data_client *a, struct data_client *b)
+{
+	bool ok = true;
+	for (int i = 0; i < 3; i++)
+		ok = settle(&a->c) && settle(&b->c) && ok;
+	return ok;
+}
+
+/* The source copies: a selection with a serial from its own
+ * wl_keyboard.enter, "the event that triggered this request". */
+static struct wl_data_source *
+copy(struct data_client *source)
+{
+	struct wl_data_source *s = wl_data_device_manager_create_data_source(
+		source->c.data_device_manager);
+	wl_data_source_add_listener(s, &sSourceListener, NULL);
+	wl_data_source_offer(s, SELECTION_MIME);
+	wl_data_device_set_selection(source->device, s, source->enter_serial);
+	return s;
+}
+
+static int
+run_data(void)
+{
+	struct server s;
+	if (!server_start(&s)) {
+		result(ST_BLOCKED, "data", "server start");
+		server_stop(&s);
+		return summary();
+	}
+
+	/* 1. Source copies while focused; then the sink gets focus and must be
+	 * offered the selection (WLCS CopyCutPaste
+	 * given_source_has_offered_when_sink_gets_focus_it_sees_offer). */
+	struct data_client src, sink;
+	if (!data_client_open(&src, s.socket, COLOR_ROOT)) {
+		result(ST_BLOCKED, "selection-offered-on-focus", "source setup");
+		server_stop(&s);
+		return summary();
+	}
+	push_focus(src.server_toplevel, true);
+	settle(&src.c);
+	bool ok = src.focused && src.enter_serial != 0;
+	if (!ok) {
+		result(ST_BLOCKED, "selection-offered-on-focus",
+			"the source never got keyboard focus");
+		server_stop(&s);
+		return summary();
+	}
+	struct wl_data_source *selection = copy(&src);
+	settle(&src.c);
+
+	if (!data_client_open(&sink, s.socket, COLOR_CHILD)) {
+		result(ST_BLOCKED, "selection-offered-on-focus", "sink setup");
+		server_stop(&s);
+		return summary();
+	}
+	push_focus(src.server_toplevel, false);
+	push_focus(sink.server_toplevel, true);
+	ok = settle_both(&src, &sink);
+	result(ok && sink.focused && sink.selection != NULL
+			&& sink.selection_has_mime ? ST_PASS : ST_FAIL,
+		"selection-offered-on-focus",
+		"sink focused %d, selection offer %s, mime %s",
+		sink.focused, sink.selection != NULL ? "received" : "MISSING",
+		sink.selection_has_mime ? SELECTION_MIME : "MISSING");
+
+	/* 2. The sink keeps focus; the source copies again with its old (still
+	 * valid) enter serial: the focused sink must see the new selection at
+	 * once (WLCS given_sink_has_focus_when_source_makes_offer_...). */
+	int before = sink.selection_events;
+	struct wl_data_source *second = copy(&src);
+	ok = settle_both(&src, &sink);
+	result(ok && sink.selection_events > before && sink.selection != NULL
+			&& sink.selection_has_mime ? ST_PASS : ST_FAIL,
+		"selection-reaches-focused-client",
+		"%d new selection event(s) at the focused sink, mime %s",
+		sink.selection_events - before,
+		sink.selection_has_mime ? SELECTION_MIME : "MISSING");
+
+	/* 3. wayland.xml: the serial must be one the client got from an
+	 * event. Serial 0 never is; the selection must not change. */
+	before = sink.selection_events;
+	struct wl_data_source *bogus = wl_data_device_manager_create_data_source(
+		src.c.data_device_manager);
+	wl_data_source_offer(bogus, SELECTION_MIME);
+	wl_data_device_set_selection(src.device, bogus, 0);
+	ok = settle_both(&src, &sink);
+	result(ok && sink.selection_events == before ? ST_PASS : ST_FAIL,
+		"selection-invalid-serial-ignored",
+		"%d selection event(s) after set_selection with serial 0",
+		sink.selection_events - before);
+
+	(void)selection;
+	(void)second;
+	conn_close(&sink.c);
+	conn_close(&src.c);
+	server_stop(&s);
+	return summary();
+}
+
+/* ---- input: window box vs pointer coordinates -------------------------- */
+
+struct pointer_state {
+	struct wl_surface *focus;
+	double x, y;
+	int enters;
+	int buttons;                /* wl_pointer.button events */
+	uint32_t button;            /* the last one */
+	uint32_t button_serial;     /* its serial (xdg_popup.grab needs one) */
+};
+
+static void
+ptr_enter(void *data, struct wl_pointer *p, uint32_t serial,
+	struct wl_surface *surface, wl_fixed_t x, wl_fixed_t y)
+{
+	(void)p;
+	(void)serial;
+	struct pointer_state *st = data;
+	st->focus = surface;
+	st->x = wl_fixed_to_double(x);
+	st->y = wl_fixed_to_double(y);
+	st->enters++;
+}
+
+static void
+ptr_leave(void *data, struct wl_pointer *p, uint32_t serial,
+	struct wl_surface *surface)
+{
+	(void)p;
+	(void)serial;
+	(void)surface;
+	((struct pointer_state *)data)->focus = NULL;
+}
+
+static void
+ptr_motion(void *data, struct wl_pointer *p, uint32_t time, wl_fixed_t x,
+	wl_fixed_t y)
+{
+	(void)p;
+	(void)time;
+	struct pointer_state *st = data;
+	st->x = wl_fixed_to_double(x);
+	st->y = wl_fixed_to_double(y);
+}
+
+static void
+ptr_button(void *data, struct wl_pointer *p, uint32_t serial, uint32_t time,
+	uint32_t button, uint32_t state)
+{
+	(void)p;
+	(void)time;
+	(void)state;
+	struct pointer_state *st = data;
+	st->buttons++;
+	st->button = button;
+	st->button_serial = serial;
+}
+
+static void
+ptr_axis(void *data, struct wl_pointer *p, uint32_t time, uint32_t axis,
+	wl_fixed_t value)
+{
+	(void)data;
+	(void)p;
+	(void)time;
+	(void)axis;
+	(void)value;
+}
+
+static void
+ptr_frame(void *data, struct wl_pointer *p)
+{
+	(void)data;
+	(void)p;
+}
+
+static void
+ptr_axis_source(void *data, struct wl_pointer *p, uint32_t source)
+{
+	(void)data;
+	(void)p;
+	(void)source;
+}
+
+static void
+ptr_axis_stop(void *data, struct wl_pointer *p, uint32_t time, uint32_t axis)
+{
+	(void)data;
+	(void)p;
+	(void)time;
+	(void)axis;
+}
+
+static void
+ptr_axis_discrete(void *data, struct wl_pointer *p, uint32_t axis,
+	int32_t discrete)
+{
+	(void)data;
+	(void)p;
+	(void)axis;
+	(void)discrete;
+}
+
+static const struct wl_pointer_listener sPointerListener = {
+	.enter = ptr_enter,
+	.leave = ptr_leave,
+	.motion = ptr_motion,
+	.button = ptr_button,
+	.axis = ptr_axis,
+	.frame = ptr_frame,
+	.axis_source = ptr_axis_source,
+	.axis_stop = ptr_axis_stop,
+	.axis_discrete = ptr_axis_discrete,
+};
+
+/* Which surface has the keyboard, and the keys it got. */
+struct kbd_state {
+	struct wl_surface *focus;
+	int keys;
+	uint32_t last_key;
+	struct wl_surface *last_key_focus;
+};
+
+static void
+kb_keymap(void *data, struct wl_keyboard *k, uint32_t format, int32_t fd,
+	uint32_t size)
+{
+	(void)data;
+	(void)k;
+	(void)format;
+	(void)size;
+	close(fd);
+}
+
+static void
+kb_enter(void *data, struct wl_keyboard *k, uint32_t serial,
+	struct wl_surface *surface, struct wl_array *keys)
+{
+	(void)k;
+	(void)serial;
+	(void)keys;
+	((struct kbd_state *)data)->focus = surface;
+}
+
+static void
+kb_leave(void *data, struct wl_keyboard *k, uint32_t serial,
+	struct wl_surface *surface)
+{
+	(void)k;
+	(void)serial;
+	struct kbd_state *st = data;
+	if (st->focus == surface)
+		st->focus = NULL;
+}
+
+static void
+kb_key(void *data, struct wl_keyboard *k, uint32_t serial, uint32_t time,
+	uint32_t key, uint32_t state)
+{
+	(void)k;
+	(void)serial;
+	(void)time;
+	(void)state;
+	struct kbd_state *st = data;
+	st->keys++;
+	st->last_key = key;
+	st->last_key_focus = st->focus;
+}
+
+static void
+kb_modifiers(void *data, struct wl_keyboard *k, uint32_t serial,
+	uint32_t depressed, uint32_t latched, uint32_t locked, uint32_t group)
+{
+	(void)data;
+	(void)k;
+	(void)serial;
+	(void)depressed;
+	(void)latched;
+	(void)locked;
+	(void)group;
+}
+
+static void
+kb_repeat_info(void *data, struct wl_keyboard *k, int32_t rate,
+	int32_t delay)
+{
+	(void)data;
+	(void)k;
+	(void)rate;
+	(void)delay;
+}
+
+static const struct wl_keyboard_listener sKbdListener = {
+	.keymap = kb_keymap,
+	.enter = kb_enter,
+	.leave = kb_leave,
+	.key = kb_key,
+	.modifiers = kb_modifiers,
+	.repeat_info = kb_repeat_info,
+};
+
+/* app_server moving the pointer over its native window. */
+static void
+push_motion(struct wlr_xdg_toplevel *toplevel, double x, double y)
+{
+	union koan_cmd_payload in = {0};
+	in.pointer_motion.toplevel = toplevel;
+	in.pointer_motion.x = x;
+	in.pointer_motion.y = y;
+	koan_queue_push(koan_adapter_queue(), KOAN_CMD_POINTER_MOTION, &in,
+		NULL);
+}
+
+/*
+ * app_server's native window is the box koan_adapter.c delivers with
+ * set_buffer, and it sends pointer positions relative to that box's
+ * origin. Koan must map them back with the same box. A desynchronized
+ * sub-surface that sticks out to the left and then unmaps itself shrinks
+ * the box at once, while wlroots' effective xdg geometry only follows on
+ * the toplevel's next own commit (WLCS SurfaceInputCombinations
+ * input_falls_through_subsurface_when_unmapped).
+ */
+static int
+run_input(void)
+{
+	struct server s;
+	if (!server_start(&s)) {
+		result(ST_BLOCKED, "input", "server start");
+		server_stop(&s);
+		return summary();
+	}
+	struct conn c;
+	struct toplevel t;
+	struct pointer_state ptr = {0};
+	atomic_store(&sCreatedToplevel, NULL);
+	if (!conn_open(&c, s.socket) || c.wm_base == NULL || c.seat == NULL
+		|| !map_toplevel(&c, &t, COLOR_ROOT)) {
+		result(ST_BLOCKED, "input", "toplevel did not map");
+		server_stop(&s);
+		return summary();
+	}
+	struct wlr_xdg_toplevel *key = atomic_load(&sCreatedToplevel);
+	struct wl_pointer *pointer = wl_seat_get_pointer(c.seat);
+	wl_pointer_add_listener(pointer, &sPointerListener, &ptr);
+
+	struct wl_surface *child = wl_compositor_create_surface(c.compositor);
+	struct wl_subsurface *sub = wl_subcompositor_get_subsurface(
+		c.subcompositor, child, t.surface);
+	wl_subsurface_set_position(sub, -20, 0);
+	wl_subsurface_set_desync(sub);
+	attach_color(&c, child, 16, 16, COLOR_GRAND);
+	wl_surface_commit(child);
+	wl_surface_commit(t.surface);
+	settle(&c);
+	int32_t wide = sFrameWidth;
+
+	/* The sub-surface unmaps itself; the root does not commit. */
+	wl_surface_attach(child, NULL, 0, 0);
+	wl_surface_commit(child);
+	bool ok = settle(&c);
+	int32_t narrow = sFrameWidth;
+	result(ok && wide == 84 && narrow == 64 ? ST_PASS : ST_FAIL,
+		"window-box-follows-unmapped-subsurface",
+		"native window width %d with the sub-surface, %d after it "
+		"unmapped (expected 84, 64)", wide, narrow);
+
+	push_motion(key, 10, 10);
+	ok = settle(&c);
+	result(ok && ptr.focus == t.surface && ptr.x == 10 && ptr.y == 10
+			? ST_PASS : ST_FAIL, "pointer-coordinates-match-window-box",
+		"window point (10,10) entered %s at (%.0f,%.0f) (expected the "
+		"root at 10,10)", ptr.focus == t.surface ? "the root"
+			: ptr.focus == NULL ? "nothing" : "another surface",
+		ptr.x, ptr.y);
+
+	/* Restack: two sub-surfaces at (0,0); the second is created on top,
+	 * then placed below the first (WLCS SubsurfaceTest place_below_simple).
+	 * wayland.xml (wl_subsurface.place_below): "put back just below the
+	 * reference surface", so the first one must get the pointer, and only
+	 * it: a single motion, a single enter. */
+	struct wl_surface *first = wl_compositor_create_surface(c.compositor);
+	struct wl_subsurface *first_sub = wl_subcompositor_get_subsurface(
+		c.subcompositor, first, t.surface);
+	attach_color(&c, first, 32, 32, COLOR_CHILD);
+	wl_surface_commit(first);
+	struct wl_surface *second = wl_compositor_create_surface(c.compositor);
+	struct wl_subsurface *second_sub = wl_subcompositor_get_subsurface(
+		c.subcompositor, second, t.surface);
+	attach_color(&c, second, 32, 32, COLOR_GRAND);
+	wl_surface_commit(second);
+	wl_surface_commit(t.surface);
+	settle(&c);
+	wl_subsurface_place_below(second_sub, first);
+	wl_surface_commit(second);
+	wl_surface_commit(first);
+	wl_surface_commit(t.surface);
+	settle(&c);
+	uint32_t shown = frame_pixel(5, 5);
+	push_motion(key, 40, 40);       /* off both, onto the root */
+	settle(&c);
+	int enters = ptr.enters;
+	push_motion(key, 5, 5);
+	ok = settle(&c);
+	result(ok && ptr.focus == first && ptr.enters == enters + 1
+			&& shown == COLOR_CHILD ? ST_PASS : ST_FAIL,
+		"pointer-follows-place-below",
+		"window shows 0x%08x at (5,5) (expected the first sub-surface "
+		"0x%08x); pointer entered %s with %d enter(s)", shown, COLOR_CHILD,
+		ptr.focus == first ? "the first sub-surface"
+			: ptr.focus == second ? "the second sub-surface"
+			: "another surface", ptr.enters - enters);
+	(void)first_sub;
+
+	/* A popup (menu) over the window: app_server's popup window sends
+	 * positions in the toplevel's content coordinates, where Koan's
+	 * hit-test finds the popup on top. A click there must reach the
+	 * popup: Nautilus's menu items highlighted but never activated. */
+	{
+		struct popup m;
+		popup_create(&c, &t, &m);
+		ok = settle(&c) && m.configured;
+		if (ok) {
+			xdg_surface_ack_configure(m.xdg_surface, m.serial);
+			attach_color(&c, m.surface, 20, 10, COLOR_GRAND);
+			wl_surface_commit(m.surface);
+			ok = settle(&c);
+		}
+		push_motion(key, m.x + 5, m.y + 5);
+		ok = ok && settle(&c);
+		bool on_popup = ptr.focus == m.surface;
+		int buttons = ptr.buttons;
+		union koan_cmd_payload press = {0};
+		press.pointer_button.toplevel = key;
+		press.pointer_button.button = 0x110;
+		press.pointer_button.pressed = true;
+		koan_queue_push(koan_adapter_queue(), KOAN_CMD_POINTER_BUTTON, &press,
+			NULL);
+		press.pointer_button.pressed = false;
+		koan_queue_push(koan_adapter_queue(), KOAN_CMD_POINTER_BUTTON, &press,
+			NULL);
+		ok = ok && settle(&c);
+		result(ok && on_popup && ptr.buttons == buttons + 2 ? ST_PASS
+				: ST_FAIL, "pointer-button-reaches-popup",
+			"pointer %s the popup; %d button event(s) (expected 2)",
+			on_popup ? "on" : "NOT on", ptr.buttons - buttons);
+		xdg_popup_destroy(m.xdg_popup);
+		xdg_surface_destroy(m.xdg_surface);
+		wl_surface_destroy(m.surface);
+		settle(&c);
+	}
+
+	/* Menus and the keyboard (xdg_popup.grab: the topmost grabbing popup
+	 * "should be given keyboard focus"). wlroots' popup grab swallows
+	 * focus changes, so Koan must hand the keys over itself: arrow keys
+	 * in a GTK menu went to the window behind it. */
+	if ((c.seat_caps & WL_SEAT_CAPABILITY_KEYBOARD) == 0) {
+		result(ST_BLOCKED, "popup-keyboard", "seat has no keyboard");
+	} else {
+		struct kbd_state kb = {0};
+		struct wl_keyboard *keyboard = wl_seat_get_keyboard(c.seat);
+		wl_keyboard_add_listener(keyboard, &sKbdListener, &kb);
+		union koan_cmd_payload focus = {0};
+		focus.keyboard_focus.toplevel = key;
+		focus.keyboard_focus.focused = 1;
+		koan_queue_push(koan_adapter_queue(), KOAN_CMD_KEYBOARD_FOCUS, &focus,
+			NULL);
+		union koan_cmd_payload press = {0};
+		press.pointer_button.toplevel = key;
+		press.pointer_button.button = 0x110;
+		press.pointer_button.pressed = true;
+		push_motion(key, 30, 30);
+		koan_queue_push(koan_adapter_queue(), KOAN_CMD_POINTER_BUTTON, &press,
+			NULL);
+		settle(&c);
+		bool window_focused = kb.focus == t.surface;
+
+		struct popup m;
+		popup_create(&c, &t, &m);
+		xdg_popup_grab(m.xdg_popup, c.seat, ptr.button_serial);
+		ok = settle(&c) && m.configured;
+		if (ok) {
+			xdg_surface_ack_configure(m.xdg_surface, m.serial);
+			attach_color(&c, m.surface, 20, 10, COLOR_GRAND);
+			wl_surface_commit(m.surface);
+			ok = settle(&c) && !m.done;
+		}
+		result(ok && window_focused && kb.focus == m.surface ? ST_PASS
+				: ST_FAIL, "popup-keyboard-to-grabbing-popup",
+			"window had the keyboard: %s; after the menu mapped it is on %s",
+			window_focused ? "yes" : "NO",
+			kb.focus == m.surface ? "the menu"
+				: kb.focus == t.surface ? "the window" : "nothing");
+
+		union koan_cmd_payload k = {0};
+		k.keyboard_key.toplevel = key;
+		k.keyboard_key.key = 108;           /* KEY_DOWN */
+		k.keyboard_key.pressed = true;
+		koan_queue_push(koan_adapter_queue(), KOAN_CMD_KEYBOARD_KEY, &k, NULL);
+		k.keyboard_key.pressed = false;
+		koan_queue_push(koan_adapter_queue(), KOAN_CMD_KEYBOARD_KEY, &k, NULL);
+		int keys = kb.keys;
+		settle(&c);
+		result(kb.keys == keys + 2 && kb.last_key == 108
+				&& kb.last_key_focus == m.surface ? ST_PASS : ST_FAIL,
+			"popup-keyboard-keys-reach-popup",
+			"%d key event(s), last on %s", kb.keys - keys,
+			kb.last_key_focus == m.surface ? "the menu"
+				: kb.last_key_focus == t.surface ? "the window" : "nothing");
+
+		xdg_popup_destroy(m.xdg_popup);
+		xdg_surface_destroy(m.xdg_surface);
+		wl_surface_destroy(m.surface);
+		settle(&c);
+		result(kb.focus == t.surface ? ST_PASS : ST_FAIL,
+			"popup-keyboard-back-to-parent",
+			"after the menu closed the keyboard is on %s",
+			kb.focus == t.surface ? "the window" : "something else");
+		press.pointer_button.pressed = false;
+		koan_queue_push(koan_adapter_queue(), KOAN_CMD_POINTER_BUTTON, &press,
+			NULL);
+		settle(&c);
+	}
+
+	/* app_server saw a click outside every client surface (a window
+	 * frame, a native window, the desktop): KOAN_CMD_DISMISS_POPUPS ends
+	 * the grabs, so menus close; tooltips (no grab) stay. */
+	{
+		union koan_cmd_payload press = {0};
+		press.pointer_button.toplevel = key;
+		press.pointer_button.button = 0x110;
+		press.pointer_button.pressed = true;
+		push_motion(key, 30, 30);
+		koan_queue_push(koan_adapter_queue(), KOAN_CMD_POINTER_BUTTON, &press,
+			NULL);
+		settle(&c);
+		struct popup menu, tip;
+		popup_create(&c, &t, &menu);
+		xdg_popup_grab(menu.xdg_popup, c.seat, ptr.button_serial);
+		popup_create(&c, &t, &tip);
+		ok = settle(&c) && menu.configured && tip.configured;
+		if (ok) {
+			xdg_surface_ack_configure(menu.xdg_surface, menu.serial);
+			attach_color(&c, menu.surface, 20, 10, COLOR_GRAND);
+			wl_surface_commit(menu.surface);
+			xdg_surface_ack_configure(tip.xdg_surface, tip.serial);
+			attach_color(&c, tip.surface, 20, 10, COLOR_CHILD);
+			wl_surface_commit(tip.surface);
+			ok = settle(&c) && !menu.done && !tip.done;
+		}
+		union koan_cmd_payload none = {0};
+		ok = ok && koan_queue_push(koan_adapter_queue(),
+			KOAN_CMD_DISMISS_POPUPS, &none, NULL) != NULL && settle(&c);
+		result(ok && menu.done && !tip.done ? ST_PASS : ST_FAIL,
+			"click-outside-dismisses-grabbing-popups",
+			"menu popup_done %s, tooltip popup_done %s",
+			menu.done ? "received" : "MISSING",
+			tip.done ? "received (wrong)" : "not sent");
+		xdg_popup_destroy(tip.xdg_popup);
+		xdg_surface_destroy(tip.xdg_surface);
+		wl_surface_destroy(tip.surface);
+		xdg_popup_destroy(menu.xdg_popup);
+		xdg_surface_destroy(menu.xdg_surface);
+		wl_surface_destroy(menu.surface);
+		press.pointer_button.pressed = false;
+		koan_queue_push(koan_adapter_queue(), KOAN_CMD_POINTER_BUTTON, &press,
+			NULL);
+		settle(&c);
+	}
+
+	/* A menu holding the pointer grab (xdg_popup.grab, with the press's
+	 * serial, as GTK does) while app_server quits: wlroots destroyed the
+	 * grab twice when koan_server_destroy() destroyed the seat, and
+	 * app_server crashed on every session end with a menu open. The
+	 * client stays connected so the server tears the popup down. */
+	{
+		struct popup m;
+		union koan_cmd_payload press = {0};
+		press.pointer_button.toplevel = key;
+		press.pointer_button.button = 0x111;
+		press.pointer_button.pressed = true;
+		push_motion(key, 30, 30);
+		koan_queue_push(koan_adapter_queue(), KOAN_CMD_POINTER_BUTTON, &press,
+			NULL);
+		settle(&c);
+		popup_create(&c, &t, &m);
+		xdg_popup_grab(m.xdg_popup, c.seat, ptr.button_serial);
+		ok = settle(&c) && m.configured && !m.done;
+		if (ok) {
+			xdg_surface_ack_configure(m.xdg_surface, m.serial);
+			attach_color(&c, m.surface, 20, 10, COLOR_GRAND);
+			wl_surface_commit(m.surface);
+			ok = settle(&c) && !m.done;
+		}
+		/* server_stop() crashed here. */
+		server_stop(&s);
+		result(ok ? ST_PASS : ST_BLOCKED, "shutdown-with-grabbing-popup",
+			ok ? "server shut down with a grabbing popup mapped"
+				: "the popup did not get the grab");
+		conn_close(&c);
+		return summary();
+	}
+}
+
 static int
 run_xdg(void)
 {
@@ -1753,6 +3024,181 @@ run_xdg(void)
 		result(ST_BLOCKED, "xdg", "toplevel did not map");
 		server_stop(&s);
 		return summary();
+	}
+	/* Later cases map other toplevels; keep this one's key. */
+	struct wlr_xdg_toplevel *main_toplevel = atomic_load(&sCreatedToplevel);
+
+	/* xdg-shell.xml (xdg_toplevel.set_/unset_maximized and
+	 * set_/unset_fullscreen): "the compositor will respond by emitting a
+	 * configure event". The request goes to the window manager
+	 * (koan_window_callbacks.request_state; app_server zooms or goes
+	 * fullscreen) and its answer comes back as that configure. */
+	static const struct {
+		const char *name;
+		int request;              /* 0 max, 1 unmax, 2 fs, 3 unfs */
+		bool maximized, fullscreen;
+		int32_t width;            /* 800 when the state is entered */
+	} kStateRequests[] = {
+		{ "toplevel-set-maximized-granted", 0, true, false, 800 },
+		{ "toplevel-unset-maximized-granted", 1, false, false, -1 },
+		{ "toplevel-set-fullscreen-granted", 2, false, true, 800 },
+		{ "toplevel-unset-fullscreen-granted", 3, false, false, -1 },
+	};
+	for (size_t i = 0; i < sizeof(kStateRequests) / sizeof(*kStateRequests);
+		i++) {
+		int before = t.configures;
+		int asked = atomic_load(&sStateRequests);
+		switch (kStateRequests[i].request) {
+			case 0: xdg_toplevel_set_maximized(t.xdg_toplevel); break;
+			case 1: xdg_toplevel_unset_maximized(t.xdg_toplevel); break;
+			case 2: xdg_toplevel_set_fullscreen(t.xdg_toplevel, NULL); break;
+			default: xdg_toplevel_unset_fullscreen(t.xdg_toplevel); break;
+		}
+		bool ok = wait_for_count(&c, &t.configures, before + 1);
+		if (t.configures > before) {
+			xdg_surface_ack_configure(t.xdg_surface, t.configure_serial);
+			wl_surface_commit(t.surface);
+			ok = ok && settle(&c);
+		}
+		ok = ok && atomic_load(&sStateRequests) == asked + 1
+			&& t.maximized == kStateRequests[i].maximized
+			&& t.fullscreen == kStateRequests[i].fullscreen
+			&& (kStateRequests[i].width < 0
+				|| t.width == kStateRequests[i].width);
+		result(ok ? ST_PASS : ST_FAIL, kStateRequests[i].name,
+			"window manager asked %d time(s); configure: %dx%d "
+			"maximized=%d fullscreen=%d",
+			atomic_load(&sStateRequests) - asked, t.width, t.height,
+			t.maximized, t.fullscreen);
+	}
+
+	/* A client may destroy its toplevel while app_server is still
+	 * creating the native window (the handle arrives later with
+	 * WINDOW_READY). That window must still be destroyed: left alive it
+	 * stays on screen without a client, and app_server keeps it under the
+	 * dead toplevel's address, which a new toplevel can get from malloc
+	 * (its window was then refused as a "duplicate" and never shown, so
+	 * WLCS's new windows never became active). */
+	{
+		static int late_window;
+		struct toplevel o = {0};
+		o.surface = wl_compositor_create_surface(c.compositor);
+		o.xdg_surface = xdg_wm_base_get_xdg_surface(c.wm_base, o.surface);
+		xdg_surface_add_listener(o.xdg_surface, &sXdgSurfaceListener, &o);
+		o.xdg_toplevel = xdg_surface_get_toplevel(o.xdg_surface);
+		wl_surface_commit(o.surface);
+		bool ok = settle(&c) && o.configured;
+		struct wlr_xdg_toplevel *before = atomic_load(&sCreatedToplevel);
+		if (ok) {
+			xdg_surface_ack_configure(o.xdg_surface, o.configure_serial);
+			attach_color(&c, o.surface, 32, 32, COLOR_CHILD);
+			wl_surface_commit(o.surface);
+			ok = settle(&c);
+		}
+		struct wlr_xdg_toplevel *dead = atomic_load(&sCreatedToplevel);
+		ok = ok && dead != before;   /* create_window was asked */
+		xdg_toplevel_destroy(o.xdg_toplevel);
+		xdg_surface_destroy(o.xdg_surface);
+		wl_surface_destroy(o.surface);
+		ok = ok && settle(&c);
+		int destroyed = atomic_load(&sDestroyWindowCount);
+		union koan_cmd_payload ready = {0};
+		ready.window_ready.toplevel = dead;
+		ready.window_ready.window = &late_window;
+		ok = ok && koan_queue_push(koan_adapter_queue(),
+			KOAN_CMD_WINDOW_READY, &ready, NULL) != NULL && settle(&c);
+		int n = atomic_load(&sDestroyWindowCount) - destroyed;
+		result(ok && n == 1 && atomic_load(&sDestroyedWindow) == &late_window
+				? ST_PASS : ST_FAIL, "toplevel-destroyed-before-window-ready",
+			"late window destroyed %d time(s)%s", n,
+			ok ? "" : "; setup failed");
+	}
+
+	/* A client may ask to be maximized as soon as it is mapped, before
+	 * app_server reported its native window (WINDOW_READY). The request
+	 * belongs to the window manager: it must reach it once the window
+	 * exists, not be answered with the current state (WLCS
+	 * window_can_maximize_itself failed this way about half the time). */
+	{
+		static int pending_window;
+		struct toplevel o = {0};
+		o.surface = wl_compositor_create_surface(c.compositor);
+		o.xdg_surface = xdg_wm_base_get_xdg_surface(c.wm_base, o.surface);
+		xdg_surface_add_listener(o.xdg_surface, &sXdgSurfaceListener, &o);
+		o.xdg_toplevel = xdg_surface_get_toplevel(o.xdg_surface);
+		xdg_toplevel_add_listener(o.xdg_toplevel, &sToplevelListener, &o);
+		wl_surface_commit(o.surface);
+		bool ok = settle(&c) && o.configured;
+		if (ok) {
+			xdg_surface_ack_configure(o.xdg_surface, o.configure_serial);
+			attach_color(&c, o.surface, 32, 32, COLOR_CHILD);
+			wl_surface_commit(o.surface);
+			ok = settle(&c);
+		}
+		int asked = atomic_load(&sStateRequests);
+		xdg_toplevel_set_maximized(o.xdg_toplevel);
+		ok = ok && settle(&c);
+		int asked_before_ready = atomic_load(&sStateRequests) - asked;
+		int configures = o.configures;
+		union koan_cmd_payload ready = {0};
+		ready.window_ready.toplevel = atomic_load(&sCreatedToplevel);
+		ready.window_ready.window = &pending_window;
+		ok = ok && koan_queue_push(koan_adapter_queue(),
+			KOAN_CMD_WINDOW_READY, &ready, NULL) != NULL
+			&& wait_for_count(&c, &o.configures, configures + 1);
+		int asked_after_ready = atomic_load(&sStateRequests) - asked;
+		result(ok && asked_before_ready == 0 && asked_after_ready == 1
+				&& o.maximized && o.width == 800 ? ST_PASS : ST_FAIL,
+			"toplevel-maximize-before-window-ready",
+			"window manager asked %d time(s) before WINDOW_READY, %d after; "
+			"configure %dx%d maximized=%d", asked_before_ready,
+			asked_after_ready, o.width, o.height, o.maximized);
+		xdg_toplevel_destroy(o.xdg_toplevel);
+		xdg_surface_destroy(o.xdg_surface);
+		wl_surface_destroy(o.surface);
+		settle(&c);
+	}
+
+	/* xdg-shell.xml (xdg_toplevel.set_minimized): "Request that the
+	 * compositor minimize your surface". It goes to the window manager
+	 * (koan_window_callbacks.request_minimize; app_server minimizes the
+	 * native window like its minimize button). No configure is due. */
+	{
+		int asked = atomic_load(&sMinimizeRequests);
+		xdg_toplevel_set_minimized(t.xdg_toplevel);
+		bool ok = settle(&c);
+		int n = atomic_load(&sMinimizeRequests) - asked;
+		result(ok && n == 1 ? ST_PASS : ST_FAIL, "toplevel-set-minimized",
+			"window manager asked %d time(s)%s", n,
+			ok ? "" : "; client disconnected");
+	}
+
+	/* Allowed order: the first configure has arrived, the client attaches,
+	 * then acks and commits. Only an attach before any configure is an
+	 * error. */
+	{
+		struct toplevel o = {0};
+		o.surface = wl_compositor_create_surface(c.compositor);
+		o.xdg_surface = xdg_wm_base_get_xdg_surface(c.wm_base, o.surface);
+		xdg_surface_add_listener(o.xdg_surface, &sXdgSurfaceListener, &o);
+		o.xdg_toplevel = xdg_surface_get_toplevel(o.xdg_surface);
+		wl_surface_commit(o.surface);
+		bool ok = settle(&c) && o.configured;
+		if (ok) {
+			attach_color(&c, o.surface, 32, 32, COLOR_CHILD);
+			xdg_surface_ack_configure(o.xdg_surface, o.configure_serial);
+			wl_surface_commit(o.surface);
+			ok = settle(&c);
+		}
+		result(ok ? ST_PASS : ST_FAIL, "attach-after-configure-before-ack",
+			ok ? "mapped without a protocol error"
+				: "client disconnected or never configured");
+		if (ok) {
+			xdg_toplevel_destroy(o.xdg_toplevel);
+			xdg_surface_destroy(o.xdg_surface);
+			wl_surface_destroy(o.surface);
+			settle(&c);
+		}
 	}
 
 	/* xdg-shell: the initial commit of a popup must be answered with
@@ -1784,6 +3230,7 @@ run_xdg(void)
 		wl_callback_add_listener(cb, &sFrameListener, &wait);
 		wl_surface_commit(p.surface);
 		ok = settle(&c);
+		wait_for_count(&c, &wait.done, 1);
 		result(ok ? ST_PASS : ST_FAIL, "popup-map",
 			ok ? "mapped without a protocol error" : "client disconnected");
 		/* A client throttled on its popup's frame callback must not
@@ -1797,10 +3244,39 @@ run_xdg(void)
 			"popup was never configured");
 	}
 
-	/* Showing the popup is app_server's job and has no bridge yet:
-	 * koan_window_callbacks only knows toplevels. */
-	result(ST_NOT_IMPLEMENTED, "popup-displayed",
-		"no native window for xdg_popup in the app_server bridge");
+	/* A mapped popup becomes a native window (create_popup) at its place
+	 * in the parent's content coordinates (positioner: 14,14 20x10), and
+	 * gets its own pixels once app_server reports the window. Nautilus's
+	 * menus were invisible without this, and their pointer grab made the
+	 * app look frozen. */
+	static int popup_window;
+	{
+		pthread_mutex_lock(&sPopupLock);
+		bool asked = sPopupWm.creates == 1
+			&& sPopupWm.toplevel == main_toplevel
+			&& sPopupWm.x == 14 && sPopupWm.y == 14
+			&& sPopupWm.width == 20 && sPopupWm.height == 10;
+		result(asked ? ST_PASS : ST_FAIL, "popup-window-requested",
+			"create_popup x%d at %d,%d %dx%d (expected 14,14 20x10)",
+			sPopupWm.creates, sPopupWm.x, sPopupWm.y, sPopupWm.width,
+			sPopupWm.height);
+		union koan_cmd_payload ready = {0};
+		ready.popup_ready.popup = sPopupWm.popup;
+		ready.popup_ready.window = &popup_window;
+		pthread_mutex_unlock(&sPopupLock);
+		int frames = atomic_load(&sSetBufferCount);
+		ok = koan_queue_push(koan_adapter_queue(), KOAN_CMD_POPUP_READY,
+			&ready, NULL) != NULL && settle(&c);
+		pthread_mutex_lock(&sFrameLock);
+		bool shown = sFrameWidth == 20 && sFrameHeight == 10;
+		pthread_mutex_unlock(&sFrameLock);
+		ok = ok && shown && atomic_load(&sSetBufferCount) == frames + 1
+			&& frame_pixel(0, 0) == COLOR_GRAND;
+		result(ok ? ST_PASS : ST_FAIL, "popup-displayed",
+			"popup frame %s, first pixel 0x%08x",
+			shown ? "delivered 20x10" : "NOT delivered", frame_pixel(0, 0));
+	}
+	int destroys_before_popup = atomic_load(&sDestroyWindowCount);
 
 	/* Destroying the parent first is a protocol error
 	 * (xdg_wm_base.not_the_topmost_popup / defunct_surfaces); destroy
@@ -1811,6 +3287,40 @@ run_xdg(void)
 	ok = settle(&c);
 	result(ok ? ST_PASS : ST_FAIL, "popup-destroy",
 		ok ? "destroyed cleanly" : "client disconnected");
+	result(atomic_load(&sDestroyWindowCount) == destroys_before_popup + 1
+			&& atomic_load(&sDestroyedWindow) == &popup_window
+			? ST_PASS : ST_FAIL, "popup-window-destroyed",
+		"destroy_window x%d for the popup's window",
+		atomic_load(&sDestroyWindowCount) - destroys_before_popup);
+
+	/* xdg_popup.popup_done: when the window manager deactivates the
+	 * toplevel (the user clicked elsewhere), its popups are dismissed,
+	 * like native menus. */
+	{
+		struct popup q;
+		popup_create(&c, &t, &q);
+		ok = settle(&c) && q.configured;
+		if (ok) {
+			xdg_surface_ack_configure(q.xdg_surface, q.serial);
+			attach_color(&c, q.surface, 20, 10, COLOR_GRAND);
+			wl_surface_commit(q.surface);
+			ok = settle(&c);
+		}
+		union koan_cmd_payload off = {0};
+		off.toplevel_configure.toplevel = main_toplevel;
+		off.toplevel_configure.maximized = -1;
+		off.toplevel_configure.activated = 0;
+		ok = ok && koan_queue_push(koan_adapter_queue(),
+			KOAN_CMD_TOPLEVEL_CONFIGURE, &off, NULL) != NULL && settle(&c);
+		result(ok && q.done ? ST_PASS : ST_FAIL,
+			"popup-done-on-deactivation", "popup_done %s (configured %d, "
+			"steps ok %d)", q.done ? "received" : "NOT received",
+			q.configured, ok);
+		xdg_popup_destroy(q.xdg_popup);
+		xdg_surface_destroy(q.xdg_surface);
+		wl_surface_destroy(q.surface);
+		settle(&c);
+	}
 
 	struct conn after;
 	bool alive = conn_open(&after, s.socket);
@@ -1818,6 +3328,198 @@ run_xdg(void)
 	result(alive ? ST_PASS : ST_FAIL, "xdg-server-alive",
 		alive ? "new client served" : "new client failed");
 	conn_close(&c);
+	server_stop(&s);
+	return summary();
+}
+
+/* ---- testctl: koan_test_v1 ------------------------------------------- */
+
+/* A thread stands in for app_server: it drains the app_server-direction
+ * queue, records what koan_test_v1 asked for and answers each fence with
+ * one input-looper part (pushed before the BEGIN, which the Wayland side
+ * must accept). sCtlHold stops it, like a busy app_server. */
+static pthread_mutex_t sCtlLock = PTHREAD_MUTEX_INITIALIZER;
+static struct {
+	int places;
+	void *place_toplevel;
+	int32_t place_x, place_y;
+	int motions;
+	double x, y;
+	int buttons;
+	uint32_t button;
+	bool pressed;
+	int fences;
+} sCtl;
+static atomic_bool sCtlHold;
+static atomic_bool sCtlStop;
+
+static int
+ctl_process(struct koan_command *cmd, void *userdata)
+{
+	(void)userdata;
+	pthread_mutex_lock(&sCtlLock);
+	switch (cmd->type) {
+		case KOAN_CMD_TEST_PLACE:
+			sCtl.places++;
+			sCtl.place_toplevel = cmd->payload.test_place.toplevel;
+			sCtl.place_x = cmd->payload.test_place.x;
+			sCtl.place_y = cmd->payload.test_place.y;
+			break;
+		case KOAN_CMD_TEST_POINTER:
+			if (cmd->payload.test_pointer.button == 0) {
+				sCtl.motions++;
+				sCtl.x = cmd->payload.test_pointer.x;
+				sCtl.y = cmd->payload.test_pointer.y;
+			} else {
+				sCtl.buttons++;
+				sCtl.button = cmd->payload.test_pointer.button;
+				sCtl.pressed = cmd->payload.test_pointer.pressed;
+			}
+			break;
+		case KOAN_CMD_TEST_FENCE:
+		{
+			sCtl.fences++;
+			union koan_cmd_payload reply = {0};
+			reply.test_fence.serial = cmd->payload.test_fence.serial;
+			koan_queue_push(koan_adapter_queue(), KOAN_CMD_TEST_FENCE_PART,
+				&reply, NULL);
+			reply.test_fence.parts = 1;
+			koan_queue_push(koan_adapter_queue(), KOAN_CMD_TEST_FENCE_BEGIN,
+				&reply, NULL);
+			break;
+		}
+		default:
+			break;
+	}
+	pthread_mutex_unlock(&sCtlLock);
+	return 0;
+}
+
+static void *
+ctl_thread(void *data)
+{
+	(void)data;
+	while (!atomic_load(&sCtlStop)) {
+		if (!atomic_load(&sCtlHold)) {
+			koan_queue_drain_direction(koan_adapter_queue(),
+				KOAN_QUEUE_TO_APP_SERVER, ctl_process, NULL);
+		}
+		usleep(1000);
+	}
+	return NULL;
+}
+
+static void
+ctl_done(void *data, struct wl_callback *callback, uint32_t serial)
+{
+	(void)serial;
+	(*(int *)data)++;
+	wl_callback_destroy(callback);
+}
+
+static const struct wl_callback_listener sCtlDoneListener = {
+	.done = ctl_done,
+};
+
+static int
+run_testctl(void)
+{
+	sTestControl = true;
+	struct server s;
+	if (!server_start(&s)) {
+		result(ST_BLOCKED, "testctl", "server start");
+		server_stop(&s);
+		return summary();
+	}
+	pthread_t ctl;
+	atomic_store(&sCtlStop, false);
+	atomic_store(&sCtlHold, false);
+	if (pthread_create(&ctl, NULL, ctl_thread, NULL) != 0) {
+		result(ST_BLOCKED, "testctl", "app_server stand-in thread");
+		server_stop(&s);
+		return summary();
+	}
+
+	struct conn c;
+	int count = 0;
+	const struct global *g = conn_open(&c, s.socket)
+		? find_global(&c, "koan_test_v1", &count) : NULL;
+	result(g != NULL && count == 1 ? ST_PASS : ST_FAIL,
+		"testctl-global-advertised", "koan_test_v1 advertised %d time(s)",
+		count);
+	struct toplevel t;
+	if (g == NULL || c.wm_base == NULL || !map_toplevel(&c, &t, COLOR_ROOT)) {
+		result(ST_BLOCKED, "testctl", "no koan_test_v1 or no toplevel");
+		goto out;
+	}
+	struct koan_test_v1 *test = wl_registry_bind(c.registry, g->name,
+		&koan_test_v1_interface, 1);
+
+	/* sync answers only after app_server passed the fence. */
+	{
+		int done = 0;
+		atomic_store(&sCtlHold, true);
+		struct wl_callback *cb = koan_test_v1_sync(test);
+		wl_callback_add_listener(cb, &sCtlDoneListener, &done);
+		bool ok = settle(&c);
+		usleep(100 * 1000);
+		ok = ok && settle(&c);
+		int while_held = done;
+		atomic_store(&sCtlHold, false);
+		ok = ok && wait_for_count(&c, &done, 1);
+		result(ok && while_held == 0 && done == 1 ? ST_PASS : ST_FAIL,
+			"testctl-sync-waits-for-app-server",
+			"done %d time(s) while app_server was busy, %d after", while_held,
+			done);
+	}
+
+	/* move_surface names the surface origin; the native window shows the
+	 * window geometry, so app_server gets the origin plus its offset. */
+	{
+		xdg_surface_set_window_geometry(t.xdg_surface, 4, 3, 40, 30);
+		wl_surface_commit(t.surface);
+		bool ok = settle(&c);
+		int done = 0;
+		koan_test_v1_move_surface(test, t.surface, 100, 50);
+		struct wl_callback *cb = koan_test_v1_sync(test);
+		wl_callback_add_listener(cb, &sCtlDoneListener, &done);
+		ok = ok && wait_for_count(&c, &done, 1);
+		pthread_mutex_lock(&sCtlLock);
+		ok = ok && sCtl.places == 1
+			&& sCtl.place_toplevel == atomic_load(&sCreatedToplevel)
+			&& sCtl.place_x == 104 && sCtl.place_y == 53;
+		result(ok ? ST_PASS : ST_FAIL, "testctl-move-surface",
+			"%d place command(s), content at %d,%d (expected 104,53)",
+			sCtl.places, sCtl.place_x, sCtl.place_y);
+		pthread_mutex_unlock(&sCtlLock);
+	}
+
+	/* Pointer requests reach app_server unchanged, before the sync. */
+	{
+		int done = 0;
+		koan_test_v1_pointer_motion(test, wl_fixed_from_double(12.5),
+			wl_fixed_from_double(7.25));
+		koan_test_v1_pointer_button(test, 0x110,
+			WL_POINTER_BUTTON_STATE_PRESSED);
+		struct wl_callback *cb = koan_test_v1_sync(test);
+		wl_callback_add_listener(cb, &sCtlDoneListener, &done);
+		bool ok = wait_for_count(&c, &done, 1);
+		pthread_mutex_lock(&sCtlLock);
+		ok = ok && sCtl.motions == 1 && sCtl.x == 12.5 && sCtl.y == 7.25
+			&& sCtl.buttons == 1 && sCtl.button == 0x110 && sCtl.pressed;
+		result(ok ? ST_PASS : ST_FAIL, "testctl-pointer",
+			"motion x%d to %.2f,%.2f; button x%d 0x%x %s", sCtl.motions,
+			sCtl.x, sCtl.y, sCtl.buttons, sCtl.button,
+			sCtl.pressed ? "pressed" : "released");
+		pthread_mutex_unlock(&sCtlLock);
+	}
+
+	koan_test_v1_destroy(test);
+	settle(&c);
+out:
+	conn_close(&c);
+	atomic_store(&sCtlStop, true);
+	pthread_join(ctl, NULL);
 	server_stop(&s);
 	return summary();
 }
@@ -1850,9 +3552,15 @@ main(int argc, char **argv)
 		status = run_compose();
 	} else if (strcmp(mode, "xdg") == 0) {
 		status = run_xdg();
+	} else if (strcmp(mode, "data") == 0) {
+		status = run_data();
+	} else if (strcmp(mode, "input") == 0) {
+		status = run_input();
+	} else if (strcmp(mode, "testctl") == 0) {
+		status = run_testctl();
 	} else {
 		fprintf(stderr, "usage: %s [core|lifecycle|bad-buffer|subsurface|"
-			"compose|xdg]\n", argv[0]);
+			"compose|xdg|data|input|testctl]\n", argv[0]);
 		status = 2;
 	}
 

@@ -1,4 +1,9 @@
 /*
+ * SPDX-License-Identifier: MIT
+ * Copyright © 2026 carlos20260001
+ */
+
+/*
  * Koan window adapter for wlroots.
  *
  * Connects wlroots Wayland surfaces (xdg_toplevel) to native Koan windows
@@ -36,6 +41,7 @@
 #include <wlr/util/log.h>
 
 #include "koan_adapter.h"
+#include "koan_test.h"
 #include "koan_queue.h"
 #include "koan_server.h"
 
@@ -51,6 +57,10 @@ struct koan_toplevel {
 	void *native_window;     /* app_server-owned native Window handle */
 	bool mapped;
 	bool create_pending;     /* CREATE_WINDOW command sent, awaiting result */
+	/* A state request made while create_pending, forwarded to the window
+	 * manager on WINDOW_READY: 1 enter, 0 leave, -1 none. */
+	int32_t deferred_maximized;
+	int32_t deferred_fullscreen;
 
 	/* Buffered commit data while window creation is pending. The adapter
 	 * copies client pixels here on commit; once the native window exists,
@@ -74,6 +84,38 @@ struct koan_toplevel {
 };
 
 static struct wl_list g_toplevels = {0};
+
+/* Toplevels destroyed while app_server was still creating their native
+ * window (create_pending): the window's WINDOW_READY is still on its way
+ * and the window must be destroyed when it arrives. Only the address is
+ * kept, as a key. A new toplevel can reuse the address, but app_server
+ * answers creations in order, so the oldest orphan with the address owns
+ * the first WINDOW_READY for it. */
+struct koan_orphan {
+	struct wl_list link;          /* g_orphans, oldest first */
+	void *key;                    /* the dead toplevel or popup */
+};
+static struct wl_list g_orphans = {0};
+
+/* An xdg_popup shown as a native window (koan_window_callbacks.
+ * create_popup). Created on its first mapped commit, destroyed when it is
+ * unmapped or destroyed; a remap makes a new one. */
+struct koan_popup {
+	struct wl_list link;                /* g_popups */
+	struct wlr_xdg_popup *popup;
+	struct wlr_xdg_toplevel *toplevel;  /* the root toplevel */
+	void *native_window;
+	bool create_pending;
+	bool failed;                        /* app_server had no window for it */
+	int32_t x, y;                       /* last position sent */
+	void *buffer_data;                  /* frame waiting for POPUP_READY */
+	int32_t buffer_width, buffer_height, buffer_stride;
+	struct wl_listener destroy;
+	struct wl_listener unmap;
+};
+static struct wl_list g_popups = {0};
+
+static void remember_orphan(void *key);
 static struct koan_queue *g_queue = NULL;
 static void *g_userdata = NULL;
 static struct koan_window_callbacks g_cbs = {0};
@@ -112,11 +154,13 @@ static void koan_toplevel_destroy(struct koan_toplevel *kt) {
  * geometry (clients such as GTK/Firefox draw shadows outside it), clamped
  * to the extents of the whole surface tree, in root-surface coordinates.
  * Falls back to the tree extents. */
-static struct wlr_box window_box(struct wlr_xdg_toplevel *toplevel) {
+/* The part of an xdg_surface's tree a native window shows: its window
+ * geometry clamped to the tree's extents (surface coordinates). */
+static struct wlr_box surface_box(struct wlr_xdg_surface *xdg_surface) {
 	struct wlr_box ext;
-	wlr_surface_get_extents(toplevel->base->surface, &ext);
+	wlr_surface_get_extents(xdg_surface->surface, &ext);
 	struct wlr_box box = ext;
-	const struct wlr_box *g = &toplevel->base->geometry;
+	const struct wlr_box *g = &xdg_surface->geometry;
 	if (g->width > 0 && g->height > 0) {
 		int32_t x1 = g->x > ext.x ? g->x : ext.x;
 		int32_t y1 = g->y > ext.y ? g->y : ext.y;
@@ -134,6 +178,14 @@ static struct wlr_box window_box(struct wlr_xdg_toplevel *toplevel) {
 		}
 	}
 	return box;
+}
+
+static struct wlr_box window_box(struct wlr_xdg_toplevel *toplevel) {
+	return surface_box(toplevel->base);
+}
+
+struct wlr_box koan_adapter_window_box(struct wlr_xdg_toplevel *toplevel) {
+	return window_box(toplevel);
 }
 
 struct compose_target {
@@ -223,25 +275,70 @@ static void handle_toplevel_destroy(struct wl_listener *listener, void *data) {
 	koan_adapter_toplevel_destroyed(kt->toplevel);
 }
 
+/* xdg-shell.xml: after set_/unset_maximized and set_/unset_fullscreen
+ * "the compositor will respond by emitting a configure event". The window
+ * manager (app_server: zoom / fullscreen of the native window) decides and
+ * answers with KOAN_CMD_TOPLEVEL_CONFIGURE. Without one (no request_state
+ * callback, or no native window yet) reply with the current state so the
+ * client stops waiting. Covered by tests/koan_protocol_test.c (xdg:
+ * toplevel-*-granted). */
+static void request_state(struct koan_toplevel *kt, int32_t maximized,
+		int32_t fullscreen, const char *request) {
+	if (kt->native_window && g_cbs.request_state) {
+		g_cbs.request_state(g_userdata, g_queue, kt->native_window,
+			maximized, fullscreen);
+		return;
+	}
+	/* app_server is creating the native window: the window manager
+	 * decides once it exists (WINDOW_READY). Covered by
+	 * tests/koan_protocol_test.c (xdg: toplevel-maximize-before-window-
+	 * ready). */
+	if (kt->create_pending && g_cbs.request_state) {
+		if (maximized >= 0)
+			kt->deferred_maximized = maximized;
+		if (fullscreen >= 0)
+			kt->deferred_fullscreen = fullscreen;
+		return;
+	}
+	if (kt->toplevel->base->initialized)
+		wlr_xdg_surface_schedule_configure(kt->toplevel->base);
+	wlr_log(WLR_INFO, "Koan: xdg_toplevel %s answered with the current "
+		"state (no window manager for it)", request);
+}
+
 static void handle_toplevel_request_maximize(struct wl_listener *listener,
 		void *data) {
-	(void)listener;
 	(void)data;
-	wlr_log(WLR_INFO, "Koan: xdg_toplevel request_maximize (not yet wired)");
+	struct koan_toplevel *kt =
+		wl_container_of(listener, kt, toplevel_request_maximize);
+	request_state(kt, kt->toplevel->requested.maximized ? 1 : 0, -1,
+		"request_maximize");
 }
 
 static void handle_toplevel_request_minimize(struct wl_listener *listener,
 		void *data) {
-	(void)listener;
 	(void)data;
-	wlr_log(WLR_INFO, "Koan: xdg_toplevel request_minimize (not yet wired)");
+	struct koan_toplevel *kt =
+		wl_container_of(listener, kt, toplevel_request_minimize);
+	/* xdg-shell has no reply to set_minimized and no unminimize request:
+	 * the window manager hides the native window like its minimize
+	 * button. Covered by tests/koan_protocol_test.c (xdg:
+	 * toplevel-set-minimized). */
+	if (kt->native_window && g_cbs.request_minimize) {
+		g_cbs.request_minimize(g_userdata, g_queue, kt->native_window);
+		return;
+	}
+	wlr_log(WLR_INFO, "Koan: xdg_toplevel request_minimize ignored (no "
+		"window manager for it)");
 }
 
 static void handle_toplevel_request_fullscreen(struct wl_listener *listener,
 		void *data) {
-	(void)listener;
 	(void)data;
-	wlr_log(WLR_INFO, "Koan: xdg_toplevel request_fullscreen (not yet wired)");
+	struct koan_toplevel *kt =
+		wl_container_of(listener, kt, toplevel_request_fullscreen);
+	request_state(kt, -1, kt->toplevel->requested.fullscreen ? 1 : 0,
+		"request_fullscreen");
 }
 
 static void handle_toplevel_request_move(struct wl_listener *listener,
@@ -310,10 +407,244 @@ static void subscribe_toplevel_events(struct koan_toplevel *kt) {
 /* -------------------------------------------------------------------------- */
 
 /* Process app_server -> Wayland commands drained from the queue. */
+/* ---- orphans ----------------------------------------------------------- */
+
+static void remember_orphan(void *key) {
+	struct koan_orphan *orphan = calloc(1, sizeof(*orphan));
+	if (orphan == NULL) {
+		wlr_log(WLR_ERROR, "Koan adapter: out of memory; the native window "
+			"of a destroyed surface will leak");
+		return;
+	}
+	orphan->key = key;
+	wl_list_insert(g_orphans.prev, &orphan->link);
+}
+
+/* A WINDOW_READY / POPUP_READY for a surface that died while its window
+ * was being created: destroy the window. Returns true if it was one. */
+static bool take_orphan(void *key, void *window) {
+	struct koan_orphan *orphan;
+	wl_list_for_each(orphan, &g_orphans, link) {
+		if (orphan->key == key) {
+			wl_list_remove(&orphan->link);
+			free(orphan);
+			if (window && g_cbs.destroy_window)
+				g_cbs.destroy_window(g_userdata, g_queue, window);
+			return true;
+		}
+	}
+	return false;
+}
+
+/* ---- popups ------------------------------------------------------------ */
+
+static struct koan_popup *find_popup(struct wlr_xdg_popup *popup) {
+	struct koan_popup *kp;
+	wl_list_for_each(kp, &g_popups, link) {
+		if (kp->popup == popup)
+			return kp;
+	}
+	return NULL;
+}
+
+static struct wlr_xdg_toplevel *popup_toplevel(struct wlr_xdg_popup *popup) {
+	struct wlr_surface *parent = popup->parent;
+	struct wlr_xdg_popup *p;
+	while (parent != NULL
+			&& (p = wlr_xdg_popup_try_from_wlr_surface(parent)) != NULL)
+		parent = p->parent;
+	return parent != NULL ? wlr_xdg_toplevel_try_from_wlr_surface(parent)
+		: NULL;
+}
+
+/* The popup's box (popup surface coordinates) and where its top-left is in
+ * the toplevel's window-content coordinates. */
+static struct wlr_box popup_box(struct koan_popup *kp, int32_t *x,
+		int32_t *y) {
+	struct wlr_box box = surface_box(kp->popup->base);
+	const struct wlr_box *g = &kp->popup->base->geometry;
+	/* get_toplevel_coords starts at the popup's parent: the popup's own
+	 * position (current.geometry, relative to the parent's window
+	 * geometry) is the caller's part, as in sway and tinywl. */
+	int tx, ty;
+	wlr_xdg_popup_get_toplevel_coords(kp->popup,
+		kp->popup->current.geometry.x + box.x - g->x,
+		kp->popup->current.geometry.y + box.y - g->y, &tx, &ty);
+	struct wlr_box content = window_box(kp->toplevel);
+	*x = tx - content.x;
+	*y = ty - content.y;
+	return box;
+}
+
+/* The native window goes away (unmap, destroy, or its toplevel lost
+ * focus); a pending one is destroyed when POPUP_READY comes. */
+static void popup_hide(struct koan_popup *kp) {
+	if (kp->native_window && g_cbs.destroy_window)
+		g_cbs.destroy_window(g_userdata, g_queue, kp->native_window);
+	else if (kp->create_pending)
+		remember_orphan(kp->popup);
+	kp->native_window = NULL;
+	kp->create_pending = false;
+	kp->failed = false;
+	free(kp->buffer_data);
+	kp->buffer_data = NULL;
+}
+
+static void popup_ready(struct wlr_xdg_popup *popup, void *window) {
+	if (take_orphan(popup, window))
+		return;
+	struct koan_popup *kp = find_popup(popup);
+	if (kp == NULL || !kp->create_pending) {
+		if (window && g_cbs.destroy_window)
+			g_cbs.destroy_window(g_userdata, g_queue, window);
+		return;
+	}
+	kp->create_pending = false;
+	kp->native_window = window;
+	kp->failed = window == NULL;
+	if (window && kp->buffer_data && g_cbs.set_buffer) {
+		g_cbs.set_buffer(g_userdata, g_queue, window, kp->buffer_data,
+			kp->buffer_width, kp->buffer_height, kp->buffer_stride,
+			DRM_FORMAT_ARGB8888);
+		kp->buffer_data = NULL; /* set_buffer takes it */
+	}
+	free(kp->buffer_data);
+	kp->buffer_data = NULL;
+}
+
+static void handle_popup_unmap(struct wl_listener *listener, void *data) {
+	(void)data;
+	struct koan_popup *kp = wl_container_of(listener, kp, unmap);
+	koan_server_popup_keyboard(kp->popup, false);
+	popup_hide(kp);
+}
+
+static void handle_popup_destroy(struct wl_listener *listener, void *data) {
+	(void)data;
+	struct koan_popup *kp = wl_container_of(listener, kp, destroy);
+	popup_hide(kp);
+	wl_list_remove(&kp->destroy.link);
+	wl_list_remove(&kp->unmap.link);
+	wl_list_remove(&kp->link);
+	free(kp);
+}
+
+void koan_adapter_popup_new(struct wlr_xdg_popup *popup) {
+	if (popup == NULL || find_popup(popup) != NULL)
+		return;
+	struct koan_popup *kp = calloc(1, sizeof(*kp));
+	if (kp == NULL)
+		return;
+	kp->popup = popup;
+	kp->destroy.notify = handle_popup_destroy;
+	wl_signal_add(&popup->events.destroy, &kp->destroy);
+	kp->unmap.notify = handle_popup_unmap;
+	wl_signal_add(&popup->base->surface->events.unmap, &kp->unmap);
+	wl_list_insert(&g_popups, &kp->link);
+}
+
+/* Compose the popup's tree and show it. Covered by
+ * tests/koan_protocol_test.c (xdg: popup-*). */
+void koan_adapter_popup_committed(struct wlr_xdg_popup *popup) {
+	struct koan_popup *kp = find_popup(popup);
+	if (kp == NULL || !g_cbs.create_popup || kp->failed)
+		return;
+	if (kp->toplevel == NULL)
+		kp->toplevel = popup_toplevel(popup);
+	if (kp->toplevel == NULL || find_toplevel(kp->toplevel) == NULL)
+		return; /* a popup of a layer surface or of nothing we show */
+
+	int32_t x, y;
+	struct compose_target t = { NULL, popup_box(kp, &x, &y) };
+	if (t.box.width <= 0 || t.box.height <= 0
+			|| (int64_t)t.box.width * t.box.height * 4 > INT32_MAX)
+		return;
+	t.pixels = calloc((size_t)t.box.width * t.box.height, sizeof(uint32_t));
+	if (t.pixels == NULL)
+		return;
+	wlr_surface_for_each_surface(popup->base->surface, compose_surface, &t);
+	int32_t stride = t.box.width * 4;
+
+	if (kp->native_window) {
+		if ((x != kp->x || y != kp->y) && g_cbs.move_popup)
+			g_cbs.move_popup(g_userdata, g_queue, kp->native_window, x, y);
+		kp->x = x;
+		kp->y = y;
+		g_cbs.set_buffer(g_userdata, g_queue, kp->native_window, t.pixels,
+			t.box.width, t.box.height, stride, DRM_FORMAT_ARGB8888);
+		return;
+	}
+	/* Keep the newest frame until the window exists. */
+	free(kp->buffer_data);
+	kp->buffer_data = t.pixels;
+	kp->buffer_width = t.box.width;
+	kp->buffer_height = t.box.height;
+	kp->buffer_stride = stride;
+	if (!kp->create_pending) {
+		kp->create_pending = true;
+		kp->x = x;
+		kp->y = y;
+		g_cbs.create_popup(g_userdata, g_queue, popup, kp->toplevel, x, y,
+			t.box.width, t.box.height);
+	}
+}
+
+void koan_adapter_forget_popups(void) {
+	if (g_popups.next == NULL)
+		return;
+	while (!wl_list_empty(&g_popups)) {
+		struct koan_popup *kp = wl_container_of(g_popups.next, kp, link);
+		wl_list_remove(&kp->destroy.link);
+		wl_list_remove(&kp->unmap.link);
+		wl_list_remove(&kp->link);
+		free(kp->buffer_data);
+		free(kp);
+	}
+}
+
+/* xdg-shell (xdg_popup.popup_done): the compositor dismisses popups, e.g.
+ * when the user activates another window. A deactivated toplevel takes
+ * its popups along, as native menus close when their window loses focus.
+ * toplevel NULL with grabbed_only: a click outside every client surface
+ * ends the grabs (xdg_popup.grab), so menus close, tooltips stay. */
+static void dismiss_popups(struct wlr_xdg_toplevel *toplevel,
+		bool grabbed_only) {
+	struct koan_popup *kp, *tmp;
+	bool again = true;
+	/* Destroying a popup destroys its children (and their records), so
+	 * restart after each one. */
+	while (again) {
+		again = false;
+		wl_list_for_each_safe(kp, tmp, &g_popups, link) {
+			struct wlr_xdg_popup *parent =
+				wlr_xdg_popup_try_from_wlr_surface(kp->popup->parent);
+			bool outermost = grabbed_only
+				? kp->popup->seat != NULL
+					&& (parent == NULL || parent->seat == NULL)
+				: parent == NULL;
+			if ((toplevel == NULL || popup_toplevel(kp->popup) == toplevel)
+					&& outermost) {
+				wlr_xdg_popup_destroy(kp->popup);
+				again = true;
+				break;
+			}
+		}
+	}
+}
+
 static int process_app_server_command(struct koan_command *cmd, void *userdata) {
 	(void)userdata;
 
 	switch (cmd->type) {
+	case KOAN_CMD_POPUP_READY:
+		popup_ready(cmd->payload.popup_ready.popup,
+			cmd->payload.popup_ready.window);
+		break;
+
+	case KOAN_CMD_DISMISS_POPUPS:
+		dismiss_popups(NULL, true);
+		break;
+
 	case KOAN_CMD_WINDOW_READY:
 		/* app_server notifies that a native window is ready for a
 		 * toplevel whose creation was previously pending. */
@@ -321,10 +652,22 @@ static int process_app_server_command(struct koan_command *cmd, void *userdata) 
 			struct wlr_xdg_toplevel *toplevel =
 				cmd->payload.window_ready.toplevel;
 			void *window = cmd->payload.window_ready.window;
+			if (take_orphan(toplevel, window))
+				break;
 			struct koan_toplevel *kt = find_toplevel(toplevel);
 			if (kt) {
 				kt->native_window = window;
 				kt->create_pending = false;
+
+				if ((kt->deferred_maximized >= 0
+						|| kt->deferred_fullscreen >= 0)
+						&& g_cbs.request_state) {
+					g_cbs.request_state(g_userdata, g_queue,
+						kt->native_window, kt->deferred_maximized,
+						kt->deferred_fullscreen);
+				}
+				kt->deferred_maximized = -1;
+				kt->deferred_fullscreen = -1;
 
 				/* The toplevel may have been re-mapped while window
 				 * creation was pending; apply its visibility now. */
@@ -430,9 +773,24 @@ static int process_app_server_command(struct koan_command *cmd, void *userdata) 
 				wlr_xdg_toplevel_set_size(kt->toplevel, c->width, c->height);
 			if (c->maximized >= 0)
 				wlr_xdg_toplevel_set_maximized(kt->toplevel, c->maximized != 0);
+			if (c->fullscreen != KOAN_STATE_KEEP)
+				wlr_xdg_toplevel_set_fullscreen(kt->toplevel,
+					c->fullscreen == KOAN_STATE_ENTER);
+			/* The answer to a state request needs a configure even when
+			 * the window manager kept the state (wlroots only schedules
+			 * one for a change). */
+			if (c->maximized >= 0 || c->fullscreen != KOAN_STATE_KEEP)
+				wlr_xdg_surface_schedule_configure(kt->toplevel->base);
 			if (c->activated >= 0)
 				wlr_xdg_toplevel_set_activated(kt->toplevel, c->activated != 0);
+			if (c->activated == 0)
+				dismiss_popups(kt->toplevel, false);
 		}
+		break;
+
+	case KOAN_CMD_TEST_FENCE_BEGIN:
+	case KOAN_CMD_TEST_FENCE_PART:
+		koan_test_handle_command(cmd);
 		break;
 
 	default:
@@ -462,6 +820,18 @@ void koan_adapter_init(struct wlr_xdg_shell *xdg_shell,
 		       struct koan_queue *queue, void *userdata) {
 	(void)xdg_shell; /* new_toplevel listener is registered in koan_server.c */
 	wl_list_init(&g_toplevels);
+	/* Orphans of a previous server in this process can never be answered
+	 * (its queue is gone). */
+	if (g_orphans.next != NULL) {
+		while (!wl_list_empty(&g_orphans)) {
+			struct koan_orphan *o =
+				wl_container_of(g_orphans.next, o, link);
+			wl_list_remove(&o->link);
+			free(o);
+		}
+	}
+	wl_list_init(&g_orphans);
+	wl_list_init(&g_popups);
 	g_queue = queue;
 	/* app_server registers its bridge as callback userdata before the
 	 * server is created. Preserve it; only fall back to the server pointer
@@ -479,6 +849,11 @@ int koan_adapter_get_wake_fd(void) {
 
 struct koan_queue *koan_adapter_queue(void) {
 	return g_queue;
+}
+
+void koan_adapter_wake_app_server(void) {
+	if (g_cbs.wake_app_server)
+		g_cbs.wake_app_server(g_userdata);
 }
 
 int koan_adapter_drain_commands(void) {
@@ -576,6 +951,8 @@ void koan_adapter_handle_new_toplevel(struct wlr_xdg_toplevel *toplevel) {
 	struct koan_toplevel *kt = calloc(1, sizeof(*kt));
 	if (!kt)
 		return;
+	kt->deferred_maximized = -1;
+	kt->deferred_fullscreen = -1;
 	kt->toplevel = toplevel;
 	kt->surface = toplevel->base->surface;
 
@@ -612,6 +989,8 @@ void koan_adapter_toplevel_mapped(struct wlr_xdg_toplevel *toplevel) {
 	kt = calloc(1, sizeof(*kt));
 	if (!kt)
 		return;
+	kt->deferred_maximized = -1;
+	kt->deferred_fullscreen = -1;
 	kt->toplevel = toplevel;
 	kt->surface = toplevel->base->surface;
 	subscribe_toplevel_events(kt);
@@ -668,6 +1047,10 @@ void koan_adapter_toplevel_destroyed(struct wlr_xdg_toplevel *toplevel) {
 
 	if (kt->native_window && g_cbs.destroy_window) {
 		g_cbs.destroy_window(g_userdata, g_queue, kt->native_window);
+	} else if (kt->create_pending) {
+		/* Covered by tests/koan_protocol_test.c (xdg:
+		 * toplevel-destroyed-before-window-ready). */
+		remember_orphan(toplevel);
 	}
 	koan_toplevel_destroy(kt);
 

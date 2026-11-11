@@ -33,6 +33,15 @@ add_custom_command(
     DEPENDS "${_koan_test_deco_xml}"
     VERBATIM
 )
+set(_koan_test_ctl_xml "${CMAKE_CURRENT_SOURCE_DIR}/../protocol/koan-test-v1.xml")
+set(_koan_test_ctl_header "${CMAKE_CURRENT_BINARY_DIR}/koan-test-v1-client-protocol.h")
+add_custom_command(
+    OUTPUT "${_koan_test_ctl_header}"
+    COMMAND "${WAYLAND_SCANNER}" client-header
+        "${_koan_test_ctl_xml}" "${_koan_test_ctl_header}"
+    DEPENDS "${_koan_test_ctl_xml}"
+    VERBATIM
+)
 add_executable(koan_xdg_client_test
     koan_xdg_client_test.c
     "${_koan_test_xdg_header}"
@@ -63,6 +72,7 @@ set_tests_properties(koan_queue PROPERTIES TIMEOUT 10)
 add_executable(koan_protocol_test
     koan_protocol_test.c
     "${_koan_test_xdg_header}"
+    "${_koan_test_ctl_header}"
 )
 target_include_directories(koan_protocol_test PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}/../server"
@@ -70,7 +80,7 @@ target_include_directories(koan_protocol_test PRIVATE
 )
 target_link_libraries(koan_protocol_test PRIVATE
     wlroots PkgConfig::KOAN_TEST_WAYLAND_CLIENT Threads::Threads)
-foreach(_koan_mode core lifecycle bad-buffer subsurface compose xdg)
+foreach(_koan_mode core lifecycle bad-buffer subsurface compose xdg data input testctl)
     add_test(NAME koan_protocol_${_koan_mode}
         COMMAND koan_protocol_test ${_koan_mode})
     set_tests_properties(koan_protocol_${_koan_mode} PROPERTIES TIMEOUT 20)
@@ -79,6 +89,9 @@ endforeach()
 # WLCS integration (github.com/canonical/wlcs), optional and off by
 # default: -DWLROOTS_KOAN_BUILD_WLCS=ON -DWLCS_INCLUDE_DIR=<wlcs>/include
 # builds koan-wlcs-integration.so for `wlcs ./koan-wlcs-integration.so`.
+# Both WLCS integration modules (wlcs/koan_wlcs*_integration.c) are
+# GPL-3.0-only like WLCS itself (wlcs/COPYING.GPL3); the rest of
+# wlroots-koan, koan_popup_follow_check.c included, stays MIT.
 # See docker/wlcs/run-wlcs.sh. The module is a test artifact; it is not
 # installed or packaged.
 option(WLROOTS_KOAN_BUILD_WLCS "Build the WLCS integration module" OFF)
@@ -102,4 +115,50 @@ if(WLROOTS_KOAN_BUILD_WLCS)
     target_link_libraries(koan-wlcs-integration PRIVATE
         wlroots PkgConfig::KOAN_WLCS_WAYLAND)
     target_link_options(koan-wlcs-integration PRIVATE -Wl,--no-undefined)
+
+    # The same suite against a running session (docker/wlcs/run-wlcs-vm.sh):
+    # a plain Wayland client of app_server's socket, driven through
+    # koan_test_v1. No wlroots inside, so it carries its own interface table.
+    pkg_check_modules(KOAN_WLCS_VM_WAYLAND REQUIRED IMPORTED_TARGET
+        wayland-client)
+    set(_koan_test_ctl_code "${CMAKE_CURRENT_BINARY_DIR}/koan-test-v1-client-code.c")
+    add_custom_command(
+        OUTPUT "${_koan_test_ctl_code}"
+        COMMAND "${WAYLAND_SCANNER}" private-code
+            "${_koan_test_ctl_xml}" "${_koan_test_ctl_code}"
+        DEPENDS "${_koan_test_ctl_xml}"
+        VERBATIM
+    )
+    add_library(koan-wlcs-vm-integration MODULE
+        wlcs/koan_wlcs_vm_integration.c
+        "${_koan_test_ctl_header}"
+        "${_koan_test_ctl_code}"
+    )
+    set_target_properties(koan-wlcs-vm-integration PROPERTIES PREFIX "")
+    target_include_directories(koan-wlcs-vm-integration PRIVATE
+        "${CMAKE_CURRENT_BINARY_DIR}"
+        "${WLCS_INCLUDE_DIR}"
+    )
+    target_link_libraries(koan-wlcs-vm-integration PRIVATE
+        PkgConfig::KOAN_WLCS_VM_WAYLAND)
+    target_link_options(koan-wlcs-vm-integration PRIVATE -Wl,--no-undefined)
+
+    # Manual VM check: popups follow their toplevel (see the file header).
+    set(_koan_test_xdg_code "${CMAKE_CURRENT_BINARY_DIR}/xdg-shell-client-code.c")
+    add_custom_command(
+        OUTPUT "${_koan_test_xdg_code}"
+        COMMAND "${WAYLAND_SCANNER}" private-code
+            "${_koan_test_xdg_xml}" "${_koan_test_xdg_code}"
+        DEPENDS "${_koan_test_xdg_xml}"
+        VERBATIM
+    )
+    add_executable(koan-popup-follow-check
+        wlcs/koan_popup_follow_check.c
+        "${_koan_test_ctl_header}" "${_koan_test_ctl_code}"
+        "${_koan_test_xdg_header}" "${_koan_test_xdg_code}"
+    )
+    target_include_directories(koan-popup-follow-check PRIVATE
+        "${CMAKE_CURRENT_BINARY_DIR}")
+    target_link_libraries(koan-popup-follow-check PRIVATE
+        PkgConfig::KOAN_WLCS_VM_WAYLAND)
 endif()

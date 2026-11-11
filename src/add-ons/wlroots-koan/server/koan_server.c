@@ -1,4 +1,9 @@
 /*
+ * SPDX-License-Identifier: MIT
+ * Copyright © 2026 carlos20260001
+ */
+
+/*
  * Koan Wayland server lifecycle.
  *
  * Owns the Wayland display endpoint (Unix domain socket), initialises wlroots
@@ -41,6 +46,7 @@
 #include "backend/koan/backend.h"
 #include "koan_adapter.h"
 #include "koan_queue.h"
+#include "koan_test.h"
 
 struct koan_server {
 	struct wl_display *display;
@@ -59,6 +65,9 @@ struct koan_server {
 	bool keyboard_ready;
 	struct wl_listener keyboard_key;
 	struct wl_listener keyboard_modifiers;
+	/* wl_data_device.set_selection: wlroots validates the serial and
+	 * leaves accepting the selection to the compositor. */
+	struct wl_listener request_set_selection;
 	struct wlr_cursor *cursor;
 	struct wlr_xdg_shell *xdg_shell;
 	/* app_server draws the window frame (title tab, controls, stacking):
@@ -91,7 +100,16 @@ struct koan_server {
 	/* Event source for the queue wake-up fd, registered on the Wayland
 	 * event loop so app_server commands are drained on the Wayland thread. */
 	struct wl_event_source *queue_fd_source;
+
+	/* Frame callbacks are answered from this timer, at the output's
+	 * pace, never from the commit that requested them. */
+	struct wl_list surfaces;      /* struct koan_surface.link */
+	struct wl_event_source *frame_timer;
+	bool frame_timer_armed;
 };
+
+/* One frame of the synthetic 60 Hz output (koan_server_create_output). */
+#define KOAN_FRAME_INTERVAL_MS 16
 
 static struct koan_server g_server = {0};
 
@@ -220,9 +238,14 @@ static void koan_decorations_initial_commit(struct wlr_xdg_toplevel *toplevel) {
  * clients draw into subsurfaces (Firefox renders the whole window into one)
  * and a desynchronized subsurface commits on its own. */
 struct koan_surface {
+	struct wl_list link;         /* koan_server.surfaces */
 	struct wlr_surface *surface;
 	struct wl_listener commit;
 	struct wl_listener destroy;
+	/* Root of a mapped tree that committed since the last frame tick. */
+	bool frame_pending;
+	/* An xdg_popup root that was mapped at its last commit. */
+	bool popup_mapped;
 };
 
 static void koan_send_frame_done(struct wlr_surface *surface, int sx, int sy,
@@ -230,6 +253,56 @@ static void koan_send_frame_done(struct wlr_surface *surface, int sx, int sy,
 	(void)sx;
 	(void)sy;
 	wlr_surface_send_frame_done(surface, data);
+}
+
+static void koan_send_enter(struct wlr_surface *surface, int sx, int sy,
+		void *data) {
+	(void)sx;
+	(void)sy;
+	/* No-op for a surface that is already on the output. */
+	wlr_surface_send_enter(surface, data);
+}
+
+/* A mapped tree showed new content: tell its surfaces which output they
+ * are on (clients pick their buffer scale from it) and answer their frame
+ * callbacks at the next frame tick. Answering inside the commit makes a
+ * client that requests a frame from every callback (Firefox) spin without
+ * ever sleeping. */
+static void koan_tree_presented(struct wlr_surface *root) {
+	struct koan_server *server = &g_server;
+	if (server->output)
+		wlr_surface_for_each_surface(root, koan_send_enter, server->output);
+
+	struct koan_surface *ks;
+	wl_list_for_each(ks, &server->surfaces, link) {
+		if (ks->surface == root) {
+			ks->frame_pending = true;
+			break;
+		}
+	}
+	if (server->frame_timer && !server->frame_timer_armed) {
+		wl_event_source_timer_update(server->frame_timer,
+			KOAN_FRAME_INTERVAL_MS);
+		server->frame_timer_armed = true;
+	}
+}
+
+static int koan_server_handle_frame_timer(void *data) {
+	struct koan_server *server = data;
+	server->frame_timer_armed = false;
+
+	struct timespec now;
+	clock_gettime(CLOCK_MONOTONIC, &now);
+	struct koan_surface *ks;
+	wl_list_for_each(ks, &server->surfaces, link) {
+		if (!ks->frame_pending)
+			continue;
+		ks->frame_pending = false;
+		if (ks->surface->mapped)
+			wlr_surface_for_each_surface(ks->surface, koan_send_frame_done,
+				&now);
+	}
+	return 0;
 }
 
 static void koan_any_surface_handle_commit(struct wl_listener *listener,
@@ -259,9 +332,14 @@ static void koan_any_surface_handle_commit(struct wl_listener *listener,
 			return;
 		}
 		if (root->mapped) {
-			struct timespec now;
-			clock_gettime(CLOCK_MONOTONIC, &now);
-			wlr_surface_for_each_surface(root, koan_send_frame_done, &now);
+			if (surface == root && !ks->popup_mapped) {
+				ks->popup_mapped = true;
+				koan_server_popup_keyboard(popup, true);
+			}
+			koan_adapter_popup_committed(popup);
+			koan_tree_presented(root);
+		} else if (surface == root) {
+			ks->popup_mapped = false;
 		}
 		return;
 	}
@@ -286,11 +364,9 @@ static void koan_any_surface_handle_commit(struct wl_listener *listener,
 	koan_adapter_toplevel_committed(toplevel);
 
 	/* The pixels were copied out on commit, so every surface of the tree
-	 * may draw its next frame now. Clients that throttle on
-	 * wl_surface.frame (GTK, Firefox) otherwise stop after one frame. */
-	struct timespec now;
-	clock_gettime(CLOCK_MONOTONIC, &now);
-	wlr_surface_for_each_surface(root, koan_send_frame_done, &now);
+	 * may draw its next frame. Clients that throttle on wl_surface.frame
+	 * (GTK, Firefox) otherwise stop after one frame. */
+	koan_tree_presented(root);
 }
 
 static void koan_any_surface_handle_destroy(struct wl_listener *listener,
@@ -299,6 +375,7 @@ static void koan_any_surface_handle_destroy(struct wl_listener *listener,
 	struct koan_surface *ks = wl_container_of(listener, ks, destroy);
 	wl_list_remove(&ks->commit.link);
 	wl_list_remove(&ks->destroy.link);
+	wl_list_remove(&ks->link);
 	free(ks);
 }
 
@@ -316,6 +393,7 @@ static void koan_server_handle_new_surface(struct wl_listener *listener,
 	wl_signal_add(&surface->events.commit, &ks->commit);
 	ks->destroy.notify = koan_any_surface_handle_destroy;
 	wl_signal_add(&surface->events.destroy, &ks->destroy);
+	wl_list_insert(&g_server.surfaces, &ks->link);
 }
 
 static void koan_surface_handle_destroy(struct wl_listener *listener,
@@ -360,7 +438,7 @@ static void koan_server_handle_new_xdg_toplevel(struct wl_listener *listener,
 static void koan_server_handle_new_xdg_popup(struct wl_listener *listener,
 		void *data) {
 	(void)listener;
-	(void)data;
+	koan_adapter_popup_new(data);
 }
 
 /* -------------------------------------------------------------------------- */
@@ -408,6 +486,19 @@ static void koan_server_handle_keyboard_modifiers(struct wl_listener *listener,
 
 /* Optional: without an xkb keymap the seat offers no keyboard. The layout
  * comes from the usual XKB_DEFAULT_* variables (default: us). */
+/* A client copied (wl_data_device.set_selection with a serial wlroots has
+ * already validated): make it the seat's selection. wlroots then offers it
+ * to the client with keyboard focus, now and on every focus change. Without
+ * this no Wayland client could paste what another one copied. Covered by
+ * tests/koan_protocol_test.c (data: selection-*). Bridging to the BeAPI
+ * clipboard (be_clipboard) is separate work. */
+static void koan_server_handle_request_set_selection(
+		struct wl_listener *listener, void *data) {
+	(void)listener;
+	struct wlr_seat_request_set_selection_event *event = data;
+	wlr_seat_set_selection(g_server.seat, event->source, event->serial);
+}
+
 static void koan_server_create_keyboard(struct koan_server *server) {
 	struct xkb_context *context = xkb_context_new(XKB_CONTEXT_NO_FLAGS);
 	if (!context) {
@@ -461,16 +552,31 @@ static void koan_find_surface_iter(struct wlr_surface *surface, int sx, int sy,
 	}
 }
 
+/* Whether a surface is this toplevel's, or one of its popups' (menus). */
+static bool koan_surface_in_toplevel(struct wlr_xdg_toplevel *toplevel,
+		struct wlr_surface *surface) {
+	if (surface == NULL)
+		return false;
+	struct koan_find_surface f = { surface, 0, 0, false };
+	wlr_xdg_surface_for_each_surface(toplevel->base, koan_find_surface_iter,
+		&f);
+	return f.found;
+}
+
 /* Whether the seat's pointer focus is in this toplevel's surface tree, and
  * where that surface sits relative to the root. */
 static bool koan_pointer_focus_in(struct wlr_xdg_toplevel *toplevel,
 		double *ox, double *oy) {
 	struct wlr_surface *focus = g_server.seat->pointer_state.focused_surface;
-	if (!focus || wlr_surface_get_root_surface(focus)
-			!= toplevel->base->surface)
+	if (!focus)
 		return false;
+	/* The toplevel's tree and its popups (menus): the motion hit-test
+	 * (wlr_xdg_surface_surface_at) finds both, so buttons, axis and leave
+	 * must accept both, in the same coordinates. Only the subsurface tree
+	 * was checked, so clicks on a menu item were dropped. Covered by
+	 * tests/koan_protocol_test.c (input: pointer-button-reaches-popup). */
 	struct koan_find_surface f = { focus, 0, 0, false };
-	wlr_surface_for_each_surface(toplevel->base->surface,
+	wlr_xdg_surface_for_each_surface(toplevel->base,
 		koan_find_surface_iter, &f);
 	*ox = f.x;
 	*oy = f.y;
@@ -483,9 +589,15 @@ void koan_server_pointer_motion(struct wlr_xdg_toplevel *toplevel,
 	if (!seat || !toplevel->base->initialized)
 		return;
 
-	/* Window-content coordinates -> root surface coordinates. */
-	double rx = x + toplevel->base->geometry.x;
-	double ry = y + toplevel->base->geometry.y;
+	/* Window-content coordinates -> root surface coordinates, through the
+	 * same box the native window was sized with (koan_adapter_window_box).
+	 * wlroots' effective geometry lags behind when a desynchronized
+	 * sub-surface changes the tree's extents without a root commit;
+	 * using it put the pointer up to the sub-surface's offset away from
+	 * what the window shows (tests/koan_protocol_test.c, input). */
+	struct wlr_box box = koan_adapter_window_box(toplevel);
+	double rx = x + box.x;
+	double ry = y + box.y;
 
 	/* Implicit grab: while a button is held the surface that got the
 	 * press keeps the pointer, even outside it (drags, scrollbars). */
@@ -553,15 +665,55 @@ void koan_server_keyboard_focus(struct wlr_xdg_toplevel *toplevel,
 	if (!seat || !g_server.keyboard_ready || !toplevel->base->surface)
 		return;
 	struct wlr_surface *root = toplevel->base->surface;
+	struct wlr_surface *current = seat->keyboard_state.focused_surface;
 	if (focused) {
+		/* A menu of this window keeps the keys (koan_server_popup_
+		 * keyboard). */
+		if (koan_surface_in_toplevel(toplevel, current))
+			return;
 		struct wlr_keyboard *kb = &g_server.keyboard;
 		wlr_seat_keyboard_notify_enter(seat, root, kb->keycodes,
 			kb->num_keycodes, &kb->modifiers);
-	} else if (seat->keyboard_state.focused_surface == root) {
+	} else if (koan_surface_in_toplevel(toplevel, current)) {
 		/* Deactivation of a window that already lost focus to another
 		 * one must not take the focus away from the new window. */
 		wlr_seat_keyboard_notify_clear_focus(seat);
 	}
+}
+
+/* xdg_popup.grab: "the topmost grabbing popup ... should be given keyboard
+ * focus". wlroots' popup grab ignores focus changes (its keyboard grab's
+ * enter is a no-op), so this enters the surface directly. Mapped: a
+ * grabbing popup of the focused window takes the keys. Unmapped: if it
+ * had them, they go back to what opened it (the parent menu or window).
+ * Covered by tests/koan_protocol_test.c (input: popup-keyboard-*). */
+void koan_server_popup_keyboard(struct wlr_xdg_popup *popup, bool mapped) {
+	struct wlr_seat *seat = g_server.seat;
+	if (!seat || !g_server.keyboard_ready || popup->base == NULL)
+		return;
+	struct wlr_surface *surface = popup->base->surface;
+	struct wlr_surface *current = seat->keyboard_state.focused_surface;
+	struct wlr_surface *target = NULL;
+	if (mapped) {
+		struct wlr_surface *parent = popup->parent;
+		struct wlr_xdg_popup *p;
+		while (parent && (p = wlr_xdg_popup_try_from_wlr_surface(parent)))
+			parent = p->parent;
+		struct wlr_xdg_toplevel *toplevel = parent
+			? wlr_xdg_toplevel_try_from_wlr_surface(parent) : NULL;
+		if (popup->seat != NULL && toplevel != NULL
+				&& (current == NULL
+					|| koan_surface_in_toplevel(toplevel, current)))
+			target = surface;
+	} else if (current == surface && popup->parent != NULL
+			&& popup->parent->mapped) {
+		target = popup->parent;
+	}
+	if (target == NULL || target == current)
+		return;
+	struct wlr_keyboard *kb = &g_server.keyboard;
+	wlr_seat_keyboard_enter(seat, target, kb->keycodes, kb->num_keycodes,
+		&kb->modifiers);
 }
 
 void koan_server_keyboard_key(struct wlr_xdg_toplevel *toplevel,
@@ -569,8 +721,10 @@ void koan_server_keyboard_key(struct wlr_xdg_toplevel *toplevel,
 	struct wlr_seat *seat = g_server.seat;
 	if (!seat || !g_server.keyboard_ready)
 		return;
-	/* Keys go to the active native window; make sure it has focus. */
-	if (seat->keyboard_state.focused_surface != toplevel->base->surface)
+	/* Keys go to the active native window (or the menu it opened); make
+	 * sure it has focus. */
+	if (!koan_surface_in_toplevel(toplevel,
+			seat->keyboard_state.focused_surface))
 		koan_server_keyboard_focus(toplevel, true);
 	struct wlr_keyboard_key_event event = {
 		.time_msec = time,
@@ -657,6 +811,14 @@ static bool koan_server_create_output(struct koan_server *server) {
 		return false;
 	}
 
+	/* wl_output v4 sends name and description on bind; a NULL string
+	 * cannot be marshalled, so the client was disconnected (Chromium with
+	 * --ozone-platform=wayland never started). Real backends name their
+	 * outputs in wlr_output_init(); this one is the screen app_server
+	 * draws on. Covered by tests/koan_protocol_test.c (core:
+	 * output-v4-name). */
+	wlr_output_set_name(output, "KOAN-1");
+	wlr_output_set_description(output, "VitruvianOS app_server screen");
 	wlr_output_create_global(output, server->display);
 	wlr_output_layout_add(server->output_layout, output, 0, 0);
 	server->output = output;
@@ -687,10 +849,12 @@ bool koan_server_set_output_dimensions(int32_t width, int32_t height,
 struct wl_display *koan_server_create(void) {
 	struct koan_server *server = &g_server;
 	wl_list_init(&server->toplevels);
+	wl_list_init(&server->surfaces);
 	wl_list_init(&server->new_input.link);
 	wl_list_init(&server->new_surface.link);
 	wl_list_init(&server->keyboard_key.link);
 	wl_list_init(&server->keyboard_modifiers.link);
+	wl_list_init(&server->request_set_selection.link);
 	server->keyboard_ready = false;
 	wl_list_init(&server->new_toplevel_decoration.link);
 	wl_list_init(&server->decorations);
@@ -857,6 +1021,10 @@ struct wl_display *koan_server_create(void) {
 	 * advertisement but must not crash server startup. */
 	server->seat = wlr_seat_create(server->display, "seat0");
 	if (server->seat) {
+		server->request_set_selection.notify =
+			koan_server_handle_request_set_selection;
+		wl_signal_add(&server->seat->events.request_set_selection,
+			&server->request_set_selection);
 		server->new_input.notify = koan_server_handle_new_input;
 		wl_signal_add(&server->backend->events.new_input, &server->new_input);
 		koan_server_create_keyboard(server);
@@ -882,6 +1050,18 @@ struct wl_display *koan_server_create(void) {
 		server->queue_fd_source = wl_event_loop_add_fd(loop, queue_fd,
 			WL_EVENT_READABLE, koan_server_handle_queue_fd, server);
 	}
+
+	server->frame_timer = wl_event_loop_add_timer(
+		wl_display_get_event_loop(server->display),
+		koan_server_handle_frame_timer, server);
+	if (!server->frame_timer)
+		wlr_log(WLR_ERROR, "Koan: no frame timer; frame callbacks will "
+			"not be answered");
+
+	/* Only for conformance runs inside a session (root-owned switch). */
+	if (koan_test_control_requested() &&
+			!koan_test_control_create(server->display))
+		wlr_log(WLR_ERROR, "Koan: koan_test_v1 requested but not created");
 
 	wlr_log(WLR_INFO, "Koan Wayland server: protocol globals registered");
 	return server->display;
@@ -957,6 +1137,11 @@ void koan_server_destroy(struct wl_display *display) {
 
 	struct koan_server *server = &g_server;
 
+	koan_test_control_destroy();
+	/* Popups die with the display below; app_server's side goes with the
+	 * bridge's own teardown. */
+	koan_adapter_forget_popups();
+
 	/* Destroy all toplevels (removes surface listeners). */
 	while (!wl_list_empty(&server->toplevels)) {
 		struct koan_toplevel *kt =
@@ -972,6 +1157,7 @@ void koan_server_destroy(struct wl_display *display) {
 
 	wl_list_remove(&server->keyboard_key.link);
 	wl_list_remove(&server->keyboard_modifiers.link);
+	wl_list_remove(&server->request_set_selection.link);
 	if (server->seat)
 		wlr_seat_destroy(server->seat);
 	if (server->keyboard_ready) {
@@ -998,6 +1184,9 @@ void koan_server_destroy(struct wl_display *display) {
 
 	if (server->queue_fd_source)
 		wl_event_source_remove(server->queue_fd_source);
+	if (server->frame_timer)
+		wl_event_source_remove(server->frame_timer);
+	server->frame_timer = NULL;
 
 	/* Destroy the command queue. */
 	if (server->queue)
@@ -1017,6 +1206,7 @@ void koan_server_destroy(struct wl_display *display) {
 
 	memset(server, 0, sizeof(*server));
 	wl_list_init(&server->toplevels);
+	wl_list_init(&server->surfaces);
 
 	wlr_log(WLR_INFO, "Koan Wayland server: destroyed");
 }

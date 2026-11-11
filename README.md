@@ -63,12 +63,33 @@ stays stable.
 
 ---
 ### Wip Koan WLROOTS implementation for wayland support
-Firefox ESR From Debian Repository
-> >Chromium with --ozone-platform=wayland still not working
-> >Mouse input And Keyboard input still not working as is , WIP.
-> >Screen Fractional Scaling Not Wired Up on Wayland , Tested Showcased Wayland programs at 1.00 Scale , WIP.
+Wayland applications from the Debian repositories run as native Koan windows, with the Koan window frame, Deskbar entries and native window stacking.
+
+What works now:
+* Firefox ESR and Chromium (`chromium --ozone-platform=wayland`)
+* Mouse and keyboard input
+* Menus and popups (GTK/Nautilus menus, browser menus), including keyboard navigation
+* Fullscreen (F11 in Firefox, the fullscreen button in Chromium)
+
+> **⚠️ Still WIP**
+> >
+> > * Screen fractional scaling is not wired up for Wayland yet; Wayland programs were tested at 1.00 scale.
+> > * No GPU acceleration yet: Chromium renders in software (`chrome://gpu` reports GL disabled).
+> > * Transparent corners of client-drawn windows and menus show black.
+> > Upstream .desktop implementation Conflicts with wlroots-koan , so my .desktop implementation still works under installed applications deskbar menu until fix is applied.
+
 <p align="center">
   <img src="/Vanilla-Firefox-Wayland-on-Koan.png" alt="Terminal Showcasing Apt install chromium , Chromium startup command , Firefox-ESR and Deskbar Team Window Integration With Wayland Clients" width="800" />
+</p>
+
+Chromium on Wayland: `chrome://gpu` shows the Wayland Ozone platform and the interfaces Koan's compositor exposes.
+<p align="center">
+  <img src="/chromium.png" alt="Chromium chrome://gpu page on Koan: Ozone platform wayland, the Wayland interfaces exposed by Koan's compositor, GL disabled" width="800" />
+</p>
+
+Speedometer 2.1 (browserbench.org) in Chromium on Koan's Wayland server: 336 ± 23 runs per minute.
+<p align="center">
+  <img src="/Chromium-Benchmark.png" alt="Speedometer 2.1 result of 336 plus or minus 23 runs per minute in Chromium on Koan" width="800" />
 </p>
 
 ### Nexus
@@ -127,6 +148,10 @@ All Google Chrome and Chromium logos, icons, product branding, and other protect
 
 The Chromium source code is distributed under its respective open-source licenses. Such licenses do not grant rights to Google's trademarks or proprietary Google Chrome branding.
 
+BrowserBench (browserbench.org) and Speedometer are the names of a browser benchmark website and a browser benchmark maintained by WebKit engine developers under an open governance model. The browserbench.org domain is registered to Apple Inc. (WHOIS registrant organization). These names, and any associated marks, belong to Apple Inc. or their respective owners.
+
+Koan Operating System is not affiliated with, endorsed by, sponsored by, or officially associated with BrowserBench, the Speedometer project, or its maintainers. The Speedometer 2.1 score shown in this README is an informal result from a single run on Koan, provided for descriptive purposes only and it does not imply endorsement, sponsorship, affiliation, or partnership.
+
 All trademarks, product names, logos, and company names are the property of their respective owners. Their use in this project is for identification and attribution purposes only and does not imply endorsement, sponsorship, affiliation, or partnership with Koan Operating System.
 
 ### SSH debug boot
@@ -141,4 +166,4 @@ Koan is built by volunteers. There's is not current dontation page for Koan itse
 
 ### License
 
-Koan contains components licensed under the [GPL](https://www.gnu.org/licenses/gpl-3.0.html), [MIT](https://opensource.org/licenses/MIT), and [Apache-2.0](data/system/data/licenses/Apache%20v2). Check each component's file and package notices for its applicable license.
+Koan contains components licensed under the [GPL-2.0](LICENSE), [GPL-3.0](https://www.gnu.org/licenses/gpl-3.0.html) (for example the WLCS test modules in `src/add-ons/wlroots-koan/tests/wlcs/`), [MIT](https://opensource.org/licenses/MIT), and [Apache-2.0](data/system/data/licenses/Apache%20v2). Check each component's file and package notices for its applicable license.

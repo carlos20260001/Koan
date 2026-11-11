@@ -1,4 +1,9 @@
 /*
+ * SPDX-License-Identifier: MIT
+ * Copyright © 2026 carlos20260001
+ */
+
+/*
  * Regression test for koan_queue.
  *
  *  - Commands are drained in the order they were pushed. Head insertion

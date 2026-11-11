@@ -1,4 +1,9 @@
 /*
+ * SPDX-License-Identifier: MIT
+ * Copyright © 2026 carlos20260001
+ */
+
+/*
  * Regression test: the Koan Wayland server must start up without aborting.
  *
  * app_server calls koan_server_create(), koan_server_add_socket() and

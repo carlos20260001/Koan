@@ -1,4 +1,9 @@
 /*
+ * SPDX-License-Identifier: MIT
+ * Copyright © 2026 carlos20260001
+ */
+
+/*
  * Regression test: a real xdg-shell client must be able to show a window
  * through the Koan Wayland server.
  *
@@ -574,6 +579,21 @@ settle(struct client *c)
 	return true;
 }
 
+/* Frame callbacks are answered at the output's pace (a timer in
+ * koan_server.c), not inside the commit: dispatch for up to about a
+ * second until the flag is set. */
+static bool
+wait_for_flag(struct client *c, const bool *flag)
+{
+	for (int i = 0; i < 500 && !*flag; i++) {
+		if (wl_display_roundtrip(c->display) < 0)
+			return false;
+		if (!*flag)
+			usleep(2000);
+	}
+	return *flag;
+}
+
 #define CHECK(cond, msg) \
 	do { \
 		if (!(cond)) { \
@@ -697,7 +717,7 @@ main(void)
 		"the synchronized subsurface was not composed");
 
 	/* 4. The frame callback must complete, or clients stop drawing. */
-	CHECK(mapped.frame_done,
+	CHECK(wait_for_flag(&c, &mapped.frame_done),
 		"wl_surface.frame callback never completed; clients freeze "
 		"after their first frame");
 
@@ -716,7 +736,7 @@ main(void)
 		"a frame after the subsurface commit was composed wrongly");
 	CHECK(atomic_load(&sLastSubPixel) == SUB_PIXEL_2,
 		"a desynchronized subsurface commit never reached set_buffer");
-	CHECK(child_frame_done,
+	CHECK(wait_for_flag(&c, &child_frame_done),
 		"the subsurface's frame callback never completed; Firefox stops "
 		"drawing its content after one frame");
 

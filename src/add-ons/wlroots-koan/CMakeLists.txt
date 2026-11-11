@@ -135,6 +135,8 @@ set(WLR_PROTOCOL_ENTRIES
     "wlr-output-power-management-unstable-v1=${CMAKE_CURRENT_SOURCE_DIR}/protocol/wlr-output-power-management-unstable-v1.xml"
     "wlr-screencopy-unstable-v1=${CMAKE_CURRENT_SOURCE_DIR}/protocol/wlr-screencopy-unstable-v1.xml"
     "wlr-virtual-pointer-unstable-v1=${CMAKE_CURRENT_SOURCE_DIR}/protocol/wlr-virtual-pointer-unstable-v1.xml"
+    # Koan's own test-control protocol (server/koan_test.c)
+    "koan-test-v1=${CMAKE_CURRENT_SOURCE_DIR}/protocol/koan-test-v1.xml"
 )
 
 # All generated files live in one directory so that the include paths below
@@ -409,6 +411,7 @@ set(WLR_KOAN_PLATFORM_SRCS
     server/koan_queue.c
     server/koan_server.c
     server/koan_adapter.c
+    server/koan_test.c
     compat/wlroots-compat.c
 )
 

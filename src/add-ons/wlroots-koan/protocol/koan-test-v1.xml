@@ -1,0 +1,62 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<protocol name="koan_test_v1">
+  <copyright>
+    SPDX-License-Identifier: MIT
+    Copyright © 2026 carlos20260001
+  </copyright>
+
+  <description summary="test control for the Koan Wayland server">
+    A private protocol for conformance test runners (WLCS) that run inside
+    a VitruvianOS session against app_server's real Wayland socket. It
+    places windows and injects pointer input through app_server's own
+    window management and event dispatching, so tests exercise the real
+    stacking, hit-testing and focus.
+
+    The global exists only while the root-owned file
+    /run/koan-test-control is present when app_server starts. Never enable
+    it on a system that runs untrusted clients: it lets a client move
+    windows and inject input.
+  </description>
+
+  <interface name="koan_test_v1" version="1">
+    <request name="destroy" type="destructor"/>
+
+    <request name="move_surface">
+      <description summary="place the surface's window">
+        Move the native window of the toplevel that owns this surface so
+        that the surface's origin is at (x, y) in screen coordinates.
+        Ignored if the surface has no mapped xdg_toplevel.
+      </description>
+      <arg name="surface" type="object" interface="wl_surface"/>
+      <arg name="x" type="int"/>
+      <arg name="y" type="int"/>
+    </request>
+
+    <request name="pointer_motion">
+      <description summary="move the pointer">
+        Move the pointer to (x, y) in screen coordinates, as a mouse would.
+      </description>
+      <arg name="x" type="fixed"/>
+      <arg name="y" type="fixed"/>
+    </request>
+
+    <request name="pointer_button">
+      <description summary="press or release a button">
+        button is a Linux evdev code (BTN_LEFT, ...); state is a
+        wl_pointer.button_state value.
+      </description>
+      <arg name="button" type="uint"/>
+      <arg name="state" type="uint"/>
+    </request>
+
+    <request name="sync">
+      <description summary="wait until earlier requests took effect">
+        The callback's done event is sent once app_server has handled every
+        earlier request of this object and the Wayland events they caused
+        (pointer enter/motion/button, configure, ...) have been sent to
+        their clients.
+      </description>
+      <arg name="callback" type="new_id" interface="wl_callback"/>
+    </request>
+  </interface>
+</protocol>

@@ -356,6 +356,14 @@ LibEvdevEventStream::InsertEvent(BMessage* event)
 	if (event->what == B_MOUSE_MOVED)
 		fLatestMouseMovedEvent = event;
 
+	// Wake GetNextEvent() like device input does; without this an inserted
+	// event (fake mouse moved, injected input) waited for the next real one.
+	if (fWaitingOnEvent) {
+		fWaitingOnEvent = false;
+		lock.Unlock();
+		release_sem(fEventNotification);
+	}
+
 	return B_OK;
 }
 

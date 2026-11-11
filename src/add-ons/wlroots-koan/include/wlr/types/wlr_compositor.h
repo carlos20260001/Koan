@@ -92,6 +92,17 @@ struct wlr_surface_role {
 	 */
 	void (*client_commit)(struct wlr_surface *surface);
 	/**
+	 * Koan local addition (not in upstream 0.20.2). Called when the client
+	 * sends wl_surface.attach with a non-NULL buffer, before it is stored.
+	 * May be NULL. Returns false (after posting a protocol error) to refuse
+	 * the attach. Used by xdg_surface, whose protocol forbids attaching a
+	 * buffer before the first configure.
+	 *
+	 * If the role is represented by an object, this is only called if
+	 * such object exists.
+	 */
+	bool (*client_attach)(struct wlr_surface *surface);
+	/**
 	 * Called when a new surface state is committed. May be NULL.
 	 *
 	 * If the role is represented by an object, this is only called if

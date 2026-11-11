@@ -1,4 +1,9 @@
 /*
+ * SPDX-License-Identifier: MIT
+ * Copyright © 2026 carlos20260001
+ */
+
+/*
  * Koan thread-safe command queue for Wayland<->app_server communication.
  *
  * Two execution domains:
@@ -64,6 +69,26 @@ enum koan_cmd_type {
 	 * inside the Desktop call that requested them (it holds window
 	 * locks); the bridge performs them when it drains the queue. */
 	KOAN_CMD_NATIVE_ACTION,
+
+	/* koan_test_v1 (server/koan_test.c), only with the test-control
+	 * global enabled. Wayland -> app_server: */
+	KOAN_CMD_TEST_PLACE,          /* move a native window */
+	KOAN_CMD_TEST_POINTER,        /* inject a mouse event */
+	KOAN_CMD_TEST_FENCE,          /* start a fence through the event path */
+	/* app_server -> Wayland: */
+	KOAN_CMD_TEST_FENCE_BEGIN,    /* how many parts the fence has */
+	KOAN_CMD_TEST_FENCE_PART,     /* one input looper passed the fence */
+
+	/* xdg_popup (menus, tooltips, popovers) as native windows above their
+	 * toplevel's window. Wayland -> app_server: */
+	KOAN_CMD_CREATE_POPUP,
+	KOAN_CMD_MOVE_POPUP,
+	/* app_server -> Wayland: the popup's native window exists. */
+	KOAN_CMD_POPUP_READY,
+	/* app_server -> Wayland: the user clicked outside every Wayland
+	 * client surface (a window frame, a native window, the desktop):
+	 * popups holding a grab get xdg_popup.popup_done. */
+	KOAN_CMD_DISMISS_POPUPS,
 };
 
 /* Which thread is the intended consumer of a command. koan_queue_push()
@@ -188,18 +213,33 @@ struct koan_cmd_toplevel_close {
 
 /* KOAN_CMD_TOPLEVEL_CONFIGURE: native size/state -> xdg_toplevel.configure.
  * width/height 0 keep the client's size; maximized/activated -1 keep the
- * current state. */
+ * current state. fullscreen is enum koan_state_change, whose 0 means "keep"
+ * so zero-initialised payloads (= {}) never drop a fullscreen state. */
 struct koan_cmd_toplevel_configure {
 	struct wlr_xdg_toplevel *toplevel;
 	int32_t width;
 	int32_t height;
 	int32_t maximized;
 	int32_t activated;
+	int32_t fullscreen;
+};
+
+enum koan_state_change {
+	KOAN_STATE_KEEP = 0,
+	KOAN_STATE_ENTER = 1,
+	KOAN_STATE_LEAVE = 2,
 };
 
 enum koan_native_action {
 	KOAN_NATIVE_MINIMIZE,     /* arg: 1 minimize, 0 restore */
 	KOAN_NATIVE_ZOOM,         /* maximize / restore */
+	/* The client asked (xdg_toplevel.set_/unset_maximized,
+	 * set_/unset_fullscreen). arg: 1 enter, 0 leave. app_server must answer
+	 * with a TOPLEVEL_CONFIGURE even if it keeps the state. */
+	KOAN_NATIVE_SET_MAXIMIZED,
+	KOAN_NATIVE_SET_FULLSCREEN,
+	/* The toplevel's native window moved: move its popups' windows. */
+	KOAN_NATIVE_FOLLOW_POPUPS,
 };
 
 /* KOAN_CMD_NATIVE_ACTION. window is the bridge's handle; the bridge
@@ -208,6 +248,55 @@ struct koan_cmd_native_action {
 	void *window;
 	int32_t action;           /* enum koan_native_action */
 	int32_t arg;
+};
+
+/* KOAN_CMD_TEST_PLACE: put the native window's content top-left at
+ * (x, y) on screen. toplevel is a key only. */
+struct koan_cmd_test_place {
+	struct wlr_xdg_toplevel *toplevel;
+	int32_t x;
+	int32_t y;
+};
+
+/* KOAN_CMD_TEST_POINTER: absolute screen position; button 0 is a motion,
+ * otherwise an evdev button code pressed or released at (x, y). */
+struct koan_cmd_test_pointer {
+	double x;
+	double y;
+	uint32_t button;
+	bool pressed;
+};
+
+/* KOAN_CMD_TEST_FENCE, _FENCE_BEGIN (parts set), _FENCE_PART. */
+struct koan_cmd_test_fence {
+	uint32_t serial;
+	int32_t parts;
+};
+
+/* KOAN_CMD_CREATE_POPUP. popup and toplevel are keys only. (x, y) is the
+ * popup's top-left in the toplevel's window-content coordinates, the same
+ * space as pointer positions; it may be negative or outside the window. */
+struct koan_cmd_create_popup {
+	struct wlr_xdg_popup *popup;
+	struct wlr_xdg_toplevel *toplevel;
+	int32_t x;
+	int32_t y;
+	int32_t width;
+	int32_t height;
+};
+
+/* KOAN_CMD_MOVE_POPUP: the popup moved (xdg_popup.reposition) or its
+ * toplevel's content box changed. window is the popup's handle. */
+struct koan_cmd_move_popup {
+	void *window;
+	int32_t x;
+	int32_t y;
+};
+
+/* KOAN_CMD_POPUP_READY. window NULL: app_server could not make one. */
+struct koan_cmd_popup_ready {
+	struct wlr_xdg_popup *popup;
+	void *window;
 };
 
 union koan_cmd_payload {
@@ -227,6 +316,12 @@ union koan_cmd_payload {
 	struct koan_cmd_toplevel_close toplevel_close;
 	struct koan_cmd_toplevel_configure toplevel_configure;
 	struct koan_cmd_native_action native_action;
+	struct koan_cmd_test_place test_place;
+	struct koan_cmd_test_pointer test_pointer;
+	struct koan_cmd_test_fence test_fence;
+	struct koan_cmd_create_popup create_popup;
+	struct koan_cmd_move_popup move_popup;
+	struct koan_cmd_popup_ready popup_ready;
 };
 
 struct koan_command {

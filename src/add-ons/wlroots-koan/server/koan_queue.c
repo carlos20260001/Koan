@@ -1,4 +1,9 @@
 /*
+ * SPDX-License-Identifier: MIT
+ * Copyright © 2026 carlos20260001
+ */
+
+/*
  * Koan thread-safe command queue implementation.
  *
  * Threading model:
@@ -57,6 +62,10 @@ direction_for_type(enum koan_cmd_type type) {
 	case KOAN_CMD_WINDOW_READY:
 	case KOAN_CMD_TOPLEVEL_CLOSE:
 	case KOAN_CMD_TOPLEVEL_CONFIGURE:
+	case KOAN_CMD_TEST_FENCE_BEGIN:
+	case KOAN_CMD_TEST_FENCE_PART:
+	case KOAN_CMD_POPUP_READY:
+	case KOAN_CMD_DISMISS_POPUPS:
 		return KOAN_QUEUE_TO_WAYLAND;
 	default:
 		return KOAN_QUEUE_TO_APP_SERVER;
@@ -142,6 +151,15 @@ static void free_payload(union koan_cmd_payload *payload,
 	case KOAN_CMD_TOPLEVEL_CLOSE:
 	case KOAN_CMD_TOPLEVEL_CONFIGURE:
 	case KOAN_CMD_NATIVE_ACTION:
+	case KOAN_CMD_TEST_PLACE:
+	case KOAN_CMD_TEST_POINTER:
+	case KOAN_CMD_TEST_FENCE:
+	case KOAN_CMD_TEST_FENCE_BEGIN:
+	case KOAN_CMD_TEST_FENCE_PART:
+	case KOAN_CMD_CREATE_POPUP:
+	case KOAN_CMD_MOVE_POPUP:
+	case KOAN_CMD_POPUP_READY:
+	case KOAN_CMD_DISMISS_POPUPS:
 		/* No heap-owned payload. */
 		break;
 	}

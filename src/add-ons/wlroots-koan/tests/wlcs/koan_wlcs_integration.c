@@ -1,5 +1,18 @@
 /*
- * SPDX-License-Identifier: MIT
+ * SPDX-License-Identifier: GPL-3.0-only
+ * Copyright 2026, carlos20260001.
+ *
+ * This program is free software: you can redistribute it and/or modify it
+ * under the terms of the GNU General Public License version 3,
+ * as published by the Free Software Foundation.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  *
  * WLCS (Wayland Conformance Test Suite, github.com/canonical/wlcs)
  * integration for the Koan Wayland server.
@@ -24,14 +37,17 @@
  *     coordinates, the same calls the app_server bridge makes;
  *   - a new window and a clicked window get keyboard focus and the
  *     activated state through the same queue commands app_server pushes
- *     (KOAN_CMD_KEYBOARD_FOCUS, KOAN_CMD_TOPLEVEL_CONFIGURE).
+ *     (KOAN_CMD_KEYBOARD_FOCUS, KOAN_CMD_TOPLEVEL_CONFIGURE);
+ *   - maximize/fullscreen requests are granted with the screen-sized frame,
+ *     as app_server's zoom_window()/fullscreen_window() do.
  * Consequently WLCS results describe the Koan protocol layer, not
  * app_server's own window management.
  *
- * Licensing: this file is MIT like the rest of wlroots-koan. It only
- * includes WLCS's interface headers (GPL-3.0) and is loaded into the
- * GPL-3.0 wlcs runner; the combined test binary is GPL-3.0. It is a test
- * artifact and is not installed or packaged.
+ * Licensing: GPL-3.0-only, like WLCS (debian/copyright: GPL-3; its
+ * interface headers say "version 3"), whose headers this file implements
+ * and whose runner loads it. The wlroots-koan code it links (MIT) is
+ * compatible with that. It is a test artifact and is not installed or
+ * packaged.
  */
 
 #define _GNU_SOURCE
@@ -66,6 +82,8 @@ struct window {
 	struct wl_listener toplevel_destroy;
 	int32_t x, y;                   /* window-content top-left */
 	bool visible;
+	bool maximized, fullscreen;
+	int32_t restore_x, restore_y;   /* position before max/fullscreen */
 };
 
 struct client_socket {
@@ -98,42 +116,26 @@ now_ms(void)
 	return (uint32_t)(ts.tv_sec * 1000 + ts.tv_nsec / 1000000);
 }
 
-/*
- * The native window's content box, in root-surface coordinates: the same
- * box koan_adapter.c (window_box) sizes app_server's window with, i.e. the
- * xdg window geometry clamped to the extents of the whole surface tree,
- * or those extents.
- */
+/* The native window's content box in root-surface coordinates: exactly
+ * what koan_adapter.c gives app_server (and maps pointer positions back
+ * with), so the stand-in hit-tests the window app_server would show. */
 static struct wlr_box
 content_box(const struct window *w)
 {
-	struct wlr_box ext;
-	wlr_surface_get_extents(w->toplevel->base->surface, &ext);
-	struct wlr_box box = ext;
-	const struct wlr_box *g = &w->toplevel->base->geometry;
-	if (g->width > 0 && g->height > 0) {
-		int32_t x1 = g->x > ext.x ? g->x : ext.x;
-		int32_t y1 = g->y > ext.y ? g->y : ext.y;
-		int32_t x2 = g->x + g->width;
-		int32_t y2 = g->y + g->height;
-		if (x2 > ext.x + ext.width)
-			x2 = ext.x + ext.width;
-		if (y2 > ext.y + ext.height)
-			y2 = ext.y + ext.height;
-		if (x2 > x1 && y2 > y1)
-			box = (struct wlr_box){ x1, y1, x2 - x1, y2 - y1 };
-	}
-	return box;
+	return koan_adapter_window_box(w->toplevel);
 }
 
-/* Where the native window content starts on screen. WLCS (like Mir)
- * places the xdg window geometry at the requested position when the
- * client set one, and otherwise the root surface's origin. */
+/*
+ * Where the content box starts on screen. WLCS (like Mir) places the
+ * window geometry at the requested position when the client set one
+ * explicitly; otherwise it places the root surface's origin there, and a
+ * sub-surface at negative coordinates extends the window up/left of it.
+ */
 static void
 content_origin(const struct window *w, double *x, double *y)
 {
-	const struct wlr_box *g = &w->toplevel->base->geometry;
-	if (g->width > 0 && g->height > 0) {
+	const struct wlr_box *set = &w->toplevel->base->current.geometry;
+	if (set->width > 0 && set->height > 0) {
 		*x = w->x;
 		*y = w->y;
 		return;
@@ -315,6 +317,49 @@ cb_set_visibility(void *userdata, struct koan_queue *queue, void *window,
 	}
 }
 
+/* What app_server does for xdg_toplevel.set_/unset_maximized and
+ * set_/unset_fullscreen (WaylandWindow.cpp: zoom_window() and
+ * fullscreen_window()): grant it with the screen-sized frame at the screen
+ * origin, and restore the previous position when the state is left. Koan's
+ * output is 1920x1080 and the stand-in has no decorator to keep on screen. */
+static void
+cb_request_state(void *userdata, struct koan_queue *queue, void *window,
+	int32_t maximized, int32_t fullscreen)
+{
+	(void)userdata;
+	struct window *w = window;
+	union koan_cmd_payload reply = {0};
+	reply.toplevel_configure.toplevel = w->toplevel;
+	reply.toplevel_configure.maximized = -1;
+	reply.toplevel_configure.activated = -1;
+
+	bool was_expanded = w->maximized || w->fullscreen;
+	if (maximized >= 0 && !w->fullscreen)
+		w->maximized = maximized != 0;
+	if (fullscreen >= 0) {
+		w->fullscreen = fullscreen != 0;
+		reply.toplevel_configure.fullscreen = w->fullscreen
+			? KOAN_STATE_ENTER : KOAN_STATE_LEAVE;
+	}
+	reply.toplevel_configure.maximized = w->maximized ? 1 : 0;
+
+	bool expanded = w->maximized || w->fullscreen;
+	if (expanded && !was_expanded) {
+		w->restore_x = w->x;
+		w->restore_y = w->y;
+	}
+	if (expanded) {
+		w->x = 0;
+		w->y = 0;
+		reply.toplevel_configure.width = 1920;
+		reply.toplevel_configure.height = 1080;
+	} else if (was_expanded) {
+		w->x = w->restore_x;
+		w->y = w->restore_y;
+	}
+	koan_queue_push(queue, KOAN_CMD_TOPLEVEL_CONFIGURE, &reply, NULL);
+}
+
 static const struct koan_window_callbacks sCallbacks = {
 	.create_window = cb_create_window,
 	.destroy_window = cb_destroy_window,
@@ -322,6 +367,7 @@ static const struct koan_window_callbacks sCallbacks = {
 	.set_size = cb_set_size,
 	.set_buffer = cb_set_buffer,
 	.set_visibility = cb_set_visibility,
+	.request_state = cb_request_state,
 };
 
 /* ---- pointer ----------------------------------------------------------- */
@@ -653,6 +699,11 @@ create_server(int argc, const char **argv)
 	s->base.start_on_this_thread = server_start_on_this_thread;
 	wl_list_init(&s->windows);
 	wl_list_init(&s->sockets);
+	/* app_server starts with the cursor in the middle of the screen
+	 * (Desktop::Init, MoveCursorTo(width / 2, height / 2)); Koan's output
+	 * is 1920x1080 (koan_server_create_output). */
+	s->pointer_x = 1920 / 2;
+	s->pointer_y = 1080 / 2;
 	sServer = s;
 	return &s->base;
 }

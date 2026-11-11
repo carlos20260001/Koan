@@ -22,6 +22,12 @@
 #   VOS_CCACHE       1 to enable ccache (default: 1 if ccache binary exists)
 #   VOS_TMPFS_BUILD  1 to build on a tmpfs in /tmp (default: auto when /tmp has space)
 #   VOS_SSHDEBUG     1 to include the opt-in SSH debug boot and MCP server
+#   VOS_WITH_WLROOTS ON to build the wlroots-koan Wayland server into
+#                    app_server, OFF to leave it out. Unset: ON when
+#                    VOS_CMAKE_EXTRA_OPTS has -DVOS_WITH_WLROOTS=ON, else what
+#                    the build tree was configured with, else OFF (a tmpfs
+#                    tree is always new, so it needs the variable). A tree
+#                    configured with the other value is reconfigured.
 #
 # Usage:
 #   docker/build.sh            # configure (if needed) + bake
@@ -40,6 +46,20 @@ SSHDEBUG="${VOS_SSHDEBUG:-0}"
 case "$SSHDEBUG" in
     0|1) ;;
     *) printf 'error: VOS_SSHDEBUG must be 0 or 1 (got %s)\n' "$SSHDEBUG" >&2; exit 1 ;;
+esac
+
+# A fresh tree (always the case on tmpfs) only gets the Wayland server when
+# asked for, so resolve the request once and compare it with the tree.
+case "${VOS_WITH_WLROOTS:-}" in
+    ON|on|1|TRUE|true|YES|yes) WITH_WLROOTS=ON ;;
+    OFF|off|0|FALSE|false|NO|no) WITH_WLROOTS=OFF ;;
+    "")
+        case " ${VOS_CMAKE_EXTRA_OPTS:-} " in
+            *" -DVOS_WITH_WLROOTS=ON "*|*" -DVOS_WITH_WLROOTS=1 "*) WITH_WLROOTS=ON ;;
+            *) WITH_WLROOTS="" ;;   # resolved against the build tree below
+        esac
+        ;;
+    *) printf 'error: VOS_WITH_WLROOTS must be ON or OFF (got %s)\n' "$VOS_WITH_WLROOTS" >&2; exit 1 ;;
 esac
 
 log() { printf '\n==> %s\n' "$*"; }
@@ -188,6 +208,19 @@ cd "$ACTUAL_BUILD_DIR"
 # ---------------------------------------------------------------------------
 # Configure the per-arch build tree + Debian chroot.
 # ---------------------------------------------------------------------------
+if [ -z "$WITH_WLROOTS" ]; then
+    case "$(sed -n 's/^VOS_WITH_WLROOTS:BOOL=//p' CMakeCache.txt 2>/dev/null)" in
+        ON|1|TRUE|YES) WITH_WLROOTS=ON ;;
+        *) WITH_WLROOTS=OFF ;;
+    esac
+fi
+export VOS_WITH_WLROOTS="$WITH_WLROOTS"
+if [ "$WITH_WLROOTS" = ON ]; then
+    log "Wayland server (wlroots-koan in app_server): ON"
+else
+    log "Wayland server (wlroots-koan in app_server): OFF -- app_server will not create a Wayland socket; set VOS_WITH_WLROOTS=ON to include it"
+fi
+
 _force_configure=0
 if [ -f build.ninja ] && [ -f buildconfig.conf ]; then
     _cached_type="$(sed -n 's/^CMAKE_BUILD_TYPE=//p' buildconfig.conf)"
@@ -198,6 +231,12 @@ if [ -f build.ninja ] && [ -f buildconfig.conf ]; then
     _cached_sshdebug="$(sed -n 's/^VOS_SSHDEBUG=//p' buildconfig.conf)"
     if [ "$_cached_sshdebug" != "$SSHDEBUG" ]; then
         log "SSH-debug setting changed: ${_cached_sshdebug:-unset} -> $SSHDEBUG"
+        _force_configure=1
+    fi
+    _cached_wlroots="$(sed -n 's/^VOS_WITH_WLROOTS:BOOL=//p' CMakeCache.txt 2>/dev/null)"
+    case "$_cached_wlroots" in ON|1|TRUE|YES) _cached_wlroots=ON ;; *) _cached_wlroots=OFF ;; esac
+    if [ "$_cached_wlroots" != "$WITH_WLROOTS" ]; then
+        log "Wayland server setting changed: ${_cached_wlroots:-unset} -> $WITH_WLROOTS"
         _force_configure=1
     fi
 fi

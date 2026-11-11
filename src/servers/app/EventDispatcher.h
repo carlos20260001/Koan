@@ -66,6 +66,8 @@ class EventFilter {
 		virtual void RemoveTarget(EventTarget* target);
 };
 
+static const uint32 kEventStreamFence = 'evfn';
+
 class EventDispatcher : public BLocker {
 	public:
 		EventDispatcher();
@@ -91,6 +93,10 @@ class EventDispatcher : public BLocker {
 		// Hands an event from an output add-on (remote desktop and
 		// friends) to the stream queue; ownership moves on success.
 		void InjectEvent(BMessage* event);
+			// An injected event whose 'what' is kEventStreamFence is not
+			// dispatched: once every event queued before it has been sent
+			// to its targets, the dispatcher sends it to its "target"
+			// messenger. Lets a test harness wait for injected input.
 		bigtime_t IdleTime();
 		// Set by PowerManager when it turns the display off for idle; the
 		// next input event turns it back on.

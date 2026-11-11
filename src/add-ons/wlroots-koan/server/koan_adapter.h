@@ -1,4 +1,9 @@
 /*
+ * SPDX-License-Identifier: MIT
+ * Copyright © 2026 carlos20260001
+ */
+
+/*
  * Koan window adapter for wlroots.
  *
  * Connects wlroots Wayland surfaces (xdg_toplevel) to native Koan windows
@@ -30,6 +35,7 @@ extern "C" {
 
 /* wlroots public headers are C-only and have no extern "C" guards. Include
  * them inside the block so C++ consumers (app_server) get C linkage. */
+#include <wlr/util/box.h>
 #include <wlr/types/wlr_xdg_shell.h>
 
 struct wlr_xdg_toplevel;
@@ -86,6 +92,45 @@ struct koan_window_callbacks {
 	 * command. */
 	void (*set_visibility)(void *userdata, struct koan_queue *queue,
 			       void *window, bool visible);
+
+	/* The client asked to (un)maximize or (un)set fullscreen
+	 * (xdg_toplevel.set_/unset_maximized, set_/unset_fullscreen).
+	 * maximized/fullscreen: 1 enter, 0 leave, -1 not part of this request.
+	 * The window manager decides and must answer with a
+	 * KOAN_CMD_TOPLEVEL_CONFIGURE (xdg-shell requires a configure in reply
+	 * even when the state is refused). May be NULL: Koan then replies
+	 * with the current state. Only called once the native window exists. */
+	void (*request_state)(void *userdata, struct koan_queue *queue,
+			      void *window, int32_t maximized, int32_t fullscreen);
+
+	/* The client asked to be minimized (xdg_toplevel.set_minimized).
+	 * xdg-shell has no matching unminimize request and no reply: the
+	 * window manager hides the native window the way its minimize button
+	 * does, and the user restores it from the window list. May be NULL:
+	 * the request is then ignored, which xdg-shell allows. Only called
+	 * once the native window exists. */
+	void (*request_minimize)(void *userdata, struct koan_queue *queue,
+				 void *window);
+
+	/* Show a mapped xdg_popup as a native window above its toplevel's
+	 * (no frame, never takes focus, like a native menu). (x, y): its
+	 * top-left in the toplevel's window-content coordinates. Reply with
+	 * KOAN_CMD_POPUP_READY. The popup's pixels then arrive through
+	 * set_buffer and it goes away through destroy_window, both with the
+	 * handle POPUP_READY returned. May be NULL: popups are then not shown
+	 * (they still get configures and frame callbacks). */
+	void (*create_popup)(void *userdata, struct koan_queue *queue,
+			     struct wlr_xdg_popup *popup,
+			     struct wlr_xdg_toplevel *toplevel,
+			     int32_t x, int32_t y, int32_t width, int32_t height);
+
+	/* A shown popup moved; same coordinates as create_popup. */
+	void (*move_popup)(void *userdata, struct koan_queue *queue,
+			   void *window, int32_t x, int32_t y);
+
+	/* Wake app_server after the Wayland thread queued a command for it
+	 * outside the callbacks above (koan_test_v1). May be NULL. */
+	void (*wake_app_server)(void *userdata);
 };
 
 /*
@@ -118,6 +163,23 @@ void koan_adapter_toplevel_unmapped(struct wlr_xdg_toplevel *toplevel);
 
 /* Called by the server when a toplevel surface commits new content. */
 void koan_adapter_toplevel_committed(struct wlr_xdg_toplevel *toplevel);
+
+/* The native window's content box in root-surface coordinates: the xdg
+ * window geometry clamped to the live extents of the surface tree. This is
+ * the box set_buffer delivers, and app_server's pointer positions are
+ * relative to its origin. Wayland thread only. */
+struct wlr_box koan_adapter_window_box(struct wlr_xdg_toplevel *toplevel);
+
+/* xdg_popup lifecycle, from koan_server.c (Wayland thread). new: track it
+ * (its unmap and destroy are followed here); committed: a mapped popup
+ * committed new content. */
+void koan_adapter_popup_new(struct wlr_xdg_popup *popup);
+void koan_adapter_popup_committed(struct wlr_xdg_popup *popup);
+/* Server shutdown: drop the popup records without calling back. */
+void koan_adapter_forget_popups(void);
+
+/* Calls koan_window_callbacks.wake_app_server, if set. */
+void koan_adapter_wake_app_server(void);
 
 /* Called by the server when a toplevel is destroyed. */
 void koan_adapter_toplevel_destroyed(struct wlr_xdg_toplevel *toplevel);

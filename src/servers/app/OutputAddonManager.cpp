@@ -626,8 +626,14 @@ OutputAddonManager::_HandleInjectInput(BMessage* message)
 		return;
 	}
 
-	// Ownership moves to the stream queue.
-	desktop->EventDispatcher().InjectEvent(&event);
+	// The stream queue keeps and later deletes the pointer, so it must be a
+	// heap copy (a stack message dangled once this returned).
+	BMessage* injected = new(std::nothrow) BMessage(event);
+	if (injected == NULL) {
+		_SendReply(message, B_NO_MEMORY);
+		return;
+	}
+	desktop->EventDispatcher().InjectEvent(injected);
 	_SendReply(message, B_OK);
 }
 

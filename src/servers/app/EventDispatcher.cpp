@@ -866,6 +866,13 @@ EventDispatcher::_EventLoop()
 			case kFakeMouseMoved:
 				_SendFakeMouseMoved(event);
 				break;
+			case kEventStreamFence:
+			{
+				BMessenger target;
+				if (event->FindMessenger("target", &target) == B_OK)
+					target.SendMessage(event);
+				break;
+			}
 			case B_MOUSE_MOVED:
 			{
 				BPoint where;

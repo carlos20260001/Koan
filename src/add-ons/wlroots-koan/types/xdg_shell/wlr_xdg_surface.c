@@ -367,9 +367,30 @@ static void xdg_surface_role_destroy(struct wlr_surface *wlr_surface) {
 	destroy_xdg_surface(surface);
 }
 
+// Koan local change: xdg-shell.xml (xdg_surface) "any attempts by a client
+// to attach or manipulate a buffer prior to the first xdg_surface.configure
+// call must also be treated as errors". Upstream only checks at commit
+// (xdg_surface_role_client_commit, which still catches a commit before the
+// ack). Here: no configure has been sent yet and none was acked. Covered by
+// tests/koan_protocol_test.c (core: xdg-attach-before-first-configure;
+// xdg: attach-after-configure-before-ack).
+static bool xdg_surface_role_client_attach(struct wlr_surface *wlr_surface) {
+	struct wlr_xdg_surface *surface =
+		wlr_xdg_surface_try_from_wlr_surface(wlr_surface);
+	if (surface == NULL || surface->configured ||
+			!wl_list_empty(&surface->configure_list)) {
+		return true;
+	}
+	wl_resource_post_error(surface->resource,
+		XDG_SURFACE_ERROR_UNCONFIGURED_BUFFER,
+		"buffer attached before the first xdg_surface.configure");
+	return false;
+}
+
 static const struct wlr_surface_role xdg_surface_role = {
 	.name = "xdg_surface",
 	.client_commit = xdg_surface_role_client_commit,
+	.client_attach = xdg_surface_role_client_attach,
 	.commit = xdg_surface_role_commit,
 	.map = xdg_surface_role_map,
 	.destroy = xdg_surface_role_destroy,
@@ -401,9 +422,20 @@ void create_xdg_surface(struct wlr_xdg_client *client, struct wlr_surface *wlr_s
 		return;
 	}
 
-	if (wlr_surface_has_buffer(wlr_surface)) {
+	// Koan local change (upstream 0.20.2 posts XDG_SURFACE_ERROR_UNCONFIGURED_BUFFER
+	// on this xdg_wm_base resource, i.e. code 3, which in the xdg_wm_base
+	// enum means invalid_positioner, and only checks a committed buffer).
+	// xdg-shell.xml (xdg_surface): a wl_surface with a buffer attached *or*
+	// committed is a client error; the request is on xdg_wm_base, whose
+	// enum has invalid_surface_state for it. Covered by
+	// tests/koan_protocol_test.c (core: xdg-surface-from-*-buffer).
+	// An attached but uncommitted buffer is only held as the pending
+	// buffer resource (pending.buffer_width is set at commit time).
+	if (wlr_surface_has_buffer(wlr_surface) ||
+			((wlr_surface->pending.committed & WLR_SURFACE_STATE_BUFFER) &&
+			wlr_surface->pending_buffer_resource != NULL)) {
 		wl_resource_post_error(client->resource,
-			XDG_SURFACE_ERROR_UNCONFIGURED_BUFFER,
+			XDG_WM_BASE_ERROR_INVALID_SURFACE_STATE,
 			"xdg_surface must not have a buffer at creation");
 		return;
 	}
