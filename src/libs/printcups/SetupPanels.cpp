@@ -9,13 +9,20 @@
 #include "SetupPanels.h"
 
 #include <Box.h>
+#include <Alert.h>
+#include <Application.h>
 #include <Button.h>
+#include <Entry.h>
+#include <FilePanel.h>
+#include <FindDirectory.h>
 #include <Catalog.h>
 #include <LayoutBuilder.h>
 #include <MenuField.h>
 #include <MenuItem.h>
 #include <Message.h>
+#include <Path.h>
 #include <PopUpMenu.h>
+#include <Roster.h>
 #include <Rect.h>
 #include <String.h>
 #include <StringView.h>
@@ -58,13 +65,40 @@ private:
 };
 
 
+// The queue the panels describe: the one chosen in the settings, else the
+// default.
+static const char*
+CurrentQueue(const BMessage* settings)
+{
+	const char* printer = NULL;
+	if (settings != NULL
+		&& settings->FindString(PSRV_FIELD_CURRENT_PRINTER, &printer) == B_OK
+		&& printer != NULL) {
+		return printer;
+	}
+	return "";
+}
+
+
+static status_t
+LoadQueueInfo(const char* queue, printcups_queue_info* info)
+{
+	CupsBridge bridge;
+	if (queue != NULL && queue[0] != '\0')
+		return bridge.QueueInfo(queue, info);
+
+	char name[256];
+	if (bridge.DefaultQueue(name, sizeof(name)) != B_OK)
+		return B_ERROR;
+	return bridge.QueueInfo(name, info);
+}
+
+
 static BRect
-PaperRectForMedia(const char* media, bool* ok)
+PaperRectForMedia(const char* queue, const char* media, bool* ok)
 {
 	printcups_queue_info info;
-	CupsBridge bridge;
-	if (bridge.DefaultQueue(info.name, sizeof(info.name)) != B_OK
-		|| bridge.QueueInfo(info.name, &info) != B_OK) {
+	if (LoadQueueInfo(queue, &info) != B_OK) {
 		*ok = false;
 		return BRect(0, 0, 595, 841);
 	}
@@ -97,12 +131,10 @@ PaperRectForMedia(const char* media, bool* ok)
 
 
 static BRect
-PrintableRectFor(const BRect& paper, const char* media)
+PrintableRectFor(const char* queue, const BRect& paper, const char* media)
 {
 	printcups_queue_info info;
-	CupsBridge bridge;
-	if (bridge.DefaultQueue(info.name, sizeof(info.name)) != B_OK
-		|| bridge.QueueInfo(info.name, &info) != B_OK)
+	if (LoadQueueInfo(queue, &info) != B_OK)
 		return BRect(18, 18, paper.right - 18, paper.bottom - 18);
 
 	return BRect(info.margin_left, info.margin_top,
@@ -203,9 +235,10 @@ PageSetupWindow::PageSetupWindow(BMessage* settings, bool* canceled,
 	};
 	for (int32 i = 0; kMediaNames[i] != NULL; i++) {
 		bool ok = false;
-		BRect paper = PaperRectForMedia(kMediaNames[i], &ok);
+		BRect paper = PaperRectForMedia(CurrentQueue(settings),
+			kMediaNames[i], &ok);
 		PaperItem* item = new PaperItem(kMediaNames[i], kMediaNames[i], paper,
-			PrintableRectFor(paper, kMediaNames[i]));
+			PrintableRectFor(CurrentQueue(settings), paper, kMediaNames[i]));
 		fPaperMenu->AddItem(item);
 		if (media != NULL && strcasecmp(media, kMediaNames[i]) == 0)
 			item->SetMarked(true);
@@ -342,7 +375,7 @@ PageSetupWindow::_UpdateSettings()
 		fSettings->AddRect(PSRV_FIELD_PAPER_RECT, paper);
 		fSettings->RemoveName(PSRV_FIELD_PRINTABLE_RECT);
 		fSettings->AddRect(PSRV_FIELD_PRINTABLE_RECT,
-			PrintableRectFor(paper, item->Media()));
+			PrintableRectFor(CurrentQueue(fSettings), paper, item->Media()));
 		fSettings->RemoveName("media");
 		fSettings->AddString("media", item->Media());
 	}
@@ -371,7 +404,7 @@ PageSetupWindow::_UpdatePreview()
 JobSetupWindow::JobSetupWindow(BMessage* settings, bool* canceled,
 	sem_id done)
 	:
-	BWindow(BRect(0, 0, 100, 100), B_TRANSLATE("Print"),
+	BWindow(BRect(0, 0, 380, 100), B_TRANSLATE("Print"),
 		B_TITLED_WINDOW_LOOK, B_MODAL_APP_WINDOW_FEEL,
 		B_NOT_RESIZABLE | B_NOT_ZOOMABLE | B_NOT_MINIMIZABLE
 			| B_AUTO_UPDATE_SIZE_LIMITS | B_CLOSE_ON_ESCAPE),
@@ -379,6 +412,10 @@ JobSetupWindow::JobSetupWindow(BMessage* settings, bool* canceled,
 	fCanceled(canceled),
 	fDone(done),
 	fFinished(false),
+	fPrinterMenu(NULL),
+	fSaveField(NULL),
+	fChooseButton(NULL),
+	fSavePanel(NULL),
 	fCopiesField(NULL),
 	fFirstField(NULL),
 	fLastField(NULL)
@@ -396,11 +433,40 @@ JobSetupWindow::JobSetupWindow(BMessage* settings, bool* canceled,
 		settings->FindInt32(PSRV_FIELD_LAST_PAGE, &last);
 	}
 
-	BStringView* printerLabel = new BStringView("printerLabel",
-		B_TRANSLATE("Printer:"));
-	BStringView* printerName = new BStringView("printerName",
-		printer != NULL && printer[0] != '\0'
-			? printer : B_TRANSLATE("(default)"));
+	// One entry per queue, the current one marked. Without any queue the
+	// menu stays empty and the dialog falls back to the default.
+	fPrinterMenu = new BPopUpMenu("printer");
+	{
+		CupsBridge bridge;
+		const int32 kMaxQueues = 64;
+		printcups_queue_info* queues = new printcups_queue_info[kMaxQueues];
+		int count = (int)bridge.ListQueues(queues, kMaxQueues);
+
+		char defaultName[256];
+		defaultName[0] = '\0';
+		if (printer == NULL || printer[0] == '\0')
+			bridge.DefaultQueue(defaultName, sizeof(defaultName));
+		const char* current = (printer != NULL && printer[0] != '\0')
+			? printer : defaultName;
+
+		for (int i = 0; i < count; i++) {
+			BMessage* itemMessage = new BMessage(kMsgJobSetupPrinter);
+			itemMessage->AddBool("pdf",
+				strncasecmp(queues[i].uri, "cups-pdf:", 9) == 0);
+			BMenuItem* item = new BMenuItem(queues[i].name, itemMessage);
+			fPrinterMenu->AddItem(item);
+			if (strcmp(queues[i].name, current) == 0)
+				item->SetMarked(true);
+		}
+		delete[] queues;
+		if (fPrinterMenu->CountItems() > 0 && fPrinterMenu->FindMarked() == NULL)
+			fPrinterMenu->ItemAt(0)->SetMarked(true);
+		fPrinterMenu->SetTargetForItems(this);
+	}
+	BMenuField* printerField = new BMenuField("printerField",
+		B_TRANSLATE("Printer:"), fPrinterMenu);
+	if (fPrinterMenu->CountItems() == 0)
+		printerField->SetEnabled(false);
 
 	BString text;
 	text << (copies > 0 ? copies : 1);
@@ -420,6 +486,17 @@ JobSetupWindow::JobSetupWindow(BMessage* settings, bool* canceled,
 		text.String(), NULL);
 	fLastField->SetToolTip(B_TRANSLATE("Leave empty to print to the end."));
 
+	// Where the PDF goes when the chosen printer is the virtual PDF one;
+	// otherwise cups-pdf drops it in ~/PDF under a name the user never sees.
+	fSaveField = new BTextControl("save", B_TRANSLATE("Save as:"),
+		_DefaultSavePath().String(), NULL);
+	// Without a minimum the box shrinks to a few characters and the path is
+	// cut off, so the user cannot tell where the PDF will end up.
+	fSaveField->SetExplicitMinSize(BSize(380, B_SIZE_UNSET));
+	fSaveField->SetToolTip(fSaveField->Text());
+	fChooseButton = new BButton("choose", B_TRANSLATE("Choose" B_UTF8_ELLIPSIS),
+		new BMessage(kMsgJobSetupChoose));
+
 	BButton* okButton = new BButton("ok", B_TRANSLATE("Print"),
 		new BMessage(kMsgJobSetupOk));
 	BButton* cancelButton = new BButton("cancel", B_TRANSLATE("Cancel"),
@@ -428,11 +505,12 @@ JobSetupWindow::JobSetupWindow(BMessage* settings, bool* canceled,
 	BLayoutBuilder::Group<>(this, B_VERTICAL)
 		.SetInsets(B_USE_WINDOW_SPACING)
 		.AddGrid()
-			.Add(printerLabel, 0, 0)
-			.Add(printerName, 1, 0)
+			.AddMenuField(printerField, 0, 0)
 			.AddTextControl(fCopiesField, 0, 1)
 			.AddTextControl(fFirstField, 0, 2)
 			.AddTextControl(fLastField, 0, 3)
+			.AddTextControl(fSaveField, 0, 4)
+			.Add(fChooseButton, 2, 4)
 		.End()
 		.AddGroup(B_HORIZONTAL)
 			.AddGlue()
@@ -441,7 +519,77 @@ JobSetupWindow::JobSetupWindow(BMessage* settings, bool* canceled,
 		.End();
 
 	okButton->MakeDefault(true);
+	_UpdateSaveControls();
 	CenterOnScreen();
+}
+
+
+JobSetupWindow::~JobSetupWindow()
+{
+	delete fSavePanel;
+}
+
+
+bool
+JobSetupWindow::_PdfPrinterSelected() const
+{
+	BMenuItem* item = fPrinterMenu->FindMarked();
+	bool pdf = false;
+	if (item != NULL && item->Message() != NULL)
+		item->Message()->FindBool("pdf", &pdf);
+	return pdf;
+}
+
+
+void
+JobSetupWindow::_UpdateSaveControls()
+{
+	bool pdf = _PdfPrinterSelected();
+	fSaveField->SetEnabled(pdf);
+	fChooseButton->SetEnabled(pdf);
+}
+
+
+BString
+JobSetupWindow::_DefaultSavePath() const
+{
+	BString name("Untitled");
+	app_info info;
+	if (be_app != NULL && be_app->GetAppInfo(&info) == B_OK
+		&& info.ref.name != NULL) {
+		name = info.ref.name;
+	}
+
+	BPath home;
+	if (find_directory(B_USER_DIRECTORY, &home) != B_OK)
+		return BString(name) << ".pdf";
+
+	BString path(home.Path());
+	path << "/" << name << ".pdf";
+	return path;
+}
+
+
+void
+JobSetupWindow::_ChooseFile()
+{
+	if (fSavePanel == NULL) {
+		BMessenger target(this);
+		fSavePanel = new BFilePanel(B_SAVE_PANEL, &target, NULL, B_FILE_NODE,
+			false, NULL, NULL, true);
+	}
+
+	BPath current(fSaveField->Text());
+	BPath parent;
+	if (current.InitCheck() == B_OK && current.GetParent(&parent) == B_OK) {
+		BEntry directory(parent.Path());
+		entry_ref ref;
+		if (directory.GetRef(&ref) == B_OK)
+			fSavePanel->SetPanelDirectory(&ref);
+	}
+	fSavePanel->SetSaveText(current.Leaf() != NULL
+		? current.Leaf() : "Untitled.pdf");
+	fSavePanel->Show();
 }
 
 
@@ -449,7 +597,37 @@ void
 JobSetupWindow::MessageReceived(BMessage* message)
 {
 	switch (message->what) {
+		case kMsgJobSetupPrinter:
+			_UpdateSaveControls();
+			break;
+
+		case kMsgJobSetupChoose:
+			_ChooseFile();
+			break;
+
+		case B_SAVE_REQUESTED:
+		{
+			entry_ref directory;
+			const char* name = NULL;
+			if (message->FindRef("directory", &directory) == B_OK
+				&& message->FindString("name", &name) == B_OK
+				&& name != NULL) {
+				BPath path(&directory);
+				if (path.Append(name) == B_OK) {
+					fSaveField->SetText(path.Path());
+					fSaveField->SetToolTip(path.Path());
+				}
+			}
+			break;
+		}
+
 		case kMsgJobSetupOk:
+			// Printing to PDF needs a destination; ask for one rather than
+			// writing somewhere the user did not pick.
+			if (_PdfPrinterSelected() && fSaveField->Text()[0] == '\0') {
+				_ChooseFile();
+				break;
+			}
 			_UpdateSettings();
 			_Finish(false);
 			break;
@@ -503,6 +681,31 @@ JobSetupWindow::_UpdateSettings()
 {
 	if (fSettings == NULL)
 		return;
+
+	// A different printer brings its own paper, margins, resolution and
+	// media, so refresh those from it. The page setup choice for the old
+	// printer is replaced on purpose: its paper may not exist on the new one.
+	BMenuItem* chosen = fPrinterMenu->FindMarked();
+	if (chosen != NULL) {
+		const char* previous = CurrentQueue(fSettings);
+		if (strcmp(previous, chosen->Label()) != 0) {
+			fSettings->RemoveName(PSRV_FIELD_CURRENT_PRINTER);
+			fSettings->AddString(PSRV_FIELD_CURRENT_PRINTER, chosen->Label());
+			printcups_default_settings(fSettings);
+		}
+	}
+
+	fSettings->RemoveName(PRINTCUPS_FIELD_SAVE_PATH);
+	if (_PdfPrinterSelected()) {
+		BString path(fSaveField->Text());
+		path.Trim();
+		if (!path.IsEmpty()) {
+			if (path.Length() < 4
+				|| path.IFindLast(".pdf") != path.Length() - 4)
+				path << ".pdf";
+			fSettings->AddString(PRINTCUPS_FIELD_SAVE_PATH, path.String());
+		}
+	}
 
 	int32 copies = atoi(fCopiesField->Text());
 	int32 first = atoi(fFirstField->Text());

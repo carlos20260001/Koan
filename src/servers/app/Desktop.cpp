@@ -3145,7 +3145,7 @@ Desktop::FindWindowByClientToken(int32 token, team_id teamID)
 	for (Window *window = fAllWindows.FirstWindow(); window != NULL;
 			window = window->NextWindow(kAllWindowList)) {
 		if (window->ServerWindow()->ClientToken() == token
-			&& window->ServerWindow()->ClientTeam() == teamID) {
+			&& window->ServerWindow()->PresentedTeam() == teamID) {
 			return window;
 		}
 	}
@@ -3281,7 +3281,7 @@ Desktop::MinimizeApplication(team_id team)
 
 	for (Window *window = fAllWindows.FirstWindow(); window != NULL;
 			window = window->NextWindow(kAllWindowList)) {
-		if (window->ServerWindow()->ClientTeam() != team)
+		if (window->ServerWindow()->PresentedTeam() != team)
 			continue;
 
 		window->ServerWindow()->NotifyMinimize(true);
@@ -3299,7 +3299,7 @@ Desktop::BringApplicationToFront(team_id team)
 
 	for (Window *window = fAllWindows.FirstWindow(); window != NULL;
 			window = window->NextWindow(kAllWindowList)) {
-		if (window->ServerWindow()->ClientTeam() != team)
+		if (window->ServerWindow()->PresentedTeam() != team)
 			continue;
 
 		window->ServerWindow()->NotifyMinimize(false);
@@ -3347,7 +3347,7 @@ Desktop::WriteWindowList(team_id team, BPrivate::LinkSender& sender)
 
 	for (Window *window = fAllWindows.FirstWindow(); window != NULL;
 			window = window->NextWindow(kAllWindowList)) {
-		if (team < B_OK || window->ServerWindow()->ClientTeam() == team)
+		if (team < B_OK || window->ServerWindow()->PresentedTeam() == team)
 			count++;
 	}
 
@@ -3359,7 +3359,7 @@ Desktop::WriteWindowList(team_id team, BPrivate::LinkSender& sender)
 	// first write the windows of the current workspace correctly ordered
 	for (Window *window = CurrentWindows().LastWindow(); window != NULL;
 			window = window->PreviousWindow(fCurrentWorkspace)) {
-		if (team >= B_OK && window->ServerWindow()->ClientTeam() != team)
+		if (team >= B_OK && window->ServerWindow()->PresentedTeam() != team)
 			continue;
 
 		sender.Attach<int32>(window->ServerWindow()->ServerToken());
@@ -3368,7 +3368,7 @@ Desktop::WriteWindowList(team_id team, BPrivate::LinkSender& sender)
 	// then write all the other windows
 	for (Window *window = fAllWindows.FirstWindow(); window != NULL;
 			window = window->NextWindow(kAllWindowList)) {
-		if ((team >= B_OK && window->ServerWindow()->ClientTeam() != team)
+		if ((team >= B_OK && window->ServerWindow()->PresentedTeam() != team)
 			|| window->InWorkspace(fCurrentWorkspace))
 			continue;
 
@@ -3492,7 +3492,7 @@ Desktop::WriteApplicationOrder(int32 workspace, BPrivate::LinkSender& sender)
 
 	for (Window *window = _Windows(workspace).LastWindow(); window != NULL;
 			window = window->PreviousWindow(workspace)) {
-		team_id team = window->ServerWindow()->ClientTeam();
+		team_id team = window->ServerWindow()->PresentedTeam();
 		if (count > 1) {
 			// see if we already have this team
 			bool found = false;
@@ -4749,7 +4749,7 @@ Desktop::_ActivateApp(team_id team)
 	for (Window* window = CurrentWindows().LastWindow(); window != NULL;
 			window = window->PreviousWindow(fCurrentWorkspace)) {
 		if (!window->IsHidden() && window->IsNormal()
-			&& window->ServerWindow()->ClientTeam() == team) {
+			&& window->ServerWindow()->PresentedTeam() == team) {
 			ActivateWindow(window);
 			return B_OK;
 		}
@@ -4762,7 +4762,7 @@ Desktop::_ActivateApp(team_id team)
 		// if window is a normal window of the team, and not hidden,
 		// we've found our target
 		if (!window->IsHidden() && window->IsNormal()
-			&& window->ServerWindow()->ClientTeam() == team) {
+			&& window->ServerWindow()->PresentedTeam() == team) {
 			ActivateWindow(window);
 			return B_OK;
 		}

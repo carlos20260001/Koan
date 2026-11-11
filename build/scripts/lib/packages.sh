@@ -11,24 +11,62 @@ get_kernel_flavour() {
     fi
 }
 
+# Kernel image metapackage the image installs; the vos deb depends on it.
+get_kernel_package() {
+    _arch="$1"
+    case "$_arch" in
+        amd64)     printf 'linux-image-%s' "$(get_kernel_flavour)" ;;
+        arm64)     printf 'linux-image-arm64' ;;
+        arm|arm32) printf 'linux-image-armmp' ;;
+        riscv64)   printf 'linux-image-riscv64' ;;
+        *)         die "No kernel image package for architecture: $_arch" ;;
+    esac
+}
+
+# Kernel images a system may carry. amd64 lists both flavours (trixie RT,
+# testing generic): the deb is packed before the suite is known.
+get_kernel_packages() {
+    _arch="$1"
+    get_kernel_package "$_arch"
+    if [ "$_arch" != amd64 ]; then
+        return 0
+    fi
+    _first="$(get_kernel_package amd64)"
+    for _f in rt-amd64 amd64; do
+        _p="linux-image-$_f"
+        if [ "$_p" != "$_first" ]; then
+            printf ' %s' "$_p"
+        fi
+    done
+}
+
+# Debian renamed the VP8 runtime in testing: libvpx9 on trixie, libvpx12 after.
+get_libvpx_runtime() {
+    if [ "${VOS_BASE_SUITE:-trixie}" = "trixie" ]; then
+        printf '%s' 'libvpx9'
+    else
+        printf '%s' 'libvpx12'
+    fi
+}
+
 get_base_packages() {
     _arch="$1"
     case "$_arch" in
         amd64)
             printf '%s' \
-                "apt-utils dialog linux-image-$(get_kernel_flavour) systemd-sysv systemd-timesyncd" \
+                "apt-utils dialog $(get_kernel_package amd64) systemd-sysv systemd-timesyncd" \
                 " polkitd pkexec sudo dbus-user-session seatd zstd" \
-                " network-manager modemmanager libmm-glib0 libre1 libvpx9 mobile-broadband-provider-info bluez bluez-obexd net-tools wireless-tools wireless-regdb wpasupplicant rfkill curl openssh-client" \
+                " network-manager modemmanager libmm-glib0 libre1 $(get_libvpx_runtime) mobile-broadband-provider-info bluez bluez-obexd net-tools wireless-tools wireless-regdb wpasupplicant rfkill curl openssh-client" \
                 " network-manager-openvpn network-manager-l2tp network-manager-openconnect" \
                 " procps vim-tiny libbinutils openssh-server locales libnss-myhostname xdg-user-dirs ca-certificates iputils-ping linux-sysctl-defaults xfsprogs" \
                 " fdisk e2fsprogs btrfs-progs cryptsetup dosfstools" \
                 " fortune-mod ncurses-bin rsync" \
-                " pipewire pipewire-alsa pipewire-bin wireplumber rtkit libspa-0.2-bluetooth gstreamer1.0-pipewire gstreamer1.0-plugins-base gstreamer1.0-plugins-good gstreamer1.0-plugins-bad gstreamer1.0-libav" \
+                " pipewire pipewire-alsa pipewire-bin wireplumber rtkit libspa-0.2-bluetooth gstreamer1.0-pipewire gstreamer1.0-plugins-base gstreamer1.0-plugins-good gstreamer1.0-plugins-bad gstreamer1.0-plugins-ugly gstreamer1.0-libav" \
                 " alsa-ucm-conf alsa-topology-conf gstreamer1.0-gl mesa-va-drivers" \
                 " libcamera-ipa libspa-0.2-libcamera libcamera-v4l2 v4l-utils" \
                 " swh-plugins x42-plugins frei0r-plugins" \
                 " cups cups-filters printer-driver-gutenprint printer-driver-cups-pdf" \
-                " libsane1 libsane-common sane-utils sane-airscan ipp-usb" \
+                " libsane1 libsane-common sane-utils sane-airscan ipp-usb libnss-mdns" \
                 " firmware-iwlwifi firmware-atheros firmware-realtek firmware-libertas firmware-brcm80211 firmware-misc-nonfree" \
                 " firmware-intel-graphics firmware-amd-graphics firmware-nvidia-graphics firmware-mediatek bluez-firmware" \
                 " firmware-sof-signed firmware-intel-sound firmware-cirrus intel-microcode amd64-microcode" \
@@ -39,19 +77,19 @@ get_base_packages() {
             ;;
         arm64)
             printf '%s' \
-                "apt-utils dialog linux-image-arm64 systemd-sysv systemd-timesyncd" \
+                "apt-utils dialog $(get_kernel_package arm64) systemd-sysv systemd-timesyncd" \
                 " polkitd pkexec sudo dbus-user-session seatd zstd" \
-                " network-manager modemmanager libmm-glib0 libre1 libvpx9 mobile-broadband-provider-info eg25-manager bluez bluez-obexd net-tools wireless-tools wireless-regdb wpasupplicant rfkill curl openssh-client" \
+                " network-manager modemmanager libmm-glib0 libre1 $(get_libvpx_runtime) mobile-broadband-provider-info eg25-manager bluez bluez-obexd net-tools wireless-tools wireless-regdb wpasupplicant rfkill curl openssh-client" \
                 " network-manager-openvpn network-manager-l2tp network-manager-openconnect" \
                 " procps vim-tiny libbinutils openssh-server locales libnss-myhostname xdg-user-dirs ca-certificates iputils-ping linux-sysctl-defaults xfsprogs" \
                 " fdisk e2fsprogs btrfs-progs cryptsetup dosfstools" \
                 " fortune-mod ncurses-bin rsync" \
-                " pipewire pipewire-alsa pipewire-bin wireplumber rtkit libspa-0.2-bluetooth gstreamer1.0-pipewire gstreamer1.0-plugins-base gstreamer1.0-plugins-good gstreamer1.0-plugins-bad gstreamer1.0-libav" \
+                " pipewire pipewire-alsa pipewire-bin wireplumber rtkit libspa-0.2-bluetooth gstreamer1.0-pipewire gstreamer1.0-plugins-base gstreamer1.0-plugins-good gstreamer1.0-plugins-bad gstreamer1.0-plugins-ugly gstreamer1.0-libav" \
                 " alsa-ucm-conf alsa-topology-conf gstreamer1.0-gl mesa-va-drivers libgl1-mesa-dri" \
                 " libcamera-ipa libspa-0.2-libcamera libcamera-v4l2 v4l-utils" \
                 " swh-plugins x42-plugins frei0r-plugins" \
                 " cups cups-filters printer-driver-gutenprint printer-driver-cups-pdf" \
-                " libsane1 libsane-common sane-utils sane-airscan ipp-usb" \
+                " libsane1 libsane-common sane-utils sane-airscan ipp-usb libnss-mdns" \
                 " libwpewebkit-2.0-1 libwpe-1.0-1 libwpebackend-fdo-1.0-1 libetpan20t64 libcurl3t64-gnutls" \
                 " firmware-brcm80211 firmware-misc-nonfree firmware-realtek firmware-atheros firmware-libertas bluez-firmware" \
                 " gpsd" \
@@ -59,36 +97,36 @@ get_base_packages() {
             ;;
         arm32)
             printf '%s' \
-                "apt-utils dialog linux-image-armmp systemd-sysv systemd-timesyncd" \
+                "apt-utils dialog $(get_kernel_package arm32) systemd-sysv systemd-timesyncd" \
                 " polkitd pkexec sudo dbus-user-session seatd zstd" \
-                " network-manager modemmanager libmm-glib0 libre1 libvpx9 mobile-broadband-provider-info bluez bluez-obexd net-tools wireless-tools wireless-regdb wpasupplicant rfkill curl openssh-client" \
+                " network-manager modemmanager libmm-glib0 libre1 $(get_libvpx_runtime) mobile-broadband-provider-info bluez bluez-obexd net-tools wireless-tools wireless-regdb wpasupplicant rfkill curl openssh-client" \
                 " procps vim-tiny libbinutils openssh-server locales libnss-myhostname xdg-user-dirs ca-certificates iputils-ping linux-sysctl-defaults" \
                 " fdisk e2fsprogs" \
                 " fortune-mod ncurses-bin rsync" \
-                " pipewire pipewire-alsa pipewire-bin wireplumber rtkit libspa-0.2-bluetooth gstreamer1.0-pipewire gstreamer1.0-plugins-base gstreamer1.0-plugins-good gstreamer1.0-plugins-bad gstreamer1.0-libav" \
+                " pipewire pipewire-alsa pipewire-bin wireplumber rtkit libspa-0.2-bluetooth gstreamer1.0-pipewire gstreamer1.0-plugins-base gstreamer1.0-plugins-good gstreamer1.0-plugins-bad gstreamer1.0-plugins-ugly gstreamer1.0-libav" \
                 " alsa-ucm-conf alsa-topology-conf gstreamer1.0-gl mesa-va-drivers" \
                 " libcamera-ipa libspa-0.2-libcamera libcamera-v4l2 v4l-utils" \
                 " swh-plugins frei0r-plugins" \
                 " cups cups-filters printer-driver-gutenprint printer-driver-cups-pdf" \
-                " libsane1 libsane-common sane-utils sane-airscan ipp-usb" \
+                " libsane1 libsane-common sane-utils sane-airscan ipp-usb libnss-mdns" \
                 " libwpewebkit-2.0-1 libwpe-1.0-1 libwpebackend-fdo-1.0-1 libetpan20t64 libcurl3t64-gnutls" \
                 " gpsd" \
                 " grub-common hwdata"
             ;;
         riscv64)
             printf '%s' \
-                "apt-utils dialog linux-image-riscv64 systemd-sysv systemd-timesyncd" \
+                "apt-utils dialog $(get_kernel_package riscv64) systemd-sysv systemd-timesyncd" \
                 " polkitd pkexec sudo dbus-user-session seatd zstd" \
-                " network-manager modemmanager libmm-glib0 libre1 libvpx9 mobile-broadband-provider-info bluez bluez-obexd net-tools wireless-tools wireless-regdb wpasupplicant rfkill curl openssh-client" \
+                " network-manager modemmanager libmm-glib0 libre1 $(get_libvpx_runtime) mobile-broadband-provider-info bluez bluez-obexd net-tools wireless-tools wireless-regdb wpasupplicant rfkill curl openssh-client" \
                 " procps vim-tiny libbinutils openssh-server locales libnss-myhostname xdg-user-dirs ca-certificates iputils-ping linux-sysctl-defaults xfsprogs" \
                 " fdisk e2fsprogs btrfs-progs cryptsetup dosfstools" \
                 " fortune-mod ncurses-bin rsync" \
-                " pipewire pipewire-alsa pipewire-bin wireplumber rtkit libspa-0.2-bluetooth gstreamer1.0-pipewire gstreamer1.0-plugins-base gstreamer1.0-plugins-good gstreamer1.0-plugins-bad gstreamer1.0-libav" \
+                " pipewire pipewire-alsa pipewire-bin wireplumber rtkit libspa-0.2-bluetooth gstreamer1.0-pipewire gstreamer1.0-plugins-base gstreamer1.0-plugins-good gstreamer1.0-plugins-bad gstreamer1.0-plugins-ugly gstreamer1.0-libav" \
                 " alsa-ucm-conf alsa-topology-conf gstreamer1.0-gl mesa-va-drivers" \
                 " libcamera-ipa libspa-0.2-libcamera libcamera-v4l2 v4l-utils" \
                 " swh-plugins frei0r-plugins" \
                 " cups cups-filters printer-driver-gutenprint printer-driver-cups-pdf" \
-                " libsane1 libsane-common sane-utils sane-airscan ipp-usb" \
+                " libsane1 libsane-common sane-utils sane-airscan ipp-usb libnss-mdns" \
                 " libwpewebkit-2.0-1 libwpe-1.0-1 libwpebackend-fdo-1.0-1 libetpan20t64 libcurl3t64-gnutls" \
                 " gpsd" \
                 " grub-common grub2-common grub-efi-riscv64-bin hwdata"
@@ -184,23 +222,23 @@ get_raw_image_packages() {
         amd64)
             printf '%s' \
                 "systemd systemd-sysv dbus-user-session polkitd pkexec sudo accountsservice libpam-pwquality libpwquality-tools libpwquality-dev systemd-timesyncd locales console-setup keyboard-configuration xdg-user-dirs ca-certificates iputils-ping vim net-tools iproute2 openssh-server" \
-                " linux-image-$(get_kernel_flavour) grub-common grub2-common" \
+                " $(get_kernel_package amd64) grub-common grub2-common" \
                 " grub-efi-amd64-bin grub-efi-ia32-bin grub-pc-bin xfsprogs"
             ;;
         arm64)
             printf '%s' \
                 "systemd systemd-sysv dbus-user-session polkitd pkexec sudo accountsservice libpam-pwquality libpwquality-tools libpwquality-dev systemd-timesyncd locales console-setup keyboard-configuration xdg-user-dirs ca-certificates iputils-ping vim net-tools iproute2 openssh-server" \
-                " linux-image-arm64 grub-common grub2-common grub-efi-arm64 grub-efi-arm64-bin xfsprogs"
+                " $(get_kernel_package arm64) grub-common grub2-common grub-efi-arm64 grub-efi-arm64-bin xfsprogs"
             ;;
         arm32)
             printf '%s' \
                 "systemd systemd-sysv dbus-user-session polkitd pkexec sudo accountsservice libpam-pwquality libpwquality-tools libpwquality-dev systemd-timesyncd locales console-setup keyboard-configuration xdg-user-dirs ca-certificates iputils-ping vim net-tools iproute2 openssh-server" \
-                " linux-image-armmp xfsprogs"
+                " $(get_kernel_package arm32) xfsprogs"
             ;;
         riscv64)
             printf '%s' \
                 "systemd systemd-sysv dbus-user-session polkitd pkexec sudo accountsservice libpam-pwquality libpwquality-tools libpwquality-dev systemd-timesyncd locales console-setup keyboard-configuration xdg-user-dirs ca-certificates iputils-ping vim net-tools iproute2 openssh-server" \
-                " linux-image-riscv64 grub-common grub2-common grub-efi-riscv64 grub-efi-riscv64-bin xfsprogs"
+                " $(get_kernel_package riscv64) grub-common grub2-common grub-efi-riscv64 grub-efi-riscv64-bin xfsprogs"
             ;;
         *)
             die "No raw image package list for architecture: $_arch"
