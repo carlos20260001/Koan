@@ -26,6 +26,9 @@ Application(test_screen_scale_transform
 	INCLUDES ${CMAKE_SOURCE_DIR}/src/servers/app)
 UsePrivateHeaders(test_screen_scale_transform interface)
 
+# BBitmap density and screen-scale icon bitmaps (BIconUtils).
+Application(test_icon_density SOURCES test_icon_density.cpp)
+
 # Fractional-scale render/hit-test consistency: device transform order,
 # region edge partition vs pointer hit-test, move blit vs repaint.
 Application(test_fractional_scaling

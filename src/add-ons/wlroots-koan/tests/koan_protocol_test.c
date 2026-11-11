@@ -166,6 +166,7 @@ static void *sFrame;
 static int32_t sFrameWidth;
 static int32_t sFrameHeight;
 static int32_t sFrameStride;
+static int32_t sFrameScale;
 
 static void
 fake_create_window(void *userdata, struct koan_queue *queue,
@@ -215,7 +216,7 @@ fake_set_size(void *userdata, struct koan_queue *queue, void *window,
 static void
 fake_set_buffer(void *userdata, struct koan_queue *queue, void *window,
 	void *data, int32_t width, int32_t height, int32_t stride,
-	uint32_t format)
+	uint32_t format, int32_t scale)
 {
 	(void)userdata;
 	(void)queue;
@@ -228,6 +229,7 @@ fake_set_buffer(void *userdata, struct koan_queue *queue, void *window,
 	sFrameWidth = width;
 	sFrameHeight = height;
 	sFrameStride = stride;
+	sFrameScale = scale;
 	pthread_mutex_unlock(&sFrameLock);
 	atomic_fetch_add(&sSetBufferCount, 1);
 }
@@ -1180,6 +1182,11 @@ struct output_info {
 	char name[64];
 	char description[128];
 	bool done;
+	int32_t width;              /* current mode */
+	int32_t height;
+	int32_t refresh;
+	int32_t scale;
+	int modes;                  /* wl_output.mode events received */
 };
 
 static void output_geometry(void *data, struct wl_output *o, int32_t x,
@@ -1193,7 +1200,14 @@ static void output_geometry(void *data, struct wl_output *o, int32_t x,
 static void output_mode(void *data, struct wl_output *o, uint32_t flags,
 	int32_t w, int32_t h, int32_t refresh)
 {
-	(void)data; (void)o; (void)flags; (void)w; (void)h; (void)refresh;
+	(void)o;
+	struct output_info *info = data;
+	if ((flags & WL_OUTPUT_MODE_CURRENT) == 0)
+		return;
+	info->width = w;
+	info->height = h;
+	info->refresh = refresh;
+	info->modes++;
 }
 
 static void output_done(void *data, struct wl_output *o)
@@ -1204,7 +1218,8 @@ static void output_done(void *data, struct wl_output *o)
 
 static void output_scale(void *data, struct wl_output *o, int32_t factor)
 {
-	(void)data; (void)o; (void)factor;
+	(void)o;
+	((struct output_info *)data)->scale = factor;
 }
 
 static void output_name(void *data, struct wl_output *o, const char *name)
@@ -1255,6 +1270,52 @@ test_output_v4(const char *socket)
 	conn_close(&c);
 }
 
+/* app_server reports the screen's mode with KOAN_CMD_OUTPUT_MODE
+ * (WaylandWindowBridge::ScreenChanged); bound clients must get it as the
+ * current wl_output mode and scale. */
+static void
+test_output_mode(const char *socket)
+{
+	struct conn c;
+	int count = 0;
+	const struct global *g = conn_open(&c, socket)
+		? find_global(&c, "wl_output", &count) : NULL;
+	if (g == NULL) {
+		result(ST_BLOCKED, "output-mode", "no wl_output");
+		conn_close(&c);
+		return;
+	}
+	struct output_info info = {0};
+	struct wl_output *output = wl_registry_bind(c.registry, g->name,
+		&wl_output_interface, g->version < 2 ? g->version : 2);
+	wl_output_add_listener(output, &sOutputListener, &info);
+	bool ok = settle(&c);
+	int initialModes = info.modes;
+
+	union koan_cmd_payload mode;
+	memset(&mode, 0, sizeof(mode));
+	mode.output_mode.width = 5120;
+	mode.output_mode.height = 2880;
+	mode.output_mode.refresh_mhz = 59951;
+	mode.output_mode.scale = 2.0f;
+	ok = ok && koan_queue_push(koan_adapter_queue(), KOAN_CMD_OUTPUT_MODE,
+		&mode, NULL);
+
+	/* The queue wakes the Wayland thread through its own fd, so the
+	 * events may trail a roundtrip. */
+	for (int i = 0; ok && i < 50 && info.modes == initialModes; i++) {
+		ok = settle(&c);
+		usleep(2000);
+	}
+	ok = ok && wl_display_get_error(c.display) == 0;
+	result(ok && info.width == 5120 && info.height == 2880
+			&& info.refresh == 59951 && info.scale == 2 ? ST_PASS : ST_FAIL,
+		"output-mode", "%s; current mode %dx%d@%d mHz, scale %d",
+		ok ? "connected" : "DISCONNECTED", info.width, info.height,
+		info.refresh, info.scale);
+	conn_close(&c);
+}
+
 static int
 run_core(void)
 {
@@ -1269,6 +1330,7 @@ run_core(void)
 	test_registry(s.socket);
 	test_negative(s.socket);
 	test_output_v4(s.socket);
+	test_output_mode(s.socket);
 
 	server_stop(&s);
 	result(ST_PASS, "server-shutdown", "terminated and destroyed");
@@ -2023,6 +2085,91 @@ test_nested_sync(struct conn *c, struct toplevel *t)
 	settle(c);
 }
 
+/* Sets the output's mode and scale as app_server does and waits until the
+ * Wayland thread has applied it (the queue has its own wake-up fd). */
+static bool
+set_output_scale(struct conn *c, float scale)
+{
+	union koan_cmd_payload mode;
+	memset(&mode, 0, sizeof(mode));
+	mode.output_mode.width = 2560;
+	mode.output_mode.height = 1440;
+	mode.output_mode.refresh_mhz = 60000;
+	mode.output_mode.scale = scale;
+	if (koan_queue_push(koan_adapter_queue(), KOAN_CMD_OUTPUT_MODE, &mode,
+			NULL) == NULL)
+		return false;
+	int32_t expected = scale > (int32_t)scale ? (int32_t)scale + 1
+		: (int32_t)scale;
+	for (int i = 0; i < 100; i++) {
+		if (!settle(c))
+			return false;
+		/* The output is only touched on the Wayland thread; the value
+		 * read here may lag but settles. */
+		if (koan_server_output_scale() == expected)
+			return true;
+		usleep(2000);
+	}
+	return false;
+}
+
+/* Commits a w x h buffer of one color with the given buffer scale and
+ * waits for the frame app_server would get. */
+static bool
+commit_scaled(struct conn *c, struct toplevel *t, int w, int h,
+	int32_t bufferScale, uint32_t color)
+{
+	int before = atomic_load(&sSetBufferCount);
+	wl_surface_set_buffer_scale(t->surface, bufferScale);
+	attach_color(c, t->surface, w, h, color);
+	wl_surface_commit(t->surface);
+	for (int i = 0; i < 200 && atomic_load(&sSetBufferCount) == before;
+			i++) {
+		if (!settle(c))
+			return false;
+		usleep(2000);
+	}
+	return atomic_load(&sSetBufferCount) != before;
+}
+
+/* At output scale 2 app_server gets the window content at 2 pixels per
+ * window coordinate unit: a client rendering at buffer scale 2 is copied
+ * 1:1, a client at buffer scale 1 is upscaled into the same frame. The
+ * window keeps its logical size (frame / scale). */
+static void
+test_compose_scale(struct conn *c, struct toplevel *t)
+{
+	if (!set_output_scale(c, 2.0f)) {
+		result(ST_FAIL, "compose-scale", "output scale never became 2");
+		return;
+	}
+
+	bool ok = commit_scaled(c, t, 128, 96, 2, COLOR_CHILD);
+	pthread_mutex_lock(&sFrameLock);
+	int32_t w = sFrameWidth, h = sFrameHeight, scale = sFrameScale;
+	pthread_mutex_unlock(&sFrameLock);
+	uint32_t corner = frame_pixel(127, 95);
+	result(ok && w == 128 && h == 96 && scale == 2 && corner == COLOR_CHILD
+			? ST_PASS : ST_FAIL, "compose-scale-hidpi-buffer",
+		"%s; frame %dx%d at scale %d, corner 0x%08x",
+		ok ? "delivered" : "NOT delivered", w, h, scale, corner);
+
+	ok = commit_scaled(c, t, 64, 48, 1, COLOR_ROOT);
+	pthread_mutex_lock(&sFrameLock);
+	w = sFrameWidth;
+	h = sFrameHeight;
+	scale = sFrameScale;
+	pthread_mutex_unlock(&sFrameLock);
+	corner = frame_pixel(127, 95);
+	result(ok && w == 128 && h == 96 && scale == 2 && corner == COLOR_ROOT
+			? ST_PASS : ST_FAIL, "compose-scale-lowdpi-buffer",
+		"%s; frame %dx%d at scale %d, corner 0x%08x",
+		ok ? "delivered" : "NOT delivered", w, h, scale, corner);
+
+	set_output_scale(c, 1.0f);
+	commit_scaled(c, t, 64, 48, 1, COLOR_ROOT);
+}
+
 static int
 run_compose(void)
 {
@@ -2044,6 +2191,7 @@ run_compose(void)
 	test_frame_loop(&c, &t);
 	test_frame_throttle(&c, &t);
 	test_nested_sync(&c, &t);
+	test_compose_scale(&c, &t);
 
 	struct conn after;
 	bool alive = conn_open(&after, s.socket);

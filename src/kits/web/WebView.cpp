@@ -514,12 +514,21 @@ send_fullscreen(const BMessenger& target, bool entered)
 #endif
 
 
+// Shown where no page frame covers the view yet.
+static const rgb_color kPageBackgroundColor = { 255, 255, 255, 255 };
+
+
 BWebView::BWebView(BRect frame, const char* name)
 	:
 	BView(frame, name, B_FOLLOW_LEFT_RIGHT | B_FOLLOW_TOP,
 		B_WILL_DRAW | B_FRAME_EVENTS | B_FULL_UPDATE_ON_RESIZE),
 	fImpl(new WebViewImpl())
 {
+	// Every page frame invalidates the view. With a view color, app_server
+	// erases the update region before Draw() puts the frame there, and a
+	// flip in between scans that erase out as a white flash. Draw() paints
+	// every pixel itself.
+	SetViewColor(B_TRANSPARENT_COLOR);
 }
 
 
@@ -675,7 +684,7 @@ BWebView::AttachedToWindow()
 	fImpl->fEventAdapter = new EventAdapter(fImpl->fBridge->backend);
 	fImpl->fEventAdapter->SetViewSize(w, h);
 	{
-		rgb_color c = ViewColor();
+		rgb_color c = kPageBackgroundColor;
 		fImpl->fCompositor->SetFillColor(0xFF000000 | (c.red << 16)
 			| (c.green << 8) | c.blue);
 	}
@@ -1573,11 +1582,14 @@ BWebView::Draw(BRect updateRect)
 				src.bottom = src.top + dst.Height();
 				DrawBitmap(front, src, dst);
 			}
-			SetLowColor(ViewColor());
+			SetLowColor(kPageBackgroundColor);
 			BRegion rest(Bounds());
 			if (dst.IsValid())
 				rest.Exclude(dst);
 			FillRegion(&rest, B_SOLID_LOW);
+		} else {
+			SetLowColor(kPageBackgroundColor);
+			FillRect(updateRect, B_SOLID_LOW);
 		}
 		fImpl->fCompositor->ReleaseFront();
 		Flush();

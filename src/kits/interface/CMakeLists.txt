@@ -13,6 +13,7 @@ target_sources(be PRIVATE
 	Alert.cpp
 	Alignment.cpp
 	Bitmap.cpp
+	IconScale.cpp
 	BMCPrivate.cpp
 	Box.cpp
 	Button.cpp

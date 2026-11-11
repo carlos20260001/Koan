@@ -21,6 +21,7 @@
 
 #include <algorithm>
 #include <limits.h>
+#include <math.h>
 #include <new>
 #include <stdio.h>
 #include <stdlib.h>
@@ -199,7 +200,8 @@ BBitmap::BBitmap(BRect bounds, uint32 flags, color_space colorSpace,
 	fServerToken(-1),
 	fFlags(0),
 	fWindow(NULL),
-	fInitError(B_NO_INIT)
+	fInitError(B_NO_INIT),
+	fDensity(1.0f)
 {
 	_InitObject(bounds, colorSpace, flags, bytesPerRow, screenID);
 }
@@ -228,7 +230,8 @@ BBitmap::BBitmap(BRect bounds, color_space colorSpace, bool acceptsViews,
 	fServerToken(-1),
 	fFlags(0),
 	fWindow(NULL),
-	fInitError(B_NO_INIT)
+	fInitError(B_NO_INIT),
+	fDensity(1.0f)
 {
 	int32 flags = (acceptsViews ? B_BITMAP_ACCEPTS_VIEWS : 0)
 		| (needsContiguous ? B_BITMAP_IS_CONTIGUOUS : 0);
@@ -258,7 +261,8 @@ BBitmap::BBitmap(const BBitmap* source, bool acceptsViews, bool needsContiguous)
 	fServerToken(-1),
 	fFlags(0),
 	fWindow(NULL),
-	fInitError(B_NO_INIT)
+	fInitError(B_NO_INIT),
+	fDensity(1.0f)
 {
 	if (source && source->IsValid()) {
 		int32 flags = (acceptsViews ? B_BITMAP_ACCEPTS_VIEWS : 0)
@@ -268,6 +272,7 @@ BBitmap::BBitmap(const BBitmap* source, bool acceptsViews, bool needsContiguous)
 		if (IsValid()) {
 			memcpy(Bits(), source->Bits(), min_c(BitsLength(),
 				source->BitsLength()));
+			fDensity = source->fDensity;
 		}
 	}
 }
@@ -286,7 +291,8 @@ BBitmap::BBitmap(const BBitmap& source, uint32 flags)
 	fServerToken(-1),
 	fFlags(0),
 	fWindow(NULL),
-	fInitError(B_NO_INIT)
+	fInitError(B_NO_INIT),
+	fDensity(1.0f)
 {
 	if (!source.IsValid())
 		return;
@@ -294,8 +300,10 @@ BBitmap::BBitmap(const BBitmap& source, uint32 flags)
 	_InitObject(source.Bounds(), source.ColorSpace(), flags,
 		source.BytesPerRow(), B_MAIN_SCREEN_ID);
 
-	if (IsValid())
+	if (IsValid()) {
 		memcpy(Bits(), source.Bits(), min_c(BitsLength(), source.BitsLength()));
+		fDensity = source.fDensity;
+	}
 }
 
 
@@ -312,7 +320,8 @@ BBitmap::BBitmap(const BBitmap& source)
 	fServerToken(-1),
 	fFlags(0),
 	fWindow(NULL),
-	fInitError(B_NO_INIT)
+	fInitError(B_NO_INIT),
+	fDensity(1.0f)
 {
 	*this = source;
 }
@@ -333,7 +342,8 @@ BBitmap::BBitmap(area_id area, ptrdiff_t areaOffset, BRect bounds,
 	fServerToken(-1),
 	fFlags(0),
 	fWindow(NULL),
-	fInitError(B_NO_INIT)
+	fInitError(B_NO_INIT),
+	fDensity(1.0f)
 {
 	_InitObject(bounds, colorSpace, flags,
 		bytesPerRow, screenID, area, areaOffset);
@@ -365,7 +375,8 @@ BBitmap::BBitmap(BMessage* data)
 	fServerToken(-1),
 	fFlags(0),
 	fWindow(NULL),
-	fInitError(B_NO_INIT)
+	fInitError(B_NO_INIT),
+	fDensity(1.0f)
 {
 	int32 flags;
 	if (data->FindInt32("_bmflags", &flags) != B_OK) {
@@ -622,6 +633,44 @@ BRect
 BBitmap::Bounds() const
 {
 	return fBounds;
+}
+
+
+/*!	rief Returns how many pixels of the bitmap make up one view coordinate
+	unit: 1 for ordinary bitmaps, the screen scale for icons rendered with
+	BIconUtils::CreateIconBitmap().
+*/
+float
+BBitmap::Density() const
+{
+	return fDensity > 0.0f ? fDensity : 1.0f;
+}
+
+
+/*!	rief Sets the bitmap's density (pixels per view coordinate unit).
+	Values of 0 or less reset it to 1. Only the drawing size changes:
+	DrawBitmap() at a point covers LogicalBounds() instead of Bounds().
+*/
+void
+BBitmap::SetDensity(float density)
+{
+	fDensity = density > 0.0f ? density : 1.0f;
+}
+
+
+/*!	rief Returns the area the bitmap covers when drawn at a point, in view
+	coordinates: Bounds() divided by Density().
+*/
+BRect
+BBitmap::LogicalBounds() const
+{
+	float density = Density();
+	if (density == 1.0f)
+		return fBounds;
+
+	return BRect(fBounds.left / density, fBounds.top / density,
+		roundf((fBounds.right + 1) / density) - 1,
+		roundf((fBounds.bottom + 1) / density) - 1);
 }
 
 
@@ -1015,8 +1064,10 @@ BBitmap::operator=(const BBitmap& source)
 
 	_InitObject(source.Bounds(), source.ColorSpace(), source.Flags(),
 		source.BytesPerRow(), B_MAIN_SCREEN_ID);
-	if (IsValid())
+	if (IsValid()) {
 		memcpy(Bits(), source.Bits(), min_c(BitsLength(), source.BitsLength()));
+		fDensity = source.fDensity;
+	}
 
 	return *this;
 }
@@ -1077,6 +1128,7 @@ BBitmap::_InitObject(BRect bounds, color_space colorSpace, uint32 flags,
 #endif	// RUN_WITHOUT_APP_SERVER
 
 	_CleanUp();
+	fDensity = 1.0f;
 
 	// check params
 	if (!bounds.IsValid() || !bitmaps_support_space(colorSpace, NULL)) {

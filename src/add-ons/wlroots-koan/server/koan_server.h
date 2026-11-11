@@ -54,10 +54,16 @@ bool koan_server_dispatch(struct wl_display *display, int timeout_ms);
  * Intended for standalone testing or a dedicated dispatch thread. */
 void koan_server_run(struct wl_display *display);
 
-/* Set the dimensions and scale of the Koan wl_output. Call this from
- * app_server once real display configuration is available. */
+/* Set the mode (framebuffer pixels, refresh in mHz, 0 for 60 Hz) and scale
+ * of the Koan wl_output. Wayland thread only, or before it starts:
+ * app_server sends KOAN_CMD_OUTPUT_MODE instead. */
 bool koan_server_set_output_dimensions(int32_t width, int32_t height,
-				       float scale);
+				       int32_t refresh_mhz, float scale);
+
+/* The integer scale clients are told to render at (wl_output.scale: the
+ * output scale rounded up, at least 1). Client content is composed at this
+ * many pixels per logical unit. Wayland thread only. */
+int32_t koan_server_output_scale(void);
 
 /* Input from app_server's native window, on the Wayland thread. The
  * toplevel must be known to be alive (the adapter checks). Coordinates are

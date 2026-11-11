@@ -6,7 +6,9 @@
 #define _ICON_UTILS_H
 
 
+#include <GraphicsDefs.h>
 #include <Mime.h>
+#include <Size.h>
 
 class BBitmap;
 class BNode;
@@ -37,6 +39,15 @@ public:
 									icon_size size, BBitmap* icon);
 
 	static	status_t			GetSystemIcon(const char* iconName, BBitmap* result);
+
+	// Screen-scale aware icons. IconScale() is the main screen's scale
+	// (1 without an app_server connection). CreateIconBitmap() returns a
+	// bitmap of logicalSize times that scale, with its density set, so it
+	// draws at logicalSize; fill it with GetVectorIcon() or GetIcon().
+	static	float				IconScale();
+	static	BBitmap*			CreateIconBitmap(BSize logicalSize,
+									uint32 flags = 0,
+									color_space colorSpace = B_RGBA32);
 
 	static	status_t			ConvertFromCMAP8(BBitmap* source,
 									BBitmap* result);

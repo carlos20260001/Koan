@@ -66,6 +66,7 @@ direction_for_type(enum koan_cmd_type type) {
 	case KOAN_CMD_TEST_FENCE_PART:
 	case KOAN_CMD_POPUP_READY:
 	case KOAN_CMD_DISMISS_POPUPS:
+	case KOAN_CMD_OUTPUT_MODE:
 		return KOAN_QUEUE_TO_WAYLAND;
 	default:
 		return KOAN_QUEUE_TO_APP_SERVER;
@@ -160,6 +161,7 @@ static void free_payload(union koan_cmd_payload *payload,
 	case KOAN_CMD_MOVE_POPUP:
 	case KOAN_CMD_POPUP_READY:
 	case KOAN_CMD_DISMISS_POPUPS:
+	case KOAN_CMD_OUTPUT_MODE:
 		/* No heap-owned payload. */
 		break;
 	}

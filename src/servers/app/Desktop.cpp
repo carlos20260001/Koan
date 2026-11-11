@@ -76,6 +76,10 @@
 #include "Workspace.h"
 #include "WorkspacesView.h"
 
+#ifdef VOS_WITH_WLROOTS
+#	include "WaylandWindow.h"
+#endif
+
 #include <LaunchDaemonDefs.h>
 #include <kernel/util/KMessage.h>
 #include <PanelOrientationTransform.h>
@@ -4726,6 +4730,12 @@ Desktop::_ScreenChanged(Screen* screen, const BRect* oldLogicalFrame)
 	update.AddInt32("mode", screen->ColorSpace());
 
 	fVirtualScreen.UpdateFrame();
+
+#ifdef VOS_WITH_WLROOTS
+	// Wayland clients see the screen as the Koan wl_output.
+	if (gWaylandWindowBridge != NULL && screenIndex == 0)
+		gWaylandWindowBridge->ScreenChanged(screen);
+#endif
 
 	for (Window* window = fAllWindows.FirstWindow(); window != NULL;
 			window = window->NextWindow(kAllWindowList)) {

@@ -427,6 +427,24 @@ Painter::_UpdateClipping()
 		fClippingRegion = &fScaledClippingRegion;
 	}
 
+	// Nothing may be drawn outside the attached buffer. Clipping regions
+	// lie inside it except after a scale change that leaves a window
+	// larger than the logical screen; InvertRect() writes the region's
+	// rects straight into the buffer. Copy only in that case.
+	if (fAttached) {
+		clipping_rect frame = fClippingRegion->FrameInt();
+		if (frame.left < 0 || frame.top < 0
+			|| frame.right >= (int32)fBuffer.width()
+			|| frame.bottom >= (int32)fBuffer.height()) {
+			if (fClippingRegion != &fScaledClippingRegion)
+				fScaledClippingRegion = *fClippingRegion;
+			BRegion bounds(BRect(0, 0, (int32)fBuffer.width() - 1,
+				(int32)fBuffer.height() - 1));
+			fScaledClippingRegion.IntersectWith(&bounds);
+			fClippingRegion = &fScaledClippingRegion;
+		}
+	}
+
 	fBaseRenderer.set_clipping_region(
 		const_cast<BRegion*>(fClippingRegion));
 	fValidClipping = fClippingRegion->Frame().IsValid() && fAttached;

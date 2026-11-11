@@ -291,7 +291,7 @@ TTeamMenuItem::DrawContent()
 		} else
 			menu->SetDrawingMode(B_OP_OVER);
 
-		BRect iconBounds = fIcon->Bounds();
+		BRect iconBounds = fIcon->LogicalBounds();
 		BRect updateRect = iconBounds;
 		BPoint contentLocation = ContentLocation();
 		BPoint drawLocation = contentLocation + BPoint(sHPad, sVPad);

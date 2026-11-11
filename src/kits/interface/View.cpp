@@ -3123,7 +3123,9 @@ BView::DrawBitmapAsync(const BBitmap* bitmap, BPoint where)
 	info.bitmapToken = bitmap->_ServerToken();
 	info.options = 0;
 	info.bitmapRect = bitmap->Bounds().OffsetToCopy(B_ORIGIN);
-	info.viewRect = info.bitmapRect.OffsetToCopy(where);
+	// A bitmap with a density covers its logical size: an icon rendered
+	// at the screen's scale is then copied 1:1 to the screen.
+	info.viewRect = bitmap->LogicalBounds().OffsetToCopy(where);
 
 	fOwner->fLink->StartMessage(AS_VIEW_DRAW_BITMAP);
 	fOwner->fLink->Attach<ViewDrawBitmapInfo>(info);

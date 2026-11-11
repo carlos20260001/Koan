@@ -417,6 +417,18 @@ public:
 
 	static IconCache* sIconCache;
 	static BSize sMiniIconSize;
+		// logical size of mini icons, as callers request them
+
+	// Icons are cached and rendered at the screen's pixel density: a
+	// request for a logical size is served by a bitmap of PixelSize(size),
+	// drawn into the logical rect DestinationRect() returns.
+	void SetScale(float scale);
+	static BSize PixelSize(BSize logicalSize);
+	static BRect DestinationRect(BPoint where, const BBitmap* bitmap);
+
+	static float sScale;
+	static BSize sMiniIconPixelSize;
+		// size of the bitmaps in the mini icon slots
 
 private:
 	// shared calls

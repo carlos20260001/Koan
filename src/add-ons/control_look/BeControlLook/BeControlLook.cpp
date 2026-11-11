@@ -2317,7 +2317,7 @@ BeControlLook::DrawLabel(BView* view, const char* label, const BBitmap* icon,
 		// icon only
 		BRect alignedRect = BLayoutUtils::AlignInFrame(
 			rect.OffsetByCopy(-2, -2),
-			icon->Bounds().Size(), alignment);
+			icon->LogicalBounds().Size(), alignment);
 		view->SetDrawingMode(B_OP_OVER);
 		view->DrawBitmap(icon, alignedRect.LeftTop());
 		view->SetDrawingMode(B_OP_COPY);
@@ -2334,8 +2334,8 @@ BeControlLook::DrawLabel(BView* view, const char* label, const BBitmap* icon,
 
 	if (icon != NULL && label != NULL) {
 		// move text over to fit icon
-		width = icon->Bounds().Width() + DefaultLabelSpacing() + 1;
-		height = icon->Bounds().Height() + 1;
+		width = icon->LogicalBounds().Width() + DefaultLabelSpacing() + 1;
+		height = icon->LogicalBounds().Height() + 1;
 		textOffset = width;
 		availableWidth -= textOffset;
 	}
@@ -2360,8 +2360,8 @@ BeControlLook::DrawLabel(BView* view, const char* label, const BBitmap* icon,
 
 	if (icon != NULL) {
 		BPoint location(alignedRect.LeftTop());
-		if (icon->Bounds().Height() + 1 < height)
-			location.y += ceilf((height - icon->Bounds().Height() - 1) / 2);
+		if (icon->LogicalBounds().Height() + 1 < height)
+			location.y += ceilf((height - icon->LogicalBounds().Height() - 1) / 2);
 
 		view->SetDrawingMode(B_OP_OVER);
 		view->DrawBitmap(icon, location);

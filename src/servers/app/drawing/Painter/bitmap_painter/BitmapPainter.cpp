@@ -18,6 +18,7 @@
 #include "DrawBitmapNearestNeighbor.h"
 #include "DrawBitmapNoScale.h"
 #include "drawing_support.h"
+#include "ScreenScaleTransform.h"
 #include "ServerBitmap.h"
 #include "SystemPalette.h"
 
@@ -36,7 +37,8 @@ Painter::BitmapPainter::BitmapPainter(const Painter* painter,
 	fPainter(painter),
 	fServerBitmap(bitmap),
 	fStatus(B_NO_INIT),
-	fOptions(options)
+	fOptions(options),
+	fDeviceSpace(false)
 {
 	if (bitmap == NULL || !bitmap->IsValid())
 		return;
@@ -80,7 +82,8 @@ Painter::BitmapPainter::Draw(const BRect& sourceRect,
 		destinationRect.left, destinationRect.top,
 		destinationRect.right, destinationRect.bottom);
 
-	bool success = _DetermineTransform(sourceRect, destinationRect);
+	bool success = _DetermineTransform(sourceRect, destinationRect,
+		_CanDrawInDeviceSpace());
 	if (!success)
 		return;
 
@@ -169,6 +172,13 @@ Painter::BitmapPainter::Draw(const BRect& sourceRect,
 		}
 	}
 
+	// The generic path applies the painter's full transform itself, so it
+	// needs the logical destination rect.
+	if (fDeviceSpace
+		&& !_DetermineTransform(sourceRect, destinationRect, false)) {
+		return;
+	}
+
 	if ((fOptions & B_TILE_BITMAP) != 0) {
 		DrawBitmapGeneric<Tile>::Draw(fPainter, fPainter->fInternal, fBitmap,
 			fOffset, fScaleX, fScaleY, fDestinationRect, fOptions);
@@ -182,8 +192,10 @@ Painter::BitmapPainter::Draw(const BRect& sourceRect,
 
 bool
 Painter::BitmapPainter::_DetermineTransform(BRect sourceRect,
-	const BRect& destinationRect)
+	const BRect& destinationRect, bool deviceSpace)
 {
+	fDeviceSpace = false;
+
 	if (!fPainter->fValidClipping
 		|| !sourceRect.IsValid()
 		|| ((fOptions & B_TILE_BITMAP) == 0
@@ -197,6 +209,18 @@ Painter::BitmapPainter::_DetermineTransform(BRect sourceRect,
 	if (!fPainter->fSubpixelPrecise) {
 		align_rect_to_pixels(&sourceRect);
 		align_rect_to_pixels(&fDestinationRect);
+	}
+
+	if (deviceSpace) {
+		// Map the destination to the framebuffer pixels it owns and fold
+		// the screen scale into fScaleX/fScaleY. The scaled and unscaled
+		// fast paths below can then be used at any screen scale, and a
+		// bitmap supplied at the screen's pixel density is copied 1:1.
+		fDestinationRect = ScreenScaleTransform::ToPhysicalPartitionRect(
+			fDestinationRect, fPainter->fScale);
+		if (!fDestinationRect.IsValid())
+			return false;
+		fDeviceSpace = true;
 	}
 
 	if((fOptions & B_TILE_BITMAP) == 0) {
@@ -240,6 +264,22 @@ Painter::BitmapPainter::_DetermineTransform(BRect sourceRect,
 }
 
 
+/*!	Whether the only transform between the logical destination rect and the
+	framebuffer is the screen scale, so the destination can be converted to
+	framebuffer pixels up front instead of going through the affine
+	(per-pixel interpolating) path.
+*/
+bool
+Painter::BitmapPainter::_CanDrawInDeviceSpace() const
+{
+	return fPainter->fScale != 1.0f
+		&& fPainter->fUserTransform.IsIdentity()
+		&& !fPainter->fSubpixelPrecise
+		&& (fOptions & B_TILE_BITMAP) == 0
+		&& fPainter->fInternal.fMaskedUnpackedScanline == NULL;
+}
+
+
 bool
 Painter::BitmapPainter::_HasScale()
 {
@@ -250,7 +290,7 @@ Painter::BitmapPainter::_HasScale()
 bool
 Painter::BitmapPainter::_HasAffineTransform()
 {
-	return !fPainter->fIdentityTransform;
+	return !fDeviceSpace && !fPainter->fIdentityTransform;
 }
 
 

@@ -143,9 +143,9 @@ TBarMenuTitle::DrawContent()
 		if (iconData != NULL && iconSize > 0) {
 			float side = floorf(min_c(frame.Width(), frame.Height())) - 4;
 			if (side < 8) side = 8;
-			BRect iconRect(0, 0, side - 1, side - 1);
-			BBitmap* icon = new(std::nothrow) BBitmap(iconRect, B_RGBA32);
-			if (icon != NULL && icon->InitCheck() == B_OK
+			BBitmap* icon = BIconUtils::CreateIconBitmap(
+				BSize(side - 1, side - 1));
+			if (icon != NULL
 				&& BIconUtils::GetVectorIcon(iconData, iconSize, icon) == B_OK) {
 				float x = frame.left
 					+ rintf((frame.Width() - side) / 2);

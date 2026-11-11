@@ -660,7 +660,7 @@ BButton::_ValidatePreferredSize()
 
 		const BBitmap* icon = IconBitmap(B_INACTIVE_ICON_BITMAP);
 		if (icon != NULL)
-			width += icon->Bounds().Width() + 1;
+			width += icon->LogicalBounds().Width() + 1;
 
 		if (label != NULL && icon != NULL)
 			width += labelSpacing;
@@ -681,7 +681,7 @@ BButton::_ValidatePreferredSize()
 
 		if (icon != NULL) {
 			height = std::max(height,
-				icon->Bounds().Height() + minHorizontalMargins);
+				icon->LogicalBounds().Height() + minHorizontalMargins);
 		}
 
 		// force some minimum width/height values

@@ -1253,9 +1253,12 @@ TBarApp::_CacheTeamIcon(BarTeamInfo* barInfo, int32 size, BBitmap** _icon)
 	if (*_icon != NULL)
 		return B_OK;
 
-	int32 composed = be_control_look->ComposeIconSize(size).IntegerWidth() + 1;
-	BRect iconRect = BRect(0, 0, composed - 1, composed - 1);
-	BBitmap* icon = new BBitmap(iconRect, B_RGBA32);
+	// Rendered at the screen's scale; it lays out and draws at the
+	// composed (logical) size.
+	BBitmap* icon = BIconUtils::CreateIconBitmap(
+		be_control_look->ComposeIconSize(size));
+	if (icon == NULL)
+		return B_NO_MEMORY;
 
 	// Wayland clients: the icon of their desktop entry
 	if (wayland_desktop_entry_icon(barInfo->sig, icon) == B_OK) {
@@ -1347,10 +1350,9 @@ TBarApp::_CacheWindowIcon(WindowIconCache* winCache)
 	data = (uint8*)AppResSet()->FindResource(B_VECTOR_ICON_TYPE, id, &size);
 	if (data != NULL && size > 0) {
 		// seems valid, scale bitmap according to font size
-		BBitmap* icon = new(std::nothrow) BBitmap(
-			BRect(B_ORIGIN, be_control_look->ComposeIconSize(B_MINI_ICON)),
-			B_RGBA32);
-		if (icon != NULL && icon->InitCheck() == B_OK
+		BBitmap* icon = BIconUtils::CreateIconBitmap(
+			be_control_look->ComposeIconSize(B_MINI_ICON));
+		if (icon != NULL
 			&& BIconUtils::GetVectorIcon(const_cast<const uint8*>(data),
 				size, icon) == B_OK) {
 			winCache->iconCache[index] = winCache->icon = icon;

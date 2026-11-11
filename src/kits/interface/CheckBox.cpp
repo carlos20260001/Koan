@@ -520,8 +520,8 @@ BCheckBox::_ValidatePreferredSize()
 		const BBitmap* icon = IconBitmap(B_INACTIVE_ICON_BITMAP);
 		if (icon != NULL) {
 			width += be_control_look->DefaultLabelSpacing()
-				+ icon->Bounds().Width() + 1;
-			height = std::max(height, icon->Bounds().Height());
+				+ icon->LogicalBounds().Width() + 1;
+			height = std::max(height, icon->LogicalBounds().Height());
 		}
 
 		if (const char* label = Label()) {

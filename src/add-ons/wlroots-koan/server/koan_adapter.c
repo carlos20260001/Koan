@@ -71,6 +71,7 @@ struct koan_toplevel {
 	int32_t buffer_height;
 	int32_t buffer_stride;
 	uint32_t buffer_format;
+	int32_t buffer_scale;
 
 	/* xdg_toplevel role event listeners. */
 	struct wl_listener toplevel_destroy;
@@ -110,6 +111,7 @@ struct koan_popup {
 	int32_t x, y;                       /* last position sent */
 	void *buffer_data;                  /* frame waiting for POPUP_READY */
 	int32_t buffer_width, buffer_height, buffer_stride;
+	int32_t buffer_scale;
 	struct wl_listener destroy;
 	struct wl_listener unmap;
 };
@@ -189,19 +191,74 @@ struct wlr_box koan_adapter_window_box(struct wlr_xdg_toplevel *toplevel) {
 }
 
 struct compose_target {
-	uint32_t *pixels;     /* premultiplied ARGB8888, box-sized */
+	uint32_t *pixels;     /* premultiplied ARGB8888, box * scale pixels */
 	struct wlr_box box;   /* in root-surface coordinates */
+	int32_t scale;        /* pixels per surface coordinate unit */
+	int32_t width;        /* box.width * scale */
+	int32_t height;       /* box.height * scale */
 };
+
+/* Allocate the target's pixels for its box at the output's scale. Returns
+ * false (nothing allocated) when the box is empty or too large. */
+static bool compose_target_init(struct compose_target *t,
+		struct wlr_box box) {
+	t->pixels = NULL;
+	t->box = box;
+	t->scale = koan_server_output_scale();
+	if (box.width <= 0 || box.height <= 0)
+		return false;
+	if ((int64_t)box.width * t->scale * box.height * t->scale * 4
+			> INT32_MAX) {
+		wlr_log(WLR_ERROR, "Koan adapter: window too large (%dx%d at "
+			"scale %d)", box.width, box.height, t->scale);
+		return false;
+	}
+	t->width = box.width * t->scale;
+	t->height = box.height * t->scale;
+	t->pixels = calloc((size_t)t->width * t->height, sizeof(uint32_t));
+	if (!t->pixels) {
+		wlr_log(WLR_ERROR, "Koan adapter: failed to allocate %dx%d window",
+			t->width, t->height);
+		return false;
+	}
+	return true;
+}
+
+/* Premultiplied "over": dst = src + dst * (1 - a). */
+static inline uint32_t blend_pixel(uint32_t s, uint32_t d, bool opaque) {
+	uint32_t a = s >> 24;
+	if (opaque || a == 0xff)
+		return s | 0xff000000u;
+	if (a == 0)
+		return d;
+	uint32_t inv = 255 - a;
+	uint32_t rb = ((d & 0x00ff00ffu) * inv + 0x00800080u) >> 8;
+	uint32_t ag = (((d >> 8) & 0x00ff00ffu) * inv + 0x00800080u) >> 8;
+	return s + ((rb & 0x00ff00ffu) | ((ag & 0x00ff00ffu) << 8));
+}
 
 /* wlr_surface_for_each_surface() iterator: draw one surface of the tree
  * over what is already composed (root first, children in stacking order).
  * Clients put their content in subsurfaces (Firefox renders the whole
  * window into one, the root only carries the transparent CSD frame), so
- * the root buffer alone is not what the user should see. */
+ * the root buffer alone is not what the user should see.
+ *
+ * The surface covers current.width x current.height surface units at
+ * (sx, sy), which is target->scale times as many target pixels. Its buffer
+ * (or the viewport's source crop of it) is mapped onto those: 1:1 when the
+ * client rendered at the output's scale (buffer_scale == target scale, no
+ * viewport), otherwise nearest-neighbour. Buffer transforms are not
+ * applied. */
 static void compose_surface(struct wlr_surface *surface, int sx, int sy,
 			    void *data) {
 	struct compose_target *t = data;
 	if (!surface->buffer)
+		return;
+
+	const int32_t scale = t->scale;
+	const int32_t dw = surface->current.width * scale;
+	const int32_t dh = surface->current.height * scale;
+	if (dw <= 0 || dh <= 0)
 		return;
 
 	struct wlr_buffer *buffer = &surface->buffer->base;
@@ -228,36 +285,49 @@ static void compose_surface(struct wlr_surface *surface, int sx, int sy,
 		return;
 	}
 
-	/* Buffer scale 1 and no viewporter: buffer pixels map 1:1 to surface
-	 * coordinates. Clip the buffer against the target box. */
-	int32_t x0 = sx < t->box.x ? t->box.x - sx : 0;
-	int32_t y0 = sy < t->box.y ? t->box.y - sy : 0;
-	int32_t x1 = buffer->width;
-	int32_t y1 = buffer->height;
-	if (sx + x1 > t->box.x + t->box.width)
-		x1 = t->box.x + t->box.width - sx;
-	if (sy + y1 > t->box.y + t->box.height)
-		y1 = t->box.y + t->box.height - sy;
+	/* Source rectangle in buffer pixels. */
+	double srcX = 0, srcY = 0;
+	double srcW = buffer->width, srcH = buffer->height;
+	if (surface->current.viewport.has_src) {
+		srcX = surface->current.viewport.src.x * surface->current.scale;
+		srcY = surface->current.viewport.src.y * surface->current.scale;
+		srcW = surface->current.viewport.src.width * surface->current.scale;
+		srcH = surface->current.viewport.src.height
+			* surface->current.scale;
+	}
+	bool direct = !surface->current.viewport.has_src
+		&& buffer->width == dw && buffer->height == dh;
 
+	/* Destination rectangle in target pixels, clipped to the target. */
+	const int32_t ox = (sx - t->box.x) * scale;
+	const int32_t oy = (sy - t->box.y) * scale;
+	int32_t x0 = ox < 0 ? -ox : 0;
+	int32_t y0 = oy < 0 ? -oy : 0;
+	int32_t x1 = dw;
+	int32_t y1 = dh;
+	if (ox + x1 > t->width)
+		x1 = t->width - ox;
+	if (oy + y1 > t->height)
+		y1 = t->height - oy;
+
+	const double stepX = srcW / dw;
+	const double stepY = srcH / dh;
 	for (int32_t y = y0; y < y1; y++) {
+		int32_t by = direct ? y : (int32_t)(srcY + (y + 0.5) * stepY);
+		if (by < 0 || by >= buffer->height)
+			continue;
 		const uint32_t *in = (const uint32_t *)((const uint8_t *)src
-			+ (size_t)y * stride);
-		uint32_t *out = t->pixels + (size_t)(sy + y - t->box.y)
-			* t->box.width + (sx - t->box.x);
+			+ (size_t)by * stride);
+		uint32_t *out = t->pixels + (size_t)(oy + y) * t->width + ox;
+		if (direct) {
+			for (int32_t x = x0; x < x1; x++)
+				out[x] = blend_pixel(in[x], out[x], opaque);
+			continue;
+		}
 		for (int32_t x = x0; x < x1; x++) {
-			uint32_t s = in[x];
-			uint32_t a = s >> 24;
-			if (opaque || a == 0xff) {
-				out[x] = s | 0xff000000u;
-			} else if (a != 0) {
-				/* Premultiplied "over": dst = src + dst * (1 - a). */
-				uint32_t d = out[x];
-				uint32_t inv = 255 - a;
-				uint32_t rb = ((d & 0x00ff00ffu) * inv + 0x00800080u) >> 8;
-				uint32_t ag = (((d >> 8) & 0x00ff00ffu) * inv + 0x00800080u)
-					>> 8;
-				out[x] = s + ((rb & 0x00ff00ffu) | ((ag & 0x00ff00ffu) << 8));
-			}
+			int32_t bx = (int32_t)(srcX + (x + 0.5) * stepX);
+			if (bx >= 0 && bx < buffer->width)
+				out[x] = blend_pixel(in[bx], out[x], opaque);
 		}
 	}
 
@@ -505,7 +575,7 @@ static void popup_ready(struct wlr_xdg_popup *popup, void *window) {
 	if (window && kp->buffer_data && g_cbs.set_buffer) {
 		g_cbs.set_buffer(g_userdata, g_queue, window, kp->buffer_data,
 			kp->buffer_width, kp->buffer_height, kp->buffer_stride,
-			DRM_FORMAT_ARGB8888);
+			DRM_FORMAT_ARGB8888, kp->buffer_scale);
 		kp->buffer_data = NULL; /* set_buffer takes it */
 	}
 	free(kp->buffer_data);
@@ -555,15 +625,11 @@ void koan_adapter_popup_committed(struct wlr_xdg_popup *popup) {
 		return; /* a popup of a layer surface or of nothing we show */
 
 	int32_t x, y;
-	struct compose_target t = { NULL, popup_box(kp, &x, &y) };
-	if (t.box.width <= 0 || t.box.height <= 0
-			|| (int64_t)t.box.width * t.box.height * 4 > INT32_MAX)
-		return;
-	t.pixels = calloc((size_t)t.box.width * t.box.height, sizeof(uint32_t));
-	if (t.pixels == NULL)
+	struct compose_target t;
+	if (!compose_target_init(&t, popup_box(kp, &x, &y)))
 		return;
 	wlr_surface_for_each_surface(popup->base->surface, compose_surface, &t);
-	int32_t stride = t.box.width * 4;
+	int32_t stride = t.width * 4;
 
 	if (kp->native_window) {
 		if ((x != kp->x || y != kp->y) && g_cbs.move_popup)
@@ -571,15 +637,16 @@ void koan_adapter_popup_committed(struct wlr_xdg_popup *popup) {
 		kp->x = x;
 		kp->y = y;
 		g_cbs.set_buffer(g_userdata, g_queue, kp->native_window, t.pixels,
-			t.box.width, t.box.height, stride, DRM_FORMAT_ARGB8888);
+			t.width, t.height, stride, DRM_FORMAT_ARGB8888, t.scale);
 		return;
 	}
 	/* Keep the newest frame until the window exists. */
 	free(kp->buffer_data);
 	kp->buffer_data = t.pixels;
-	kp->buffer_width = t.box.width;
-	kp->buffer_height = t.box.height;
+	kp->buffer_width = t.width;
+	kp->buffer_height = t.height;
 	kp->buffer_stride = stride;
+	kp->buffer_scale = t.scale;
 	if (!kp->create_pending) {
 		kp->create_pending = true;
 		kp->x = x;
@@ -685,7 +752,8 @@ static int process_app_server_command(struct koan_command *cmd, void *userdata) 
 						kt->buffer_width,
 						kt->buffer_height,
 						kt->buffer_stride,
-						kt->buffer_format);
+						kt->buffer_format,
+						kt->buffer_scale);
 					/* set_buffer takes ownership of the data. */
 					kt->buffer_data = NULL;
 					kt->buffer_pending = false;
@@ -793,6 +861,13 @@ static int process_app_server_command(struct koan_command *cmd, void *userdata) 
 		koan_test_handle_command(cmd);
 		break;
 
+	case KOAN_CMD_OUTPUT_MODE:
+		koan_server_set_output_dimensions(cmd->payload.output_mode.width,
+			cmd->payload.output_mode.height,
+			cmd->payload.output_mode.refresh_mhz,
+			cmd->payload.output_mode.scale);
+		break;
+
 	default:
 		/* Wayland -> app_server commands (CREATE_WINDOW, SET_BUFFER, etc.)
 		 * are pushed by the Wayland thread itself and processed by
@@ -886,32 +961,21 @@ static void deliver_buffer(struct koan_toplevel *kt) {
 	if (!surface || !surface->buffer)
 		return;
 
-	struct compose_target t = { NULL, window_box(kt->toplevel) };
-	if (t.box.width <= 0 || t.box.height <= 0)
+	struct compose_target t;
+	if (!compose_target_init(&t, window_box(kt->toplevel)))
 		return;
-	if ((int64_t)t.box.width * t.box.height * 4 > INT32_MAX) {
-		wlr_log(WLR_ERROR, "Koan adapter: window too large (%dx%d)",
-			t.box.width, t.box.height);
-		return;
-	}
-	t.pixels = calloc((size_t)t.box.width * t.box.height, sizeof(uint32_t));
-	if (!t.pixels) {
-		wlr_log(WLR_ERROR, "Koan adapter: failed to allocate %dx%d window",
-			t.box.width, t.box.height);
-		return;
-	}
 	wlr_surface_for_each_surface(surface, compose_surface, &t);
 
 	void *data = t.pixels;
-	int32_t width = t.box.width;
-	int32_t height = t.box.height;
+	int32_t width = t.width;
+	int32_t height = t.height;
 	int32_t stride = width * 4;
 	uint32_t format = DRM_FORMAT_ARGB8888;
 
 	if (kt->native_window && g_cbs.set_buffer) {
 		/* Window exists: queue the buffer immediately. */
 		g_cbs.set_buffer(g_userdata, g_queue, kt->native_window,
-			data, width, height, stride, format);
+			data, width, height, stride, format, t.scale);
 		/* set_buffer takes ownership of data. */
 	} else {
 		/* Window not yet created: buffer the data for later. */
@@ -921,6 +985,7 @@ static void deliver_buffer(struct koan_toplevel *kt) {
 		kt->buffer_height = height;
 		kt->buffer_stride = stride;
 		kt->buffer_format = format;
+		kt->buffer_scale = t.scale;
 		kt->buffer_pending = true;
 	}
 }

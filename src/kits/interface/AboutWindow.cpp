@@ -108,7 +108,7 @@ StripeView::StripeView(BBitmap* icon)
 
 	float width = 0.0f;
 	if (icon != NULL)
-		width += icon->Bounds().Width() + 24.0f;
+		width += icon->LogicalBounds().Width() + 24.0f;
 
 	SetExplicitSize(BSize(width, B_SIZE_UNSET));
 	SetExplicitPreferredSize(BSize(width, B_SIZE_UNLIMITED));
@@ -150,7 +150,7 @@ StripeView::SetIcon(BBitmap* icon)
 
 	float width = 0.0f;
 	if (icon != NULL)
-		width += icon->Bounds().Width() + 24.0f;
+		width += icon->LogicalBounds().Width() + 24.0f;
 
 	SetExplicitSize(BSize(width, B_SIZE_UNSET));
 	SetExplicitPreferredSize(BSize(width, B_SIZE_UNLIMITED));

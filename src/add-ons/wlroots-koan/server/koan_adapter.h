@@ -80,13 +80,15 @@ struct koan_window_callbacks {
 			 void *window, int32_t width, int32_t height);
 
 	/* Deliver a client buffer to the native window content.
-	 * 'data' is Koan-owned memory (a copy of the client pixels). The
-	 * receiver must copy it into the native bitmap and free 'data'.
-	 * The pointer is valid only for the duration of this callback. */
+	 * 'data' is Koan-owned memory (the composed client pixels); the
+	 * receiver takes ownership and must free it. width and height are in
+	 * pixels: the window's content box times 'scale' (pixels per surface
+	 * coordinate unit), so the content is width / scale x height / scale
+	 * in window coordinates. */
 	void (*set_buffer)(void *userdata, struct koan_queue *queue,
 			   void *window, void *data,
 			   int32_t width, int32_t height, int32_t stride,
-			   uint32_t format);
+			   uint32_t format, int32_t scale);
 
 	/* Set window visibility (map/unmap). Pushes a KOAN_CMD_SET_VISIBILITY
 	 * command. */

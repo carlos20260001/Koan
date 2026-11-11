@@ -29,6 +29,7 @@
 #include <DirectMessageTarget.h>
 #include <FindDirectory.h>
 #include <InputServerTypes.h>
+#include <InterfacePrivate.h>
 #include <Layout.h>
 #include <LayoutUtils.h>
 #include <MenuBar.h>
@@ -1177,6 +1178,7 @@ FrameMoved(origin);
 				uint32 mode;
 				if (message->FindRect("frame", &frame) == B_OK
 					&& message->FindInt32("mode", (int32*)&mode) == B_OK) {
+					BPrivate::invalidate_icon_scale();
 					_PropagateMessageToChildViews(message);
 					// call hook method
 					ScreenChanged(frame, (color_space)mode);

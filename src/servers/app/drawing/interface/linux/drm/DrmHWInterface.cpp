@@ -1012,6 +1012,33 @@ DrmHWInterface::_EventThreadMain()
 			}
 		}
 
+		// A cursor move staged while a flip was in flight, with nothing
+		// else to present: commit the cursor plane alone. That needs
+		// neither the exclusive drawing lock nor a primary flip.
+		if (active && fAtomicBatch && !fPageFlipPending
+				&& fDpmsState == B_DPMS_ON) {
+			CursorUpdate cursorOnly;
+			cursorOnly.valid = false;
+			fDirtyMutex.Lock();
+			if (fStagedCursor.valid && fAccumulatedDirty.CountRects() == 0
+					&& !fNeedsFlip) {
+				cursorOnly = fStagedCursor;
+				fStagedCursor.valid = false;
+			}
+			fDirtyMutex.Unlock();
+
+			if (cursorOnly.valid
+					&& _AtomicCommitFrame(0, NULL, &cursorOnly, NULL)
+						!= B_OK) {
+				// Lost a race with a commit from MoveCursorTo(); retry
+				// on the next tick unless a newer move replaced it.
+				fDirtyMutex.Lock();
+				if (!fStagedCursor.valid)
+					fStagedCursor = cursorOnly;
+				fDirtyMutex.Unlock();
+			}
+		}
+
 		// SetMode() deletes and recreates the buffers under the exclusive
 		// lock; reading fWriteTarget outside it used a freed buffer (#303).
 		bool flipLocked = false;
@@ -2964,15 +2991,29 @@ DrmHWInterface::MoveCursorTo(float x, float y)
 	if (fCursor.IsSet())
 		hot = fCursor->GetHotSpot();
 
-	const int32 oldPx = (int32)floorf(fCursorLocation.x - hot.x);
-	const int32 oldPy = (int32)floorf(fCursorLocation.y - hot.y);
+	// With the cursor plane nothing of the cursor is in the framebuffer:
+	// a move only changes the position and the plane. It must not wait for
+	// the drawing lock, which window threads and the flip thread hold
+	// through whole software blits (at 5K, long enough to make the pointer
+	// stutter). An obscured cursor is unhidden through the full path.
+	bool moved = false;
+	if (fHardwareCursorEnabled && fFloatingOverlaysLock.Lock()) {
+		if (fHardwareCursorEnabled && !fCursorObscured) {
+			fCursorLocation = BPoint(x, y);
+			moved = true;
+		}
+		fFloatingOverlaysLock.Unlock();
+	}
 
-	// The software cursor blits into fWriteTarget; SetMode() replaces it
-	// under the exclusive lock. HW lock first, then overlays, as SetMode().
-	if (!LockParallelAccess())
-		return;
-	HWInterface::MoveCursorTo(x, y);
-	UnlockParallelAccess();
+	if (!moved) {
+		// The software cursor blits into fWriteTarget; SetMode() replaces
+		// it under the exclusive lock. HW lock first, then overlays, as
+		// SetMode().
+		if (!LockParallelAccess())
+			return;
+		HWInterface::MoveCursorTo(x, y);
+		UnlockParallelAccess();
+	}
 
 	// When the HW sprite is off (software composite / drag), the base
 	// MoveCursorTo already handled the cursor draw — no plane update.
@@ -3037,8 +3078,9 @@ DrmHWInterface::MoveCursorTo(float x, float y)
 	} else {
 		drmModeMoveCursor(fFd, dev->crtc, px, py);
 	}
-
-	_PushCursorTrackDirty(oldPx, oldPy, px, py);
+	// No damage for the primary plane: the cursor plane moved, the
+	// framebuffer did not. A staged move is committed on its own once
+	// the flip in flight completes (_EventThread).
 }
 
 
@@ -3090,34 +3132,6 @@ DrmHWInterface::_CopyToFront(uint8* src, uint32 srcBPR, int32 x, int32 y,
 				continue;
 			memcpy(dstBase + (uint32)py * dstBPR + (uint32)px * 4, s, 4);
 		}
-	}
-}
-
-
-void
-DrmHWInterface::_PushCursorTrackDirty(int32 oldX, int32 oldY,
-	int32 newX, int32 newY)
-{
-	struct modeset_dev* dev = get_dev();
-	if (!dev || dev->cursor_w <= 0 || dev->cursor_h <= 0)
-		return;
-
-	BRegion track;
-	track.Include(BRect(oldX, oldY,
-		oldX + dev->cursor_w - 1, oldY + dev->cursor_h - 1));
-	track.Include(BRect(newX, newY,
-		newX + dev->cursor_w - 1, newY + dev->cursor_h - 1));
-
-	if (track.CountRects() == 0)
-		return;
-
-	fDirtyMutex.Lock();
-	fAccumulatedDirty.Include(&track);
-	fDirtyMutex.Unlock();
-
-	if (fPageFlipEnabled && fWakeFd >= 0) {
-		uint64_t v = 1;
-		write(fWakeFd, &v, sizeof(v));
 	}
 }
 

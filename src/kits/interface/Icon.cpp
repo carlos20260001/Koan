@@ -273,6 +273,7 @@ BIcon::_ConvertToRGB32(const BBitmap* bitmap, bool noAppServerLink)
 		delete rgb32Bitmap;
 		return NULL;
 	}
+	rgb32Bitmap->SetDensity(bitmap->Density());
 
 	return rgb32Bitmap;
 }
@@ -331,6 +332,7 @@ BIcon::_TrimBitmap(const BBitmap* bitmap, bool keepAspect,
 		trimmed.OffsetToCopy(B_ORIGIN), B_BITMAP_NO_SERVER_LINK, B_RGBA32);
 	if (trimmedBitmap == NULL)
 		return B_NO_MEMORY;
+	trimmedBitmap->SetDensity(bitmap->Density());
 
 	bits = (uint8*)bitmap->Bits();
 	bits += 4 * (int32)trimmed.left + bpr * (int32)trimmed.top;
@@ -382,6 +384,15 @@ BIcon::_MakeBitmaps(const BBitmap* bitmap, uint32 flags)
 			B_ACTIVE_ICON_BITMAP | B_DISABLED_ICON_BITMAP);
 		if (disabledClickedBitmap == NULL)
 			return B_NO_MEMORY;
+	}
+
+	// An icon rendered at the screen's scale keeps drawing at its logical
+	// size in every state.
+	BBitmap* variants[] = { normalBitmap, disabledBitmap, clickedBitmap,
+		disabledClickedBitmap };
+	for (size_t i = 0; i < sizeof(variants) / sizeof(variants[0]); i++) {
+		if (variants[i] != NULL)
+			variants[i]->SetDensity(bitmap->Density());
 	}
 
 	// copy bitmaps from file bitmap

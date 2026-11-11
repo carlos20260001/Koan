@@ -66,12 +66,16 @@ All rights reserved.
 //			generic icon
 
 
+#include <algorithm>
+
 #include <ControlLook.h>
 #include <Debug.h>
+#include <IconUtils.h>
 #include <Screen.h>
 #include <Volume.h>
 
 #include <fs_info.h>
+#include <math.h>
 #include <string.h>
 
 #include "Bitmaps.h"
@@ -108,6 +112,8 @@ All rights reserved.
 
 
 BSize IconCache::sMiniIconSize;
+BSize IconCache::sMiniIconPixelSize;
+float IconCache::sScale = 1.0f;
 
 
 static inline icon_size
@@ -193,11 +199,14 @@ IconCacheEntry::HaveIconBitmap(IconDrawMode mode, BSize size) const
 		// for now only
 
 	if (mode == kNormalIcon) {
-		return size == IconCache::sMiniIconSize ? fMiniIcon != NULL
+		return size == IconCache::sMiniIconPixelSize
+			? fMiniIcon != NULL && fMiniIcon->Bounds().Size() == size
 			: fLargeIcon != NULL
 				&& fLargeIcon->Bounds().Size() == size;
 	} else if (mode == kSelected) {
-		return size == IconCache::sMiniIconSize ? fHighlightedMiniIcon != NULL
+		return size == IconCache::sMiniIconPixelSize
+			? fHighlightedMiniIcon != NULL
+				&& fHighlightedMiniIcon->Bounds().Size() == size
 			: fHighlightedLargeIcon != NULL
 				&& fHighlightedLargeIcon->Bounds().Size() == size;
 	}
@@ -213,12 +222,12 @@ IconCacheEntry::IconForMode(IconDrawMode mode, BSize size) const
 		// for now only
 
 	if (mode == kNormalIcon) {
-		if (size == IconCache::sMiniIconSize)
+		if (size == IconCache::sMiniIconPixelSize)
 			return fMiniIcon;
 		else
 			return fLargeIcon;
 	} else if (mode == kSelected) {
-		if (size == IconCache::sMiniIconSize)
+		if (size == IconCache::sMiniIconPixelSize)
 			return fHighlightedMiniIcon;
 		else
 			return fHighlightedLargeIcon;
@@ -282,7 +291,7 @@ BBitmap*
 IconCacheEntry::ConstructBitmap(IconDrawMode requestedMode, BSize size,
 	LazyBitmapAllocator* lazyBitmap)
 {
-	BBitmap* source = (size == IconCache::sMiniIconSize) ? fMiniIcon : fLargeIcon;
+	BBitmap* source = (size == IconCache::sMiniIconPixelSize) ? fMiniIcon : fLargeIcon;
 	ASSERT(source != NULL);
 
 	return ConstructBitmap(source, requestedMode, kNormalIcon, size,
@@ -309,12 +318,12 @@ IconCacheEntry::SetIcon(BBitmap* bitmap, IconDrawMode mode, BSize size)
 {
 	BBitmap** icon = NULL;
 	if (mode == kNormalIcon) {
-		if (size == IconCache::sMiniIconSize)
+		if (size == IconCache::sMiniIconPixelSize)
 			icon = &fMiniIcon;
 		else
 			icon = &fLargeIcon;
 	} else if (mode == kSelectedIcon) {
-		if (size == IconCache::sMiniIconSize)
+		if (size == IconCache::sMiniIconPixelSize)
 			icon = &fHighlightedMiniIcon;
 		else
 			icon = &fHighlightedLargeIcon;
@@ -335,6 +344,70 @@ IconCache::IconCache()
 	InitHighlightTable();
 
 	sMiniIconSize = be_control_look->ComposeIconSize(B_MINI_ICON);
+
+	SetScale(BIconUtils::IconScale());
+}
+
+
+/*!	Sets the screen scale icons are rendered for. Cached bitmaps of the
+	old pixel size no longer match HaveIconBitmap() and are replaced the
+	next time they are drawn.
+*/
+void
+IconCache::SetScale(float scale)
+{
+	if (!(scale > 0.0f))
+		scale = 1.0f;
+
+	sScale = scale;
+	sMiniIconPixelSize = PixelSize(sMiniIconSize);
+}
+
+
+/*static*/ BSize
+IconCache::PixelSize(BSize logicalSize)
+{
+	if (sScale == 1.0f)
+		return logicalSize;
+
+	ASSERT(logicalSize.Width() == logicalSize.Height());
+	float pixels = roundf((logicalSize.IntegerWidth() + 1) * sScale);
+	if (pixels < 1.0f)
+		pixels = 1.0f;
+
+	return BSize(pixels - 1, pixels - 1);
+}
+
+
+/*static*/ BRect
+IconCache::DestinationRect(BPoint where, const BBitmap* bitmap)
+{
+	BRect bounds(bitmap->Bounds());
+	if (sScale == 1.0f)
+		return bounds.OffsetToCopy(where);
+
+	float width = roundf((bounds.IntegerWidth() + 1) / sScale);
+	float height = roundf((bounds.IntegerHeight() + 1) / sScale);
+	return BRect(where.x, where.y, where.x + width - 1, where.y + height - 1);
+}
+
+
+static void
+draw_icon_bitmap(BView* view, BPoint where, BBitmap* bitmap, bool async)
+{
+	if (IconCache::sScale == 1.0f) {
+		if (async)
+			view->DrawBitmapAsync(bitmap, where);
+		else
+			view->DrawBitmap(bitmap, where);
+		return;
+	}
+
+	BRect destination(IconCache::DestinationRect(where, bitmap));
+	if (async)
+		view->DrawBitmapAsync(bitmap, bitmap->Bounds(), destination);
+	else
+		view->DrawBitmap(bitmap, bitmap->Bounds(), destination);
 }
 
 
@@ -1126,6 +1199,8 @@ void
 IconCache::Draw(Model* model, BView* view, BPoint where, IconDrawMode mode,
 	BSize size, bool async)
 {
+	size = PixelSize(size);
+
 	// the following does not actually lock the caches, we are using the
 	// lockLater mode; we will decide which of the two to lock down depending
 	// on where we get the icon from
@@ -1159,6 +1234,9 @@ IconCache::SyncDraw(Model* model, BView* view, BPoint where,
 	void (*blitFunc)(BView*, BPoint, BBitmap*, void*),
 	void* passThruState)
 {
+	size = PixelSize(size);
+		// blitFunc must draw into DestinationRect()
+
 	AutoLock<SimpleIconCache> nodeCacheLocker(&fNodeCache, false);
 	AutoLock<SimpleIconCache> sharedCacheLocker(&fSharedCache, false);
 
@@ -1180,6 +1258,8 @@ void
 IconCache::Preload(Model* model, IconDrawMode mode, BSize size,
 	bool permanent)
 {
+	size = PixelSize(size);
+
 	AutoLock<SimpleIconCache> nodeCacheLocker(&fNodeCache, false);
 	AutoLock<SimpleIconCache> sharedCacheLocker(&fSharedCache, false);
 
@@ -1191,6 +1271,8 @@ IconCache::Preload(Model* model, IconDrawMode mode, BSize size,
 status_t
 IconCache::Preload(const char* fileType, IconDrawMode mode, BSize size)
 {
+	size = PixelSize(size);
+
 	AutoLock<SimpleIconCache> sharedCacheLocker(&fSharedCache);
 	LazyBitmapAllocator lazyBitmap(size);
 
@@ -1409,6 +1491,12 @@ bool
 IconCache::IconHitTest(BPoint where, const Model* model, IconDrawMode mode,
 	BSize size)
 {
+	if (sScale != 1.0f) {
+		size = PixelSize(size);
+		where.x = std::min(floorf(where.x * sScale), size.width);
+		where.y = std::min(floorf(where.y * sScale), size.height);
+	}
+
 	AutoLock<SimpleIconCache> nodeCacheLocker(&fNodeCache, false);
 	AutoLock<SimpleIconCache> sharedCacheLocker(&fSharedCache, false);
 
@@ -1579,10 +1667,7 @@ SharedCacheEntry::Draw(BView* view, BPoint where, IconDrawMode mode,
 	} else
 		view->SetDrawingMode(B_OP_OVER);
 
-	if (async)
-		view->DrawBitmapAsync(bitmap, where);
-	else
-		view->DrawBitmap(bitmap, where);
+	draw_icon_bitmap(view, where, bitmap, async);
 
 	view->SetDrawingMode(oldMode);
 }
@@ -1674,9 +1759,9 @@ NodeCacheEntry::Draw(BView* view, BPoint where, IconDrawMode mode,
 	if (false && async) {
 		TRESPASS();
 		// need to copy the bits first in here
-		view->DrawBitmapAsync(bitmap, where);
+		draw_icon_bitmap(view, where, bitmap, true);
 	} else
-		view->DrawBitmap(bitmap, where);
+		draw_icon_bitmap(view, where, bitmap, false);
 
 	view->SetDrawingMode(oldMode);
 }

@@ -112,7 +112,7 @@ ToolBarButton::Draw(BRect updateRect)
 
 	float bottom = Bounds().bottom;
 	if (icon != NULL) {
-		BRect iconRect = icon->Bounds();
+		BRect iconRect = icon->LogicalBounds();
 		float x = floorf((Bounds().Width() + 1 - iconRect.Width()) / 2);
 		DrawBitmap(icon, BPoint(x, 2));
 		bottom = 2 + iconRect.bottom;
@@ -149,8 +149,8 @@ ToolBarButton::MinSize()
 	float iconWidth = 0;
 	float iconHeight = 0;
 	if (icon != NULL) {
-		iconWidth = icon->Bounds().Width() + 1;
-		iconHeight = icon->Bounds().Height() + 1;
+		iconWidth = icon->LogicalBounds().Width() + 1;
+		iconHeight = icon->LogicalBounds().Height() + 1;
 	}
 
 	float width = ceilf(font.StringWidth(Label()));
@@ -376,12 +376,12 @@ BToolBar::AddAction(uint32 command, BHandler* target, const uint8* hvifIcon,
 {
 	BBitmap* bitmap = NULL;
 	if (hvifIcon != NULL) {
+		// Rendered at the screen's scale; it still lays out and draws at
+		// the logical size.
 		BSize size = be_control_look->ComposeIconSize(16);
-		bitmap = new(std::nothrow) BBitmap(
-			BRect(BPoint(0, 0), size), B_BITMAP_NO_SERVER_LINK, B_RGBA32);
+		bitmap = BIconUtils::CreateIconBitmap(size, B_BITMAP_NO_SERVER_LINK);
 		if (bitmap != NULL) {
-			if (bitmap->InitCheck() != B_OK
-				|| BIconUtils::GetVectorIcon(hvifIcon, hvifLength, bitmap)
+			if (BIconUtils::GetVectorIcon(hvifIcon, hvifLength, bitmap)
 					!= B_OK) {
 				delete bitmap;
 				bitmap = NULL;

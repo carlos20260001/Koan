@@ -83,6 +83,13 @@ public:
 			color_space			ColorSpace() const;
 			BRect				Bounds() const;
 
+	// Pixels per view coordinate unit (1 unless set). DrawBitmap() at a
+	// point covers LogicalBounds(), so an icon rendered at the screen's
+	// scale (BIconUtils::CreateIconBitmap()) draws at its logical size.
+			float				Density() const;
+			void				SetDensity(float density);
+			BRect				LogicalBounds() const;
+
 			status_t			SetDrawingFlags(uint32 flags);
 			uint32				Flags() const;
 
@@ -161,7 +168,8 @@ private:
 			uint32				fFlags;
 			BWindow*			fWindow;
 			status_t			fInitError;
-			uint32				_reserved[1];
+			float				fDensity;
+				// was uint32 _reserved[1]; 0 means 1
 };
 
 #endif	// _BITMAP_H

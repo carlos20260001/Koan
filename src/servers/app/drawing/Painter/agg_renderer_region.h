@@ -77,7 +77,11 @@ namespace agg
 			{
 				clipping_rect cb = m_region->RectAtInt(0);
 				translate_to_base_ren(cb);
-				m_ren.clip_box_naked(
+				// clip_box(), not clip_box_naked(): it also clips to the
+				// buffer. A clipping rect reaching past the framebuffer
+				// (a window larger than the logical screen after a scale
+				// change) made the span blenders write outside it.
+				m_ren.clip_box(
 					cb.left,
 					cb.top,
 					cb.right,
@@ -94,7 +98,9 @@ namespace agg
 			{
 				clipping_rect cb = m_region->RectAtInt(m_curr_cb);
 				translate_to_base_ren(cb);
-				m_ren.clip_box_naked(
+				// Clipped to the buffer; a rect wholly outside it leaves
+				// an empty box, so nothing is drawn for it.
+				m_ren.clip_box(
 					cb.left,
 					cb.top,
 					cb.right,

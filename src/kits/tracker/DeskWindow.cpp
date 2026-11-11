@@ -47,6 +47,7 @@ All rights reserved.
 #include <PathMonitor.h>
 #include <PopUpMenu.h>
 #include <Resources.h>
+#include <IconUtils.h>
 #include <Screen.h>
 #include <String.h>
 #include <StringList.h>
@@ -62,6 +63,7 @@ All rights reserved.
 #include "BackgroundImage.h"
 #include "Commands.h"
 #include "FSUtils.h"
+#include "IconCache.h"
 #include "IconMenuItem.h"
 #include "KeyInfos.h"
 #include "MountMenu.h"
@@ -515,6 +517,14 @@ BDeskWindow::ScreenChanged(BRect frame, color_space space)
 
 	if (fBackgroundImage != NULL)
 		fBackgroundImage->ScreenChanged(frame, space);
+
+	// BWindow refreshed BIconUtils' scale before calling this hook.
+	float scale = BIconUtils::IconScale();
+	if (scale != IconCache::sScale) {
+		// icons are rendered at the screen's pixel density
+		IconCache::sIconCache->SetScale(scale);
+		PoseView()->Invalidate();
+	}
 
 	PoseView()->CheckPoseVisibility(frameChanged ? &frame : 0);
 		// if frame changed, pass new frame so that icons can

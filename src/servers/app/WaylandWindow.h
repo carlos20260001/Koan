@@ -38,6 +38,7 @@ static const uint32 kMsgWaylandTestFence = 'wltf';
 #include "koan_queue.h"
 
 class Desktop;
+class Screen;
 class ServerApp;
 class ServerWindow;
 class Window;
@@ -86,6 +87,12 @@ public:
 	/* Also registers the bridge's DesktopListener (popups follow their
 	 * window; clicks outside every client close menus). */
 	void SetDesktop(Desktop *desktop);
+
+	/* Report the screen's display mode to the Koan wl_output, so clients
+	 * see the real resolution and refresh rate. Called with the desktop's
+	 * screen when it is set and after every mode change; it only queues
+	 * a command, so any thread may call it. */
+	void ScreenChanged(::Screen *screen);
 
 	/* Set the looper the Wayland thread wakes when commands are queued.
 	 * This is app_server itself; the bridge does not own it. A BMessenger
@@ -140,7 +147,7 @@ private:
 			void *window, int32_t width, int32_t height);
 	static void s_set_buffer(void *userdata, struct koan_queue *queue,
 			void *window, void *data, int32_t width, int32_t height,
-			int32_t stride, uint32_t format);
+			int32_t stride, uint32_t format, int32_t scale);
 	static void s_set_visibility(void *userdata, struct koan_queue *queue,
 			void *window, bool visible);
 	static void s_request_state(void *userdata, struct koan_queue *queue,

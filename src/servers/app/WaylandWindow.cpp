@@ -26,6 +26,7 @@
 
 #include <ctype.h>
 #include <limits.h>
+#include <math.h>
 
 #include <Entry.h>
 #include <Looper.h>
@@ -49,6 +50,7 @@
 #include "ServerWindow.h"
 #include "Window.h"
 #include "View.h"
+#include "VirtualScreen.h"
 #include "koan_server.h"
 #include "LinuxKeycodeMap.h"
 
@@ -631,6 +633,33 @@ WaylandWindowBridge::SetDesktop(Desktop *desktop)
 		desktop->RegisterListener(fListener);
 		desktop->UnlockAllWindows();
 	}
+
+	ScreenChanged(desktop->VirtualScreen().ScreenAt(0));
+}
+
+void
+WaylandWindowBridge::ScreenChanged(::Screen *screen)
+{
+	if (screen == NULL)
+		return;
+
+	uint16 width, height;
+	uint32 colorSpace;
+	float frequency;
+	screen->GetMode(width, height, colorSpace, frequency);
+
+	/* Frame() is the framebuffer app_server draws, after panel rotation:
+	 * the pixels a fullscreen client covers. */
+	BRect frame = screen->Frame();
+
+	union koan_cmd_payload payload;
+	memset(&payload, 0, sizeof(payload));
+	payload.output_mode.width = frame.IntegerWidth() + 1;
+	payload.output_mode.height = frame.IntegerHeight() + 1;
+	payload.output_mode.refresh_mhz = frequency > 0.0f
+		? (int32_t)roundf(frequency * 1000.0f) : 0;
+	payload.output_mode.scale = screen->Scale();
+	push_to_wayland(KOAN_CMD_OUTPUT_MODE, payload);
 }
 
 WaylandWindowBridge::WaylandWindowBridge()
@@ -776,6 +805,11 @@ WaylandWindowBridge::StartDispatchThread()
 	}
 
 	strlcpy(fSocketName, socket, sizeof(fSocketName));
+
+	/* The queue exists from koan_server_create() on; a desktop set before
+	 * that could not report its screen. */
+	if (fDesktop != NULL)
+		ScreenChanged(fDesktop->VirtualScreen().ScreenAt(0));
 
 	if (!koan_server_start()) {
 		wlr_log(WLR_ERROR, "Wayland bridge: failed to start backend");
@@ -971,33 +1005,26 @@ WaylandWindowBridge::s_set_size(void *userdata, struct koan_queue *queue,
 void
 WaylandWindowBridge::s_set_buffer(void *userdata, struct koan_queue *queue,
 		void *window, void *data, int32_t width, int32_t height,
-		int32_t stride, uint32_t format)
+		int32_t stride, uint32_t format, int32_t scale)
 {
 	WaylandWindowBridge *bridge = (WaylandWindowBridge *)userdata;
-	if (!bridge || !queue || !window || !data)
-		return;
-
-	/* Copy the data so the queue owns it. The adapter already copied the
-	 * wlroots pixels into 'data'; we copy again so the queue's copy is
-	 * independent of the caller's buffer. */
-	size_t size = (size_t)height * (size_t)stride;
-	void *copy = malloc(size);
-	if (!copy) {
-		wlr_log(WLR_ERROR, "Wayland bridge: failed to allocate %zu bytes "
-			"for buffer copy", size);
-		free(data); /* caller's buffer - free it */
+	if (!bridge || !queue || !window || !data) {
+		free(data); /* set_buffer takes ownership */
 		return;
 	}
-	memcpy(copy, data, size);
-	free(data); /* caller's buffer is no longer needed */
 
+	/* 'data' is the adapter's composed copy, never wlroots memory: hand
+	 * it to the queue as is. The queue frees it after
+	 * process_set_buffer(). Copying it again cost a full-window memcpy
+	 * (59 MB at 5K) per frame. */
 	union koan_cmd_payload payload = {0};
 	payload.set_buffer.window = window;
-	payload.set_buffer.data = copy;
+	payload.set_buffer.data = data;
 	payload.set_buffer.width = width;
 	payload.set_buffer.height = height;
 	payload.set_buffer.stride = stride;
 	payload.set_buffer.format = format;
+	payload.set_buffer.scale = scale > 0 ? scale : 1;
 	koan_queue_push(queue, KOAN_CMD_SET_BUFFER, &payload, NULL);
 
 	bridge->_Wake();
@@ -1431,6 +1458,15 @@ WaylandWindowBridge::process_set_buffer(struct koan_command *cmd)
 	int32_t height = cmd->payload.set_buffer.height;
 	int32_t stride = cmd->payload.set_buffer.stride;
 	uint32_t format = cmd->payload.set_buffer.format;
+	int32_t scale = cmd->payload.set_buffer.scale > 0
+		? cmd->payload.set_buffer.scale : 1;
+	/* The window's content size in window (logical) coordinates; the
+	 * bitmap has 'scale' pixels per unit and is drawn into that rect. At
+	 * a matching screen scale, Painter copies it 1:1. */
+	int32_t logicalWidth = width / scale;
+	int32_t logicalHeight = height / scale;
+	if (logicalWidth <= 0 || logicalHeight <= 0)
+		return 0;
 
 	BAutolock locker(fLock);
 
@@ -1481,10 +1517,10 @@ WaylandWindowBridge::process_set_buffer(struct koan_command *cmd)
 	 * write lock itself, as for AS_WINDOW_RESIZE. Record the size first so
 	 * the resulting B_WINDOW_RESIZED is not sent back as a configure. */
 	static_cast<WaylandServerWindow *>(ww->server_window)->SetClientSize(
-		width, height);
+		logicalWidth, logicalHeight);
 	BRect frame = native_window->Frame();
-	int32 dw = width - (frame.IntegerWidth() + 1);
-	int32 dh = height - (frame.IntegerHeight() + 1);
+	int32 dw = logicalWidth - (frame.IntegerWidth() + 1);
+	int32 dh = logicalHeight - (frame.IntegerHeight() + 1);
 	if (dw != 0 || dh != 0)
 		fDesktop->ResizeWindowBy(native_window, dw, dh);
 
@@ -1498,7 +1534,8 @@ WaylandWindowBridge::process_set_buffer(struct koan_command *cmd)
 	 * so drop the manager registration and our creation reference; the
 	 * view owns it until it is replaced or destroyed. */
 	top_view->SetViewBitmap(bitmap, IntRect(0, 0, width - 1, height - 1),
-		IntRect(0, 0, width - 1, height - 1), 0 /* no tiling */, 0);
+		IntRect(0, 0, logicalWidth - 1, logicalHeight - 1),
+		0 /* no tiling */, 0);
 	gBitmapManager->BitmapRemoved(bitmap);
 
 	/* MarkContentDirty() intersects its arguments in place, so pass
@@ -2022,7 +2059,7 @@ WaylandWindowBridge::fullscreen_window(wayland_window *ww, bool enter)
 		if (!fDesktop->LockSingleWindow())
 			return;
 		const ::Screen *screen = window->Screen();
-		BRect screenFrame = screen ? screen->Frame()
+		BRect screenFrame = screen ? screen->LogicalFrame()
 			: BRect(0, 0, 1023, 767);
 		ww->fullscreen_restore_look = window->Look();
 		fDesktop->UnlockSingleWindow();
@@ -2065,7 +2102,7 @@ WaylandWindowBridge::zoom_window(wayland_window *ww)
 		if (!fDesktop->LockSingleWindow())
 			return;
 		const ::Screen *screen = window->Screen();
-		BRect screenFrame = screen ? screen->Frame()
+		BRect screenFrame = screen ? screen->LogicalFrame()
 			: BRect(0, 0, 1023, 767);
 		/* Keep the decorator (tab and borders) on screen. */
 		BRect footprint = frame;

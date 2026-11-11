@@ -371,7 +371,7 @@ TTeamGroup::~TTeamGroup()
 void
 TTeamGroup::Draw(BView* view, BRect bounds, bool main)
 {
-	BRect largeRect = fLargeIcon->Bounds();
+	BRect largeRect = fLargeIcon->LogicalBounds();
 	largeRect.OffsetTo(bounds.LeftTop());
 	int32 offset = (bounds.IntegerWidth()
 		- largeRect.IntegerWidth()) / 2;
@@ -379,7 +379,7 @@ TTeamGroup::Draw(BView* view, BRect bounds, bool main)
 	if (main)
 		view->DrawBitmap(fLargeIcon, largeRect);
 	else {
-		BRect smallRect = fSmallIcon->Bounds();
+		BRect smallRect = fSmallIcon->LogicalBounds();
 		smallRect.OffsetTo(largeRect.LeftTop());
 		int32 offset = (largeRect.IntegerWidth()
 			- smallRect.IntegerWidth()) / 2;
@@ -2346,7 +2346,7 @@ TWindowView::Draw(BRect update)
 		TBarApp* app = static_cast<TBarApp*>(be_app);
 		const BBitmap* bitmap = app->FetchWindowIcon(local, minimized);
 		if (bitmap != NULL)
-			iconWidth = bitmap->Bounds().Width();
+			iconWidth = bitmap->LogicalBounds().Width();
 
 		float spacing = be_control_look->DefaultLabelSpacing();
 		float stringWidth = StringWidth(title.String());
@@ -2371,10 +2371,10 @@ TWindowView::Draw(BRect update)
 
 		// center bitmap horizontally and move text past icon
 		if (bitmap != NULL) {
-			p.y -= (bitmap->Bounds().bottom - bitmap->Bounds().top) / 2;
+			p.y -= (bitmap->LogicalBounds().bottom - bitmap->LogicalBounds().top) / 2;
 			DrawBitmap(bitmap, p);
 
-			point.x += bitmap->Bounds().Width() + spacing;
+			point.x += bitmap->LogicalBounds().Width() + spacing;
 		}
 
 		// center text vertically
@@ -2384,7 +2384,7 @@ TWindowView::Draw(BRect update)
 		point.y -= (textHeight / 2) + (spacing / 2);
 		if (bitmap != NULL) {
 			// center in middle of window icon
-			point.y += ((textHeight - bitmap->Bounds().Height()) / 2);
+			point.y += ((textHeight - bitmap->LogicalBounds().Height()) / 2);
 		}
 
 		MovePenTo(point);

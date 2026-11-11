@@ -2347,7 +2347,7 @@ HaikuControlLook::DrawLabel(BView* view, const char* label, const BBitmap* icon,
 	if (label == NULL) {
 		// icon only
 		BRect alignedRect = BLayoutUtils::AlignInFrame(rect,
-			icon->Bounds().Size(), alignment);
+			icon->LogicalBounds().Size(), alignment);
 		drawing_mode oldMode = view->DrawingMode();
 		view->SetDrawingMode(B_OP_OVER);
 		view->DrawBitmap(icon, alignedRect.LeftTop());
@@ -2362,8 +2362,8 @@ HaikuControlLook::DrawLabel(BView* view, const char* label, const BBitmap* icon,
 	float height = 0;
 
 	if (icon != NULL) {
-		width = icon->Bounds().Width() + DefaultLabelSpacing() + 1;
-		height = icon->Bounds().Height() + 1;
+		width = icon->LogicalBounds().Width() + DefaultLabelSpacing() + 1;
+		height = icon->LogicalBounds().Height() + 1;
 		textOffset = width;
 		availableWidth -= textOffset;
 	}
@@ -2388,8 +2388,8 @@ HaikuControlLook::DrawLabel(BView* view, const char* label, const BBitmap* icon,
 
 	if (icon != NULL) {
 		BPoint location(alignedRect.LeftTop());
-		if (icon->Bounds().Height() + 1 < height)
-			location.y += ceilf((height - icon->Bounds().Height() - 1) / 2);
+		if (icon->LogicalBounds().Height() + 1 < height)
+			location.y += ceilf((height - icon->LogicalBounds().Height() - 1) / 2);
 
 		drawing_mode oldMode = view->DrawingMode();
 		view->SetDrawingMode(B_OP_OVER);

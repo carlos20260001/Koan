@@ -89,6 +89,9 @@ enum koan_cmd_type {
 	 * client surface (a window frame, a native window, the desktop):
 	 * popups holding a grab get xdg_popup.popup_done. */
 	KOAN_CMD_DISMISS_POPUPS,
+	/* app_server -> Wayland: the screen's display mode (at startup and
+	 * after every mode change). */
+	KOAN_CMD_OUTPUT_MODE,
 };
 
 /* Which thread is the intended consumer of a command. koan_queue_push()
@@ -138,6 +141,7 @@ struct koan_cmd_set_buffer {
 	int32_t height;
 	int32_t stride;
 	uint32_t format;    /* DRM fourcc format (e.g. DRM_FORMAT_ARGB8888) */
+	int32_t scale;      /* pixels per window coordinate unit (>= 1) */
 };
 
 /* KOAN_CMD_SET_VISIBILITY */
@@ -299,6 +303,15 @@ struct koan_cmd_popup_ready {
 	void *window;
 };
 
+/* KOAN_CMD_OUTPUT_MODE: width and height in framebuffer pixels, refresh in
+ * mHz (0: unknown), scale is the screen's logical scale factor. */
+struct koan_cmd_output_mode {
+	int32_t width;
+	int32_t height;
+	int32_t refresh_mhz;
+	float scale;
+};
+
 union koan_cmd_payload {
 	struct koan_cmd_create_window create_window;
 	struct koan_cmd_destroy_window destroy_window;
@@ -322,6 +335,7 @@ union koan_cmd_payload {
 	struct koan_cmd_create_popup create_popup;
 	struct koan_cmd_move_popup move_popup;
 	struct koan_cmd_popup_ready popup_ready;
+	struct koan_cmd_output_mode output_mode;
 };
 
 struct koan_command {

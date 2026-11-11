@@ -83,7 +83,7 @@ TWindowMenuItem::GetContentSize(float* width, float* height)
 			*width = sHPad + fLabelWidth + sHPad;
 			// The icon can be missing; a text-only item still lays out.
 			if (fID >= 0 && fBitmap != NULL)
-				*width += fBitmap->Bounds().Width() + sLabelOffset;
+				*width += fBitmap->LogicalBounds().Width() + sLabelOffset;
 		} else
 			*width = Frame().Width()/* - sHPad*/;
 	}
@@ -95,7 +95,7 @@ TWindowMenuItem::GetContentSize(float* width, float* height)
 
 	if (height != NULL) {
 		*height = (fID >= 0 && fBitmap != NULL)
-			? fBitmap->Bounds().Height() : 0.0f;
+			? fBitmap->LogicalBounds().Height() : 0.0f;
 		float labelHeight = fLabelAscent + fLabelDescent;
 		*height = (labelHeight > *height) ? labelHeight : *height;
 		*height += sVPad * 2;
@@ -162,8 +162,8 @@ TWindowMenuItem::DrawContent()
 	if (fID >= 0 && fBitmap != NULL) {
 		menu->SetDrawingMode(B_OP_OVER);
 
-		const float bitmapWidth = fBitmap->Bounds().Width(),
-			bitmapHeight = fBitmap->Bounds().Height();
+		const float bitmapWidth = fBitmap->LogicalBounds().Width(),
+			bitmapHeight = fBitmap->LogicalBounds().Height();
 		float shiftedBy = 0.0f;
 		if (bitmapWidth > bitmapHeight) {
 			shiftedBy = (bitmapHeight + 1) / 2.0f;

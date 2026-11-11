@@ -106,10 +106,22 @@ struct koan_server {
 	struct wl_list surfaces;      /* struct koan_surface.link */
 	struct wl_event_source *frame_timer;
 	bool frame_timer_armed;
+	int frame_interval_ms;        /* one frame of the output's mode */
 };
 
-/* One frame of the synthetic 60 Hz output (koan_server_create_output). */
-#define KOAN_FRAME_INTERVAL_MS 16
+/* Mode of the output until app_server reports the screen's
+ * (KOAN_CMD_OUTPUT_MODE). */
+#define KOAN_DEFAULT_WIDTH 1920
+#define KOAN_DEFAULT_HEIGHT 1080
+#define KOAN_DEFAULT_REFRESH_MHZ 60000
+
+/* Frame callback interval for a refresh rate in mHz, at least 1 ms. */
+static int koan_frame_interval_ms(int32_t refresh_mhz) {
+	if (refresh_mhz <= 0)
+		refresh_mhz = KOAN_DEFAULT_REFRESH_MHZ;
+	int interval = 1000000 / refresh_mhz;
+	return interval > 0 ? interval : 1;
+}
 
 static struct koan_server g_server = {0};
 
@@ -282,7 +294,7 @@ static void koan_tree_presented(struct wlr_surface *root) {
 	}
 	if (server->frame_timer && !server->frame_timer_armed) {
 		wl_event_source_timer_update(server->frame_timer,
-			KOAN_FRAME_INTERVAL_MS);
+			server->frame_interval_ms);
 		server->frame_timer_armed = true;
 	}
 }
@@ -786,13 +798,14 @@ static bool koan_server_create_output(struct koan_server *server) {
 	wlr_output_init(output, server->backend, &output_impl,
 		wl_display_get_event_loop(server->display), NULL);
 
-	/* Add a placeholder mode (1920x1080 @ 60Hz). app_server should update
-	 * this with real display dimensions. */
+	/* A default mode until app_server reports the screen's
+	 * (koan_server_set_output_dimensions). */
 	struct wlr_output_state state;
 	wlr_output_state_init(&state);
 	wlr_output_state_set_enabled(&state, true);
 	/* Enabling without a mode fails output_basic_test() ("zero mode"). */
-	wlr_output_state_set_custom_mode(&state, 1920, 1080, 60000);
+	wlr_output_state_set_custom_mode(&state, KOAN_DEFAULT_WIDTH,
+		KOAN_DEFAULT_HEIGHT, KOAN_DEFAULT_REFRESH_MHZ);
 	wlr_output_state_set_scale(&state, 1.0f);
 	if (!wlr_output_commit_state(output, &state))
 		wlr_log(WLR_ERROR, "Koan output: initial commit failed");
@@ -822,24 +835,80 @@ static bool koan_server_create_output(struct koan_server *server) {
 	wlr_output_create_global(output, server->display);
 	wlr_output_layout_add(server->output_layout, output, 0, 0);
 	server->output = output;
-	wlr_log(WLR_INFO, "Koan output: created (placeholder dimensions)");
+	wlr_log(WLR_INFO, "Koan output: created (default mode until app_server "
+		"reports the screen)");
 	return true;
 }
 
 bool koan_server_set_output_dimensions(int32_t width, int32_t height,
-		float scale) {
+		int32_t refresh_mhz, float scale) {
 	struct koan_server *server = &g_server;
-	if (!server->backend || width <= 0 || height <= 0)
+	struct wlr_output *output = server->output;
+	if (!output || width <= 0 || height <= 0)
 		return false;
+	if (refresh_mhz <= 0)
+		refresh_mhz = KOAN_DEFAULT_REFRESH_MHZ;
 
-	wlr_log(WLR_INFO, "Koan output: dimensions set to %dx%d scale=%.2f",
-		width, height, scale);
-	/* TODO: apply to the wlr_output once real output management is wired. */
-	(void)server;
-	(void)width;
-	(void)height;
-	(void)scale;
-	return true;
+	if (!(scale > 0.0f))
+		scale = 1.0f;
+
+	server->frame_interval_ms = koan_frame_interval_ms(refresh_mhz);
+
+	if (output->width == width && output->height == height
+			&& output->refresh == refresh_mhz && output->scale == scale)
+		return true;
+
+	/* wlroots keeps the exact scale, so the output's logical size matches
+	 * app_server's screen; wl_output.scale carries it rounded up, and
+	 * clients render their buffers at that integer scale
+	 * (koan_server_output_scale()). */
+	wlr_log(WLR_INFO, "Koan output: mode %dx%d@%d.%03d Hz, scale %.2f",
+		width, height, refresh_mhz / 1000, refresh_mhz % 1000, scale);
+
+	bool ok = true;
+	if (output->width != width || output->height != height
+			|| output->refresh != refresh_mhz) {
+		/* A mode change on an output with a renderer allocates a
+		 * swapchain buffer of the new size (output_ensure_buffer), 56 MiB
+		 * at 5K, that Koan never presents: app_server draws the screen.
+		 * Commit the mode without the renderer, as
+		 * koan_server_create_output() does for the first one. */
+		struct wlr_output_state state;
+		wlr_output_state_init(&state);
+		wlr_output_state_set_custom_mode(&state, width, height,
+			refresh_mhz);
+		struct wlr_renderer *renderer = output->renderer;
+		struct wlr_allocator *allocator = output->allocator;
+		output->renderer = NULL;
+		output->allocator = NULL;
+		ok = wlr_output_commit_state(output, &state);
+		output->renderer = renderer;
+		output->allocator = allocator;
+		wlr_output_state_finish(&state);
+	}
+	if (ok && output->scale != scale) {
+		/* Separately and with the renderer: a scale change makes
+		 * wlr_cursor upload the cursor image for the new scale, which
+		 * needs it, and it does not allocate a buffer. */
+		struct wlr_output_state state;
+		wlr_output_state_init(&state);
+		wlr_output_state_set_scale(&state, scale);
+		ok = wlr_output_commit_state(output, &state);
+		wlr_output_state_finish(&state);
+	}
+	/* Each commit emits wl_output.mode/scale and done to bound clients. */
+
+	if (!ok)
+		wlr_log(WLR_ERROR, "Koan output: mode commit failed");
+	return ok;
+}
+
+int32_t koan_server_output_scale(void) {
+	struct wlr_output *output = g_server.output;
+	if (!output || !(output->scale > 1.0f))
+		return 1;
+	int32_t scale = (int32_t)output->scale;
+	return output->scale > (float)scale ? scale + 1 : scale;
 }
 
 /* -------------------------------------------------------------------------- */
@@ -850,6 +919,8 @@ struct wl_display *koan_server_create(void) {
 	struct koan_server *server = &g_server;
 	wl_list_init(&server->toplevels);
 	wl_list_init(&server->surfaces);
+	server->frame_interval_ms =
+		koan_frame_interval_ms(KOAN_DEFAULT_REFRESH_MHZ);
 	wl_list_init(&server->new_input.link);
 	wl_list_init(&server->new_surface.link);
 	wl_list_init(&server->keyboard_key.link);
