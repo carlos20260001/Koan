@@ -62,6 +62,8 @@ struct desk_settings {
 	bool alwaysOnTop;
 	bool autoRaise;
 	bool autoHide;
+	// layout: kClassicLayout or kCupertinoLayout (see BarView.h)
+	int32 layout;
 };
 
 struct clock_settings {

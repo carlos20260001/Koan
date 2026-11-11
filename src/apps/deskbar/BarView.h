@@ -37,6 +37,7 @@ All rights reserved.
 
 
 #include <Deskbar.h>
+#include <Messenger.h>
 #include <View.h>
 
 #include "NavMenu.h"
@@ -57,6 +58,17 @@ enum {
 	kFullState = 2
 };
 
+// Deskbar layouts. The classic layout is placed by the vertical, left,
+// top and state settings. The Cupertino layout pins the bar across the
+// top of the screen as a menu bar (Deskbar menu, active application
+// menu, replicant tray and clock) and adds a Dock of running
+// applications at the bottom centre. The classic placement settings are
+// kept untouched while Cupertino is on, so switching back restores them.
+enum {
+	kClassicLayout = 0,
+	kCupertinoLayout = 1
+};
+
 const float kHModeHeight = 21.0f;
 const float kMenuBarHeight = 21.0f;
 const float kStatusHeight = 22.0f;
@@ -74,6 +86,7 @@ class TDragRegion;
 class TResizeControl;
 class TInlineScrollView;
 class TTeamMenuItem;
+class TCupertinoAppMenuBar;
 
 class TBarView : public BView {
 public:
@@ -98,6 +111,11 @@ public:
 			void			UpdatePlacement();
 			void			ChangeState(bool vertical, bool left, bool top, int32 state,
 								bool aSync = false);
+
+			void			SetDeskbarLayout(int32 layout);
+			int32			DeskbarLayout() const;
+			bool			Cupertino() const
+								{ return DeskbarLayout() == kCupertinoLayout; };
 
 			void			RaiseDeskbar(bool raise);
 			void			HideDeskbar(bool hide);
@@ -183,6 +201,11 @@ private:
 			void			PlaceApplicationBar();
 
 			void			_ChangeState(BMessage* message);
+			void			_UpdateLayout(bool oldVertical, bool oldLeft,
+								bool oldTop, int32 oldState);
+
+			void			_PlaceCupertino();
+			void			_RemoveCupertino();
 
 			TBarApp*			fBarApp;
 			TBarWindow*			fBarWindow;
@@ -211,6 +234,9 @@ private:
 			BMessageFilter*	fMouseFilter;
 
 			float			fTabHeight;
+
+			TCupertinoAppMenuBar*	fAppMenuBar;
+			BMessenger		fDockMessenger;
 };
 
 

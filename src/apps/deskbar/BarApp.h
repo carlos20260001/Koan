@@ -89,6 +89,9 @@ const int32 kWindowIconCacheCount = (kMaximumFontSize - kMinimumFontSize)
 // update preferences message constant
 const uint32 kUpdatePreferences = 'Pref';
 
+// switch the Deskbar layout, "layout": kClassicLayout or kCupertinoLayout
+const uint32 kSetLayout = 'Layt';
+
 // realign replicants message constant
 const uint32 kRealignReplicants = 'Algn';
 const uint32 kLaunchDesktopEntry = 'xdla';
@@ -163,6 +166,7 @@ public:
 			int32					TeamIconSize();
 
 			BBitmap*				FetchTeamIcon(team_id team, int32 size);
+			BBitmap*				CopyTeamIcon(team_id team, int32 size);
 			BBitmap*				FetchWindowIcon(bool local = true,
 										bool minimized = false);
 

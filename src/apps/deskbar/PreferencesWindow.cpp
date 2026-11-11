@@ -101,6 +101,16 @@ PreferencesWindow::PreferencesWindow(BRect frame)
 	fWindowAutoHide = new BCheckBox(B_TRANSLATE("Auto-hide"),
 		new BMessage(kAutoHide));
 
+	// Layout controls
+	BMessage* classicMessage = new BMessage(kSetLayout);
+	classicMessage->AddInt32("layout", kClassicLayout);
+	fLayoutClassic = new BRadioButton(B_TRANSLATE("Classic"),
+		classicMessage);
+	BMessage* cupertinoMessage = new BMessage(kSetLayout);
+	cupertinoMessage->AddInt32("layout", kCupertinoLayout);
+	fLayoutCupertino = new BRadioButton(
+		B_TRANSLATE("Cupertino (menu bar and Dock)"), cupertinoMessage);
+
 	// Menu settings
 	fMenuRecentDocuments->SetValue(fSettings.recentDocsEnabled);
 	fMenuRecentDocumentCount->SetEnabled(fSettings.recentDocsEnabled);
@@ -130,6 +140,9 @@ PreferencesWindow::PreferencesWindow(BRect frame)
 	fWindowAutoRaise->SetValue(fSettings.autoRaise);
 	fWindowAutoHide->SetValue(fSettings.autoHide);
 
+	// Layout settings
+	_UpdateLayoutButtons();
+
 	_EnableDisableDependentItems();
 
 	// Targets
@@ -143,6 +156,9 @@ PreferencesWindow::PreferencesWindow(BRect frame)
 	fWindowAlwaysOnTop->SetTarget(be_app);
 	fWindowAutoRaise->SetTarget(be_app);
 	fWindowAutoHide->SetTarget(be_app);
+
+	fLayoutClassic->SetTarget(be_app);
+	fLayoutCupertino->SetTarget(be_app);
 
 	const float spacing = be_control_look->DefaultItemSpacing() * 2.3;
 
@@ -206,6 +222,19 @@ PreferencesWindow::PreferencesWindow(BRect frame)
 			.End()
 		.View());
 
+	// Layout
+	BBox* layoutBox = new BBox("layout");
+	layoutBox->SetLabel(B_TRANSLATE("Layout"));
+	layoutBox->AddChild(BLayoutBuilder::Group<>()
+		.SetExplicitMaxSize(BSize(B_SIZE_UNLIMITED, B_SIZE_UNSET))
+		.AddGroup(B_VERTICAL, 0)
+			.Add(fLayoutClassic)
+			.Add(fLayoutCupertino)
+			.AddGlue()
+			.SetInsets(B_USE_DEFAULT_SPACING)
+			.End()
+		.View());
+
 	// Action Buttons
 	fDefaultsButton = new BButton(B_TRANSLATE("Defaults"),
 		new BMessage(kDefaults));
@@ -220,6 +249,7 @@ PreferencesWindow::PreferencesWindow(BRect frame)
 				.AddGroup(B_VERTICAL, B_USE_SMALL_SPACING)
 					.Add(menuBox)
 					.Add(windowSettingsBox)
+					.Add(layoutBox)
 				.End()
 			.End()
 			.AddGroup(B_HORIZONTAL, B_USE_DEFAULT_SPACING)
@@ -256,6 +286,7 @@ PreferencesWindow::MessageReceived(BMessage* message)
 			break;
 
 		case kUpdatePreferences:
+			_UpdateLayoutButtons();
 			_EnableDisableDependentItems();
 			_UpdateButtons();
 			break;
@@ -359,7 +390,8 @@ PreferencesWindow::_IsDefaultable()
 		|| defaults->recentFoldersCount != settings->recentFoldersCount
 		|| defaults->alwaysOnTop != settings->alwaysOnTop
 		|| defaults->autoRaise != settings->autoRaise
-		|| defaults->autoHide != settings->autoHide;
+		|| defaults->autoHide != settings->autoHide
+		|| defaults->layout != settings->layout;
 }
 
 
@@ -383,7 +415,8 @@ PreferencesWindow::_IsRevertable()
 		|| fSettings.recentFoldersCount != settings->recentFoldersCount
 		|| fSettings.alwaysOnTop != settings->alwaysOnTop
 		|| fSettings.autoRaise != settings->autoRaise
-		|| fSettings.autoHide != settings->autoHide;
+		|| fSettings.autoHide != settings->autoHide
+		|| fSettings.layout != settings->layout;
 }
 
 
@@ -511,6 +544,13 @@ PreferencesWindow::_UpdatePreferences(desk_settings* settings)
 		fWindowAutoHide->Invoke();
 	}
 
+	if (current->layout != settings->layout) {
+		BRadioButton* button = settings->layout == kCupertinoLayout
+			? fLayoutCupertino : fLayoutClassic;
+		button->SetValue(B_CONTROL_ON);
+		button->Invoke();
+	}
+
 	if (updateRecentCounts)
 		_UpdateRecentCounts();
 }
@@ -532,4 +572,14 @@ PreferencesWindow::_UpdateRecentCounts()
 	be_app->PostMessage(&message);
 
 	_EnableDisableDependentItems();
+}
+
+
+void
+PreferencesWindow::_UpdateLayoutButtons()
+{
+	bool cupertino = static_cast<TBarApp*>(be_app)->Settings()->layout
+		== kCupertinoLayout;
+	fLayoutClassic->SetValue(cupertino ? B_CONTROL_OFF : B_CONTROL_ON);
+	fLayoutCupertino->SetValue(cupertino ? B_CONTROL_ON : B_CONTROL_OFF);
 }

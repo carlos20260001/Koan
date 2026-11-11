@@ -61,6 +61,7 @@ private:
 			void			_UpdateButtons();
 			void			_UpdatePreferences(desk_settings* settings);
 			void			_UpdateRecentCounts();
+			void			_UpdateLayoutButtons();
 
 private:
 			BCheckBox*		fMenuRecentDocuments;
@@ -81,6 +82,9 @@ private:
 			BCheckBox*		fWindowAlwaysOnTop;
 			BCheckBox*		fWindowAutoRaise;
 			BCheckBox*		fWindowAutoHide;
+
+			BRadioButton*	fLayoutClassic;
+			BRadioButton*	fLayoutCupertino;
 
 			BButton*		fDefaultsButton;
 			BButton*		fRevertButton;

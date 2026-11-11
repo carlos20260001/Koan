@@ -122,7 +122,9 @@ TBarApp::TBarApp()
 	fBarWindow = new TBarWindow();
 	fBarView = fBarWindow->BarView();
 
-	be_roster->StartWatching(this);
+	be_roster->StartWatching(this,
+		B_REQUEST_LAUNCHED | B_REQUEST_QUIT | B_REQUEST_ACTIVATED);
+		// activation drives the Cupertino menu bar and Dock
 
 	gLocalizedNamePreferred
 		= BLocaleRoster::Default()->IsFilesystemTranslationPreferred();
@@ -239,6 +241,8 @@ TBarApp::SaveSettings()
 		prefs.AddBool("alwaysOnTop", fSettings.alwaysOnTop);
 		prefs.AddBool("autoRaise", fSettings.autoRaise);
 		prefs.AddBool("autoHide", fSettings.autoHide);
+		// layout
+		prefs.AddInt32("layout", fSettings.layout);
 
 		prefs.Flatten(fSettingsFile);
 	}
@@ -305,6 +309,8 @@ TBarApp::InitSettings()
 	settings.alwaysOnTop = fDefaultSettings.alwaysOnTop = false;
 	settings.autoRaise = fDefaultSettings.autoRaise = false;
 	settings.autoHide = fDefaultSettings.autoHide = false;
+	// layout
+	settings.layout = fDefaultSettings.layout = kClassicLayout;
 
 	clock_settings clock;
 	clock.showSeconds = false;
@@ -379,6 +385,14 @@ TBarApp::InitSettings()
 				fDefaultSettings.autoRaise);
 			settings.autoHide = prefs.GetBool("autoHide",
 				fDefaultSettings.autoHide);
+			// layout
+			settings.layout = prefs.GetInt32("layout",
+				fDefaultSettings.layout);
+		}
+
+		if (settings.layout != kClassicLayout
+			&& settings.layout != kCupertinoLayout) {
+			settings.layout = kClassicLayout;
 		}
 
 		// constrain width setting within limits
@@ -501,6 +515,31 @@ TBarApp::MessageReceived(BMessage* message)
 			if (fPreferencesWindow != NULL)
 				fPreferencesWindow->PostMessage(kUpdatePreferences);
 			break;
+
+		case B_SOME_APP_ACTIVATED:
+			// the Cupertino menu bar and Dock show the active application
+			fBarWindow->PostMessage(message, fBarView);
+			break;
+
+		case kSetLayout:
+		{
+			int32 layout;
+			if (message->FindInt32("layout", &layout) != B_OK)
+				break;
+
+			if (fBarWindow->Lock()) {
+				fBarView->SetDeskbarLayout(layout);
+				fBarWindow->Unlock();
+			}
+
+			// written now: a Deskbar that is killed or crashes never gets
+			// to save its settings on quit
+			SaveSettings();
+
+			if (fPreferencesWindow != NULL)
+				fPreferencesWindow->PostMessage(kUpdatePreferences);
+			break;
+		}
 
 		case B_SOME_APP_LAUNCHED:
 		{
@@ -904,6 +943,30 @@ TBarApp::FetchTeamIcon(team_id team, int32 size)
 			BBitmap* icon = NULL;
 			_CacheTeamIcon(barInfo, size, &icon);
 			return icon;
+		}
+	}
+
+	return NULL;
+}
+
+
+BBitmap*
+TBarApp::CopyTeamIcon(team_id team, int32 size)
+{
+	// A copy the caller owns, made under the lock: the cached icon goes
+	// away with its team, which another thread may remove at any time.
+	BAutolock autolock(sSubscriberLock);
+	if (!autolock.IsLocked())
+		return NULL;
+
+	int32 teamCount = sBarTeamInfoList.CountItems();
+	for (int32 i = 0; i < teamCount; i++) {
+		BarTeamInfo* barInfo = (BarTeamInfo*)sBarTeamInfoList.ItemAt(i);
+		if (barInfo->teams->HasItem((void*)(addr_t)team)) {
+			BBitmap* icon = NULL;
+			if (_CacheTeamIcon(barInfo, size, &icon) != B_OK || icon == NULL)
+				return NULL;
+			return new(std::nothrow) BBitmap(icon);
 		}
 	}
 
