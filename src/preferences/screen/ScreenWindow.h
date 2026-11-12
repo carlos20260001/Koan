@@ -54,6 +54,8 @@ private:
 			void			_CheckRefreshMenu();
 
 			void			_MarkReflectionItem(int32 reflection);
+			void			_MarkScaleItem(int32 scale);
+			status_t		_SetScale(int32 scale);
 			void			_UpdateActiveMode();
 			void			_UpdateActiveMode(int32 workspace);
 			void			_UpdateWorkspaceButtons();
@@ -113,6 +115,8 @@ private:
 			BMenuField*		fRotationField;
 			BPopUpMenu*		fReflectionMenu;
 			BMenuField*		fReflectionField;
+			BPopUpMenu*		fScaleMenu;
+			BMenuField*		fScaleField;
 			BPopUpMenu*		fSwapDisplaysMenu;
 			BMenuField*		fSwapDisplaysField;
 			BPopUpMenu*		fUseLaptopPanelMenu;
@@ -152,6 +156,8 @@ private:
 			float			fOriginalBrightness;
 			int32			fOriginalRotation;
 			int32			fOriginalReflection;
+			int32			fOriginalScale;
+				// percent; 0 when app_server reports no display layout
 			bool			fModified;
 
 			AlertWindow*	fAlertWindow;

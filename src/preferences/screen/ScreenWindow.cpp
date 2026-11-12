@@ -61,6 +61,42 @@
 #include "MonitorView.h"
 #include "ProfileNameWindow.h"
 #include "ScreenSettings.h"
+
+
+/*!	The scale of the main display, in percent, and its id, from the display
+	layout app_server keeps (BPrivate::get_display_layout()). \a scales gets
+	the scales it offers. Returns false when there is no layout to ask.
+*/
+static bool
+get_main_display_scale(int32& id, int32& scale, BMessage* scales = NULL)
+{
+	BMessage layout;
+	if (BPrivate::get_display_layout(layout) != B_OK)
+		return false;
+
+	BMessage display;
+	BMessage candidate;
+	bool found = false;
+	for (int32 i = 0; layout.FindMessage("display", i, &candidate) == B_OK;
+			i++) {
+		if (!found || candidate.GetBool("primary", false)) {
+			display = candidate;
+			found = true;
+		}
+	}
+	if (!found || display.FindInt32("id", &id) != B_OK
+		|| display.FindInt32("scale", &scale) != B_OK) {
+		return false;
+	}
+
+	if (scales != NULL) {
+		scales->MakeEmpty();
+		int32 value;
+		for (int32 i = 0; layout.FindInt32("scales", i, &value) == B_OK; i++)
+			scales->AddInt32("scale", value);
+	}
+	return true;
+}
 #include "Utility.h"
 
 /* Note, this headers defines a *private* interface to the Radeon accelerant.
@@ -673,6 +709,32 @@ ScreenWindow::ScreenWindow(ScreenSettings* settings)
 		B_TRANSLATE("Reflection:"), fReflectionMenu);
 	fReflectionField->SetAlignment(B_ALIGN_RIGHT);
 
+	// The density the desktop is drawn at (app_server's display layout,
+	// after air/OS's Screen preferences): 100 to 250 percent, applied at
+	// once like the rotation and kept or undone through the countdown.
+	fScaleMenu = new BPopUpMenu("Scale", true, true);
+	{
+		int32 id, scale;
+		BMessage scales;
+		if (get_main_display_scale(id, scale, &scales)) {
+			int32 value;
+			for (int32 i = 0; scales.FindInt32("scale", i, &value) == B_OK;
+					i++) {
+				BMessage* message = new BMessage(POP_SCALE_MSG);
+				message->AddInt32("scale", value);
+				BString label;
+				label.SetToFormat("%" B_PRId32 "%%", value);
+				fScaleMenu->AddItem(new BMenuItem(label.String(), message));
+			}
+		}
+	}
+	fScaleField = new BMenuField("ScaleMenu", B_TRANSLATE("Scale:"),
+		fScaleMenu);
+	fScaleField->SetAlignment(B_ALIGN_RIGHT);
+	_MarkScaleItem(fOriginalScale);
+	if (fScaleMenu->CountItems() == 0)
+		fScaleField->Hide();
+
 	BLayoutBuilder::Group<>(outerControlsView)
 		.AddGrid(B_USE_DEFAULT_SPACING, B_USE_SMALL_SPACING)
 			.Add(fResolutionField->CreateLabelLayoutItem(), 0, 0)
@@ -693,6 +755,8 @@ ScreenWindow::ScreenWindow(ScreenSettings* settings)
 			.Add(fRotationField->CreateMenuBarLayoutItem(), 1, 7)
 			.Add(fReflectionField->CreateLabelLayoutItem(), 0, 8)
 			.Add(fReflectionField->CreateMenuBarLayoutItem(), 1, 8)
+			.Add(fScaleField->CreateLabelLayoutItem(), 0, 9)
+			.Add(fScaleField->CreateMenuBarLayoutItem(), 1, 9)
 		.End()
 		.Add(fTemperatureField);
 
@@ -1158,6 +1222,36 @@ ScreenWindow::_MarkReflectionItem(int32 reflection)
 
 
 void
+ScreenWindow::_MarkScaleItem(int32 scale)
+{
+	for (int32 i = 0; i < fScaleMenu->CountItems(); i++) {
+		BMenuItem* item = fScaleMenu->ItemAt(i);
+		if (item->Message()->GetInt32("scale", 0) == scale) {
+			item->SetMarked(true);
+			return;
+		}
+	}
+}
+
+
+/*!	Sets the main display's scale through app_server's display layout. */
+status_t
+ScreenWindow::_SetScale(int32 scale)
+{
+	int32 id, current;
+	if (!get_main_display_scale(id, current))
+		return B_NOT_SUPPORTED;
+
+	BMessage change;
+	change.AddInt32("id", id);
+	change.AddInt32("scale", scale);
+	BMessage request;
+	request.AddMessage("display", &change);
+	return BPrivate::set_display_layout(request);
+}
+
+
+void
 ScreenWindow::_UpdateActiveMode()
 {
 	_UpdateActiveMode(current_workspace());
@@ -1233,6 +1327,10 @@ ScreenWindow::ScreenChanged(BRect frame, color_space mode)
 		_UpdateOriginal();
 		_UpdateActiveMode();
 	}
+
+	int32 id, scale;
+	if (get_main_display_scale(id, scale))
+		_MarkScaleItem(scale);
 
 	// Keep the preflet fully on the new screen.
 	const BRect windowFrame = Frame();
@@ -1451,6 +1549,39 @@ ScreenWindow::MessageReceived(BMessage* message)
 			break;
 		}
 
+		case POP_SCALE_MSG:
+		{
+			int32 scale;
+			int32 id, current;
+			if (message->FindInt32("scale", &scale) != B_OK
+				|| !get_main_display_scale(id, current) || scale == current)
+				break;
+
+			bool wasPending = fAlertWindow != NULL;
+			_BeginScreenChange();
+			status_t status = _SetScale(scale);
+			if (status != B_OK) {
+				BString text(B_TRANSLATE("The screen could not be scaled to "
+					"%scale%%: %error%."));
+				BString scaleText;
+				scaleText << scale;
+				text.ReplaceFirst("%scale%", scaleText);
+				text.ReplaceFirst("%error%", strerror(status));
+				BAlert* alert = new BAlert(B_TRANSLATE("Scale"), text.String(),
+					B_TRANSLATE("OK"), NULL, NULL, B_WIDTH_AS_USUAL,
+					B_WARNING_ALERT);
+				alert->SetFlags(alert->Flags() | B_CLOSE_ON_ESCAPE);
+				alert->Go(NULL);
+
+				_MarkScaleItem(current);
+				if (!wasPending)
+					_DropScreenChange();
+			} else
+				_ShowChangeAlert();
+			_CheckApplyEnabled();
+			break;
+		}
+
 		case POP_COMBINE_DISPLAYS_MSG:
 		{
 			// new combine mode has bee chosen
@@ -1545,6 +1676,15 @@ ScreenWindow::MessageReceived(BMessage* message)
 
 			fScreenMode.SetReflection(fOriginalReflection);
 			_MarkReflectionItem(fOriginalReflection);
+
+			if (fOriginalScale > 0) {
+				int32 id, current;
+				if (get_main_display_scale(id, current)
+					&& current != fOriginalScale) {
+					_SetScale(fOriginalScale);
+				}
+				_MarkScaleItem(fOriginalScale);
+			}
 
 			_UpdateActiveMode();
 			break;
@@ -1769,9 +1909,15 @@ ScreenWindow::_CheckApplyEnabled()
 	float brightness = -1;
 	screen.GetBrightness(&brightness);
 
+	int32 id;
+	int32 scale = fOriginalScale;
+	if (fOriginalScale > 0)
+		get_main_display_scale(id, scale);
+
 	fRevertButton->SetEnabled(columns != fOriginalWorkspacesColumns
 		|| rows != fOriginalWorkspacesRows
 		|| brightness != fOriginalBrightness
+		|| scale != fOriginalScale
 		|| fSelected != fOriginal);
 }
 
@@ -1786,6 +1932,10 @@ ScreenWindow::_UpdateOriginal()
 	fScreenMode.UpdateOriginalModes();
 	fOriginalRotation = fScreenMode.Rotation();
 	fOriginalReflection = fScreenMode.Reflection();
+
+	int32 id;
+	if (!get_main_display_scale(id, fOriginalScale))
+		fOriginalScale = 0;
 }
 
 
@@ -2016,6 +2166,10 @@ ScreenWindow::_RevertScreenChange()
 		rotationItem->SetMarked(true);
 
 	_MarkReflectionItem(fOriginalReflection);
+
+	int32 id, scale;
+	if (get_main_display_scale(id, scale))
+		_MarkScaleItem(scale);
 
 	_UpdateWorkspaceButtons();
 	_UpdateActiveMode();
