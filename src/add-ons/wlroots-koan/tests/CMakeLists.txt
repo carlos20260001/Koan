@@ -33,6 +33,17 @@ add_custom_command(
     DEPENDS "${_koan_test_deco_xml}"
     VERBATIM
 )
+set(_koan_test_viewporter_xml
+    "${CMAKE_CURRENT_SOURCE_DIR}/../protocol/stable/viewporter/viewporter.xml")
+set(_koan_test_viewporter_header
+    "${CMAKE_CURRENT_BINARY_DIR}/viewporter-client-protocol.h")
+add_custom_command(
+    OUTPUT "${_koan_test_viewporter_header}"
+    COMMAND "${WAYLAND_SCANNER}" client-header
+        "${_koan_test_viewporter_xml}" "${_koan_test_viewporter_header}"
+    DEPENDS "${_koan_test_viewporter_xml}"
+    VERBATIM
+)
 set(_koan_test_ctl_xml "${CMAKE_CURRENT_SOURCE_DIR}/../protocol/koan-test-v1.xml")
 set(_koan_test_ctl_header "${CMAKE_CURRENT_BINARY_DIR}/koan-test-v1-client-protocol.h")
 add_custom_command(
@@ -73,6 +84,7 @@ add_executable(koan_protocol_test
     koan_protocol_test.c
     "${_koan_test_xdg_header}"
     "${_koan_test_ctl_header}"
+    "${_koan_test_viewporter_header}"
 )
 target_include_directories(koan_protocol_test PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}/../server"

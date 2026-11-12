@@ -108,6 +108,7 @@
 #include <wlr/util/log.h>
 
 #include "xdg-shell-client-protocol.h"
+#include "viewporter-client-protocol.h"
 #include "koan-test-v1-client-protocol.h"
 #include "koan_test.h"
 
@@ -426,6 +427,7 @@ struct conn {
 	struct wl_seat *seat;
 	struct wl_output *output;   /* bound so wl_surface.enter can name it */
 	struct wl_data_device_manager *data_device_manager;
+	struct wp_viewporter *viewporter;
 	uint32_t seat_caps;
 	struct global globals[MAX_GLOBALS];
 	int global_count;
@@ -505,6 +507,10 @@ registry_global(void *data, struct wl_registry *registry, uint32_t name,
 		&& c->output == NULL) {
 		c->output = wl_registry_bind(registry, name, &wl_output_interface,
 			min_u32(version, 2));
+	} else if (strcmp(interface, wp_viewporter_interface.name) == 0
+		&& c->viewporter == NULL) {
+		c->viewporter = wl_registry_bind(registry, name,
+			&wp_viewporter_interface, 1);
 	} else if (strcmp(interface, wl_seat_interface.name) == 0
 		&& c->seat == NULL) {
 		c->seat = wl_registry_bind(registry, name, &wl_seat_interface,
@@ -638,7 +644,6 @@ static const char *const kCoreGlobals[] = {
 
 /* Protocols the audit lists as not implemented yet. */
 static const char *const kNotImplementedGlobals[] = {
-	"wp_viewporter",
 	"wp_presentation",
 	"wp_fractional_scale_manager_v1",
 	"zwp_input_timestamps_manager_v1",
@@ -2170,6 +2175,73 @@ test_compose_scale(struct conn *c, struct toplevel *t)
 	commit_scaled(c, t, 64, 48, 1, COLOR_ROOT);
 }
 
+/* Firefox draws its whole window into a subsurface and, on a scaled
+ * output, gives that subsurface its size with wp_viewport.set_destination
+ * rather than a buffer scale: a buffer twice the window's size in each
+ * direction is shown at the window's size. Without wp_viewporter the
+ * subsurface is as large as its buffer and only its top left quarter is
+ * seen, twice too large. The buffer here is red on its left half and green
+ * on its right: scaled into the 64x48 window, the window's right edge is
+ * green. */
+static void
+test_compose_viewport(struct conn *c, struct toplevel *t)
+{
+	if (c->viewporter == NULL) {
+		result(ST_FAIL, "compose-viewport-subsurface",
+			"no wp_viewporter global");
+		return;
+	}
+
+	const int w = 128, h = 96;
+	size_t size = (size_t)w * h * 4;
+	int fd = make_shm_fd(size);
+	uint32_t *pixels = fd >= 0 ? mmap(NULL, size, PROT_READ | PROT_WRITE,
+		MAP_SHARED, fd, 0) : MAP_FAILED;
+	if (pixels == MAP_FAILED) {
+		if (fd >= 0)
+			close(fd);
+		result(ST_BLOCKED, "compose-viewport-subsurface", "no shm");
+		return;
+	}
+	for (int y = 0; y < h; y++) {
+		for (int x = 0; x < w; x++)
+			pixels[y * w + x] = x < w / 2 ? COLOR_ROOT : COLOR_CHILD;
+	}
+	munmap(pixels, size);
+	struct wl_shm_pool *pool = wl_shm_create_pool(c->shm, fd,
+		(int32_t)size);
+	struct wl_buffer *buffer = wl_shm_pool_create_buffer(pool, 0, w, h,
+		w * 4, WL_SHM_FORMAT_ARGB8888);
+	wl_shm_pool_destroy(pool);
+	close(fd);
+
+	struct wl_surface *child = wl_compositor_create_surface(c->compositor);
+	struct wl_subsurface *sub = wl_subcompositor_get_subsurface(
+		c->subcompositor, child, t->surface);
+	struct wp_viewport *viewport = wp_viewporter_get_viewport(
+		c->viewporter, child);
+	wp_viewport_set_destination(viewport, 64, 48);
+	wl_surface_attach(child, buffer, 0, 0);
+	wl_surface_damage(child, 0, 0, w, h);
+	wl_surface_commit(child);
+	attach_color(c, t->surface, 64, 48, COLOR_GRAND);
+	wl_surface_commit(t->surface);
+	bool ok = settle(c);
+
+	uint32_t left = frame_pixel(4, 20), right = frame_pixel(60, 20);
+	result(ok && left == COLOR_ROOT && right == COLOR_CHILD
+			? ST_PASS : ST_FAIL, "compose-viewport-subsurface",
+		"left 0x%08x right 0x%08x (expected red 0x%08x, then green "
+		"0x%08x)", left, right, COLOR_ROOT, COLOR_CHILD);
+
+	wp_viewport_destroy(viewport);
+	wl_subsurface_destroy(sub);
+	wl_surface_destroy(child);
+	attach_color(c, t->surface, 64, 48, COLOR_ROOT);
+	wl_surface_commit(t->surface);
+	settle(c);
+}
+
 static int
 run_compose(void)
 {
@@ -2192,6 +2264,7 @@ run_compose(void)
 	test_frame_throttle(&c, &t);
 	test_nested_sync(&c, &t);
 	test_compose_scale(&c, &t);
+	test_compose_viewport(&c, &t);
 
 	struct conn after;
 	bool alive = conn_open(&after, s.socket);

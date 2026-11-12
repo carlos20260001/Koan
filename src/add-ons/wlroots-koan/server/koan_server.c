@@ -36,6 +36,7 @@
 #include <wlr/interfaces/wlr_keyboard.h>
 #include <xkbcommon/xkbcommon.h>
 #include <wlr/types/wlr_subcompositor.h>
+#include <wlr/types/wlr_viewporter.h>
 #include <wlr/types/wlr_xdg_shell.h>
 #include <wlr/types/wlr_xdg_decoration_v1.h>
 #include <wlr/types/wlr_server_decoration.h>
@@ -1016,8 +1017,15 @@ struct wl_display *koan_server_create(void) {
 	server->subcompositor = wlr_subcompositor_create(server->display);
 	server->data_device_manager =
 		wlr_data_device_manager_create(server->display);
+	/* wp_viewporter: clients size a surface independently of its buffer.
+	 * Firefox gives its content subsurface its size this way on a scaled
+	 * output; without it the subsurface is as large as its buffer.
+	 * wlroots applies the viewport to surface->current, which
+	 * compose_surface() maps. */
+	struct wlr_viewporter *viewporter = wlr_viewporter_create(
+		server->display);
 	if (!server->compositor || !server->subcompositor ||
-			!server->data_device_manager) {
+			!server->data_device_manager || !viewporter) {
 		wlr_log(WLR_ERROR, "Failed to create core Wayland globals");
 		koan_server_destroy(server->display);
 		return NULL;
