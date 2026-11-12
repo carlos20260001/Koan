@@ -1538,15 +1538,22 @@ DrmHWInterface::SetMode(const display_mode& mode)
 	// now decides hardware vs. software, so it must always run to flip
 	// the sprite back on after a return from a rotated orientation.
 	if (fCursor.IsSet()) {
-		if (fCursorLocation.x > fDisplayMode.virtual_width - 1)
-			fCursorLocation.x = fDisplayMode.virtual_width - 1;
-		if (fCursorLocation.y > fDisplayMode.virtual_height - 1)
-			fCursorLocation.y = fDisplayMode.virtual_height - 1;
+		const int32 logicalWidth = LogicalWidth() > 0
+			? LogicalWidth() : fDisplayMode.virtual_width;
+		const int32 logicalHeight = LogicalHeight() > 0
+			? LogicalHeight() : fDisplayMode.virtual_height;
+		if (fCursorLocation.x > logicalWidth - 1)
+			fCursorLocation.x = logicalWidth - 1;
+		if (fCursorLocation.y > logicalHeight - 1)
+			fCursorLocation.y = logicalHeight - 1;
 		if (fCursorLocation.x < 0)
 			fCursorLocation.x = 0;
 		if (fCursorLocation.y < 0)
 			fCursorLocation.y = 0;
-		SetCursor(fCursor);
+		// Re-arm from the cursor as programs set it; fCursor is the copy
+		// at the render scale.
+		SetCursor(fSourceCursor.IsSet() ? fSourceCursor.Get()
+			: fCursor.Get());
 	}
 
 	_SetupDirectRender();
@@ -2410,6 +2417,21 @@ DrmHWInterface::SetSoftwareScale(uint16 percent)
 }
 
 
+/*!	Where the cursor plane goes for a pointer at the logical  location:
+	the location in buffer pixels (render scale), as _CursorFrame() puts
+	the software cursor, less the hot spot of the sprite, which is already
+	at the buffer's density.
+*/
+void
+DrmHWInterface::_CursorPlanePosition(BPoint location, BPoint hot,
+	int32& px, int32& py) const
+{
+	const float factor = RenderScaleFactor();
+	px = (int32)floorf(location.x * factor) - (int32)hot.x;
+	py = (int32)floorf(location.y * factor) - (int32)hot.y;
+}
+
+
 // The rotation convention lives in PanelOrientationTransform.h.
 
 
@@ -2822,6 +2844,11 @@ DrmHWInterface::SetCursor(ServerCursor* cursor)
 
 	HWInterface::SetCursor(cursor);
 
+	// The base class keeps fCursor at the buffer's density (render scale);
+	// that copy is what the sprite shows.
+	if (cursor != NULL && fCursor.IsSet())
+		cursor = fCursor.Get();
+
 	// The node can be freed by a concurrent udev rescan. Taken after the
 	// base call so the lock order stays modeset-before-overlays everywhere.
 	ModesetGuard modesetGuard(&fModesetMutex);
@@ -2897,9 +2924,9 @@ DrmHWInterface::SetCursor(ServerCursor* cursor)
 			cw * 4);
 	}
 
+	int32 px, py;
+	_CursorPlanePosition(fCursorLocation, cursor->GetHotSpot(), px, py);
 	const BPoint hot = cursor->GetHotSpot();
-	const int32  px  = (int32)fCursorLocation.x - (int32)hot.x;
-	const int32  py  = (int32)fCursorLocation.y - (int32)hot.y;
 
 	int ret;
 	if (fCursorUsesAtomic) {
@@ -2945,8 +2972,8 @@ DrmHWInterface::SetCursorVisible(bool visible)
 		BPoint hot(0, 0);
 		if (fCursor.IsSet())
 			hot = fCursor->GetHotSpot();
-		const int32 px = (int32)fCursorLocation.x - (int32)hot.x;
-		const int32 py = (int32)fCursorLocation.y - (int32)hot.y;
+		int32 px, py;
+		_CursorPlanePosition(fCursorLocation, hot, px, py);
 
 		// fHardwareCursorEnabled must track the actual result, or
 		// _DrawCursor() and the hardware plane both draw at once.
@@ -3041,8 +3068,8 @@ DrmHWInterface::MoveCursorTo(float x, float y)
 	if (!dev || !dev->cursor_ok)
 		return;
 
-	const int32 px = (int32)floorf(x - hot.x);
-	const int32 py = (int32)floorf(y - hot.y);
+	int32 px, py;
+	_CursorPlanePosition(BPoint(x, y), hot, px, py);
 
 	if (fCursorUsesAtomic) {
 		if (fAtomicBatch && fPageFlipPending) {
