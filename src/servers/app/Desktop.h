@@ -72,9 +72,16 @@ namespace BPrivate {
 
 // Live state captured when an unconfirmed display change begins; the
 // revert applies it wholesale when the deadline fires.
+static const int32 kMaxSnapshotDisplays = 8;
+
 struct screen_change_snapshot {
 			int32				rotation;
 			int32				reflection;
+			int32				displayCount;
+			uint32				displayIDs[kMaxSnapshotDisplays];
+			int32				displayScales[kMaxSnapshotDisplays];
+				// percent, as DisplayLayout's "scale"
+
 			int32				columns;
 			int32				rows;
 			int32				modeCount;

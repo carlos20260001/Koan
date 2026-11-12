@@ -1366,6 +1366,17 @@ Desktop::_TakeScreenChangeSnapshot(screen_change_snapshot& snapshot)
 		snapshot.reflection = HWInterface()->PanelReflection();
 	}
 
+	{
+		AutoReadLocker screenLocker(fScreenLock);
+		for (int32 i = 0; i < fDisplays.CountDisplays()
+				&& snapshot.displayCount < kMaxSnapshotDisplays; i++) {
+			const DisplayInfo* display = fDisplays.DisplayAt(i);
+			snapshot.displayIDs[snapshot.displayCount] = display->id;
+			snapshot.displayScales[snapshot.displayCount] = display->scale;
+			snapshot.displayCount++;
+		}
+	}
+
 	snapshot.columns = fSettings->WorkspacesColumns();
 	snapshot.rows = fSettings->WorkspacesRows();
 
@@ -1402,6 +1413,26 @@ Desktop::_RestoreScreenChange()
 		SetRotation(0, snapshot.rotation);
 		SetReflection(0, snapshot.reflection);
 	}
+
+	// The display scales, for the displays still there whose scale moved.
+	BMessage request;
+	{
+		AutoReadLocker screenLocker(fScreenLock);
+		for (int32 i = 0; i < snapshot.displayCount; i++) {
+			const DisplayInfo* display
+				= fDisplays.DisplayByID(snapshot.displayIDs[i]);
+			if (display == NULL || !display->IsConnected()
+				|| display->scale == snapshot.displayScales[i]) {
+				continue;
+			}
+			BMessage change;
+			change.AddInt32("id", (int32)snapshot.displayIDs[i]);
+			change.AddInt32("scale", snapshot.displayScales[i]);
+			request.AddMessage("display", &change);
+		}
+	}
+	if (!request.IsEmpty())
+		SetDisplayLayout(request);
 
 	if (snapshot.columns != fSettings->WorkspacesColumns()
 		|| snapshot.rows != fSettings->WorkspacesRows()) {
@@ -1441,6 +1472,10 @@ Desktop::_StoreScreenChange()
 
 		StoreWorkspaceConfiguration(workspace);
 	}
+
+	// The display scales confirmed with the rest.
+	AutoWriteLocker screenLocker(fScreenLock);
+	_StoreDisplayLayout();
 }
 
 
@@ -4850,6 +4885,12 @@ Desktop::_UpdateDisplays()
 void
 Desktop::_StoreDisplayLayout()
 {
+	// While an unconfirmed change is pending only the live layout moves,
+	// as with the mode and the rotation; confirming stores it
+	// (_StoreScreenChange()), cancelling restores the old one.
+	if (_ScreenChangeStoreDeferred())
+		return;
+
 	BMessage saved = *fSettings->DisplaysMessage();
 	fDisplays.Store(saved);
 	fSettings->SetDisplaysMessage(saved);
