@@ -197,6 +197,9 @@ Server(
 		# input path is input_server, run pre-auth via janus.
 		drawing/interface/linux/LibEvdevEventStream.cpp
 
+		# EDID decoder shared with Haiku's accelerants
+		${CMAKE_SOURCE_DIR}/src/add-ons/accelerants/common/decode_edid.c
+
 		stackandtile/SATDecorator.cpp
 		stackandtile/SATGroup.cpp
 		stackandtile/SATWindow.cpp
