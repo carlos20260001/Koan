@@ -167,3 +167,5 @@ Koan is built by volunteers. There's is not current dontation page for Koan itse
 ### License
 
 Koan contains components licensed under the [GPL-2.0](LICENSE), [GPL-3.0](https://www.gnu.org/licenses/gpl-3.0.html) (for example the WLCS test modules in `src/add-ons/wlroots-koan/tests/wlcs/`), [MIT](https://opensource.org/licenses/MIT), and [Apache-2.0](data/system/data/licenses/Apache%20v2). Check each component's file and package notices for its applicable license.
+
+Code ported from [air/OS](https://github.com/airos-works/haiku) is under the MIT License; its notice is appended to [LICENSE](LICENSE), and every ported file keeps its original copyright header and every ported commit its original author.
