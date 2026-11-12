@@ -2395,6 +2395,21 @@ DrmHWInterface::IsDoubleBuffered() const
 }
 
 
+/*!	The base class's software scale needs a back buffer at the logical
+	size, enlarged on every copy to the front. The render buffer and the
+	page flipped scanout buffers here are all at the mode's size, so only
+	100 percent is accepted; scaled drawing comes with the render scale.
+*/
+status_t
+DrmHWInterface::SetSoftwareScale(uint16 percent)
+{
+	if (percent != 100)
+		return B_UNSUPPORTED;
+
+	return HWInterface::SetSoftwareScale(percent);
+}
+
+
 // The rotation convention lives in PanelOrientationTransform.h.
 
 

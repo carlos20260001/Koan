@@ -139,6 +139,9 @@ public:
 	virtual	RenderingBuffer*	BackBuffer() const;
 	virtual	bool				IsDoubleBuffered() const;
 
+	// No software scaling: the render buffer stays at the mode's size.
+	virtual	status_t			SetSoftwareScale(uint16 percent);
+
 	virtual	status_t			CopyBackToFront(const BRect& frame);
 	virtual	status_t			CopyBackToFront(const BRegion& region);
 
