@@ -126,7 +126,7 @@ fake_set_size(void *userdata, struct koan_queue *queue, void *window,
 static void
 fake_set_buffer(void *userdata, struct koan_queue *queue, void *window,
 	void *data, int32_t width, int32_t height, int32_t stride,
-	uint32_t format, int32_t scale)
+	uint32_t format, float scale)
 {
 	(void)scale; /* 1: these tests never set an output scale */
 	(void)userdata;

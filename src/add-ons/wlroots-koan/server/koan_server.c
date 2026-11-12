@@ -37,6 +37,7 @@
 #include <xkbcommon/xkbcommon.h>
 #include <wlr/types/wlr_subcompositor.h>
 #include <wlr/types/wlr_viewporter.h>
+#include <wlr/types/wlr_fractional_scale_v1.h>
 #include <wlr/types/wlr_xdg_shell.h>
 #include <wlr/types/wlr_xdg_decoration_v1.h>
 #include <wlr/types/wlr_server_decoration.h>
@@ -268,12 +269,27 @@ static void koan_send_frame_done(struct wlr_surface *surface, int sx, int sy,
 	wlr_surface_send_frame_done(surface, data);
 }
 
-static void koan_send_enter(struct wlr_surface *surface, int sx, int sy,
+/* The scale a surface should render at, as the wlroots scene would tell
+ * it: the exact output scale through wp_fractional_scale_v1 (sent only
+ * when it changes, and only to clients that asked), and that rounded up as
+ * wl_surface.preferred_buffer_scale. Koan composes surfaces itself rather
+ * than through scene outputs, so it sends both. */
+static void koan_send_scale(struct wlr_surface *surface, int sx, int sy,
 		void *data) {
 	(void)sx;
 	(void)sy;
+	(void)data;
+	wlr_fractional_scale_v1_notify_scale(surface,
+		koan_server_output_scale_exact());
+	wlr_surface_set_preferred_buffer_scale(surface,
+		koan_server_output_scale());
+}
+
+static void koan_send_enter(struct wlr_surface *surface, int sx, int sy,
+		void *data) {
 	/* No-op for a surface that is already on the output. */
 	wlr_surface_send_enter(surface, data);
+	koan_send_scale(surface, sx, sy, NULL);
 }
 
 /* A mapped tree showed new content: tell its surfaces which output they
@@ -899,6 +915,17 @@ bool koan_server_set_output_dimensions(int32_t width, int32_t height,
 	}
 	/* Each commit emits wl_output.mode/scale and done to bound clients. */
 
+	/* Surfaces already shown learn the new scale now, not at their next
+	 * commit: a client waits for it before rendering at the new density. */
+	if (ok) {
+		struct koan_surface *ks;
+		wl_list_for_each(ks, &g_server.surfaces, link) {
+			if (ks->surface->mapped)
+				wlr_surface_for_each_surface(ks->surface, koan_send_scale,
+					NULL);
+		}
+	}
+
 	if (!ok)
 		wlr_log(WLR_ERROR, "Koan output: mode commit failed");
 	return ok;
@@ -910,6 +937,13 @@ int32_t koan_server_output_scale(void) {
 		return 1;
 	int32_t scale = (int32_t)output->scale;
 	return output->scale > (float)scale ? scale + 1 : scale;
+}
+
+float koan_server_output_scale_exact(void) {
+	struct wlr_output *output = g_server.output;
+	if (!output || !(output->scale > 1.0f))
+		return 1.0f;
+	return output->scale;
 }
 
 /* -------------------------------------------------------------------------- */
@@ -1024,8 +1058,16 @@ struct wl_display *koan_server_create(void) {
 	 * compose_surface() maps. */
 	struct wlr_viewporter *viewporter = wlr_viewporter_create(
 		server->display);
+	/* wp_fractional_scale_v1: clients that bind it are told the exact
+	 * output scale (1.5 at 150%) and render that many pixels, which the
+	 * adapter composes 1:1 at the same density. The scene sends the
+	 * preferred scale as surfaces enter the output and when its scale
+	 * changes; clients without it keep the integer wl_output.scale. */
+	struct wlr_fractional_scale_manager_v1 *fractional_scale =
+		wlr_fractional_scale_manager_v1_create(server->display, 1);
 	if (!server->compositor || !server->subcompositor ||
-			!server->data_device_manager || !viewporter) {
+			!server->data_device_manager || !viewporter
+			|| !fractional_scale) {
 		wlr_log(WLR_ERROR, "Failed to create core Wayland globals");
 		koan_server_destroy(server->display);
 		return NULL;

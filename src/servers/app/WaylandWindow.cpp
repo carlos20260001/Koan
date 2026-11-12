@@ -1012,7 +1012,7 @@ WaylandWindowBridge::s_set_size(void *userdata, struct koan_queue *queue,
 void
 WaylandWindowBridge::s_set_buffer(void *userdata, struct koan_queue *queue,
 		void *window, void *data, int32_t width, int32_t height,
-		int32_t stride, uint32_t format, int32_t scale)
+		int32_t stride, uint32_t format, float scale)
 {
 	WaylandWindowBridge *bridge = (WaylandWindowBridge *)userdata;
 	if (!bridge || !queue || !window || !data) {
@@ -1031,7 +1031,7 @@ WaylandWindowBridge::s_set_buffer(void *userdata, struct koan_queue *queue,
 	payload.set_buffer.height = height;
 	payload.set_buffer.stride = stride;
 	payload.set_buffer.format = format;
-	payload.set_buffer.scale = scale > 0 ? scale : 1;
+	payload.set_buffer.scale = scale >= 1.0f ? scale : 1.0f;
 	koan_queue_push(queue, KOAN_CMD_SET_BUFFER, &payload, NULL);
 
 	bridge->_Wake();
@@ -1465,13 +1465,14 @@ WaylandWindowBridge::process_set_buffer(struct koan_command *cmd)
 	int32_t height = cmd->payload.set_buffer.height;
 	int32_t stride = cmd->payload.set_buffer.stride;
 	uint32_t format = cmd->payload.set_buffer.format;
-	int32_t scale = cmd->payload.set_buffer.scale > 0
-		? cmd->payload.set_buffer.scale : 1;
+	float scale = cmd->payload.set_buffer.scale >= 1.0f
+		? cmd->payload.set_buffer.scale : 1.0f;
 	/* The window's content size in window (logical) coordinates; the
 	 * bitmap has 'scale' pixels per unit and is drawn into that rect. At
-	 * a matching screen scale, Painter copies it 1:1. */
-	int32_t logicalWidth = width / scale;
-	int32_t logicalHeight = height / scale;
+	 * a matching screen scale, Painter copies it 1:1. The adapter rounds
+	 * the pixel size, which rounding back undoes for scales of 1 and up. */
+	int32_t logicalWidth = (int32_t)lroundf(width / scale);
+	int32_t logicalHeight = (int32_t)lroundf(height / scale);
 	if (logicalWidth <= 0 || logicalHeight <= 0)
 		return 0;
 
@@ -1540,9 +1541,19 @@ WaylandWindowBridge::process_set_buffer(struct koan_command *cmd)
 	/* The view takes its own reference. The bitmap is not client-visible,
 	 * so drop the manager registration and our creation reference; the
 	 * view owns it until it is replaced or destroyed. */
+	/* Clients render at the integer output scale (2 at 125 to 200%), so at
+	 * a fractional screen scale their buffer is shrunk to the screen's
+	 * density. Nearest neighbour drops whole rows and columns of it and
+	 * leaves strokes of uneven width; filter instead, as macOS and other
+	 * compositors do for surfaces not drawn at the panel's density. At a
+	 * matching density the copy stays 1:1 and unfiltered. */
+	float renderScale = fDesktop->HWInterface() != NULL
+		? fDesktop->HWInterface()->RenderScaleFactor() : 1.0f;
+	uint32 bitmapOptions = fabsf(scale - renderScale) > 0.001f
+		? B_FILTER_BITMAP_BILINEAR : 0;
 	top_view->SetViewBitmap(bitmap, IntRect(0, 0, width - 1, height - 1),
 		IntRect(0, 0, logicalWidth - 1, logicalHeight - 1),
-		0 /* no tiling */, 0);
+		0 /* no tiling */, bitmapOptions);
 	gBitmapManager->BitmapRemoved(bitmap);
 
 	/* MarkContentDirty() intersects its arguments in place, so pass

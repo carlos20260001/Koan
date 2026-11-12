@@ -32,6 +32,7 @@
  *  - xdg_toplevel close-> close request sent to client (not a destroy)
  */
 
+#include <math.h>
 #include <stdlib.h>
 #include <string.h>
 #include <drm_fourcc.h>
@@ -71,7 +72,7 @@ struct koan_toplevel {
 	int32_t buffer_height;
 	int32_t buffer_stride;
 	uint32_t buffer_format;
-	int32_t buffer_scale;
+	float buffer_scale;
 
 	/* xdg_toplevel role event listeners. */
 	struct wl_listener toplevel_destroy;
@@ -111,7 +112,7 @@ struct koan_popup {
 	int32_t x, y;                       /* last position sent */
 	void *buffer_data;                  /* frame waiting for POPUP_READY */
 	int32_t buffer_width, buffer_height, buffer_stride;
-	int32_t buffer_scale;
+	float buffer_scale;
 	struct wl_listener destroy;
 	struct wl_listener unmap;
 };
@@ -193,9 +194,9 @@ struct wlr_box koan_adapter_window_box(struct wlr_xdg_toplevel *toplevel) {
 struct compose_target {
 	uint32_t *pixels;     /* premultiplied ARGB8888, box * scale pixels */
 	struct wlr_box box;   /* in root-surface coordinates */
-	int32_t scale;        /* pixels per surface coordinate unit */
-	int32_t width;        /* box.width * scale */
-	int32_t height;       /* box.height * scale */
+	float scale;          /* pixels per surface coordinate unit */
+	int32_t width;        /* box.width * scale, rounded */
+	int32_t height;       /* box.height * scale, rounded */
 };
 
 /* Allocate the target's pixels for its box at the output's scale. Returns
@@ -204,17 +205,16 @@ static bool compose_target_init(struct compose_target *t,
 		struct wlr_box box) {
 	t->pixels = NULL;
 	t->box = box;
-	t->scale = koan_server_output_scale();
+	t->scale = koan_server_output_scale_exact();
 	if (box.width <= 0 || box.height <= 0)
 		return false;
-	if ((int64_t)box.width * t->scale * box.height * t->scale * 4
-			> INT32_MAX) {
+	t->width = (int32_t)lroundf(box.width * t->scale);
+	t->height = (int32_t)lroundf(box.height * t->scale);
+	if ((int64_t)t->width * t->height * 4 > INT32_MAX) {
 		wlr_log(WLR_ERROR, "Koan adapter: window too large (%dx%d at "
-			"scale %d)", box.width, box.height, t->scale);
+			"scale %.2f)", box.width, box.height, t->scale);
 		return false;
 	}
-	t->width = box.width * t->scale;
-	t->height = box.height * t->scale;
 	t->pixels = calloc((size_t)t->width * t->height, sizeof(uint32_t));
 	if (!t->pixels) {
 		wlr_log(WLR_ERROR, "Koan adapter: failed to allocate %dx%d window",
@@ -237,6 +237,43 @@ static inline uint32_t blend_pixel(uint32_t s, uint32_t d, bool opaque) {
 	return s + ((rb & 0x00ff00ffu) | ((ag & 0x00ff00ffu) << 8));
 }
 
+/* The premultiplied ARGB pixel at (fx, fy) in buffer pixels, filtered
+ * from the four around it (weights in 1/256); outside the buffer the edge
+ * pixels repeat. Clients that render at another density than the window
+ * is composed at (the integer wl_output.scale, or 1) are resampled this
+ * way: nearest neighbour dropped whole rows and columns of a 2x buffer at
+ * 150% and left text with uneven strokes. */
+static inline uint32_t sample_bilinear(const uint8_t *src, size_t stride,
+		int32_t width, int32_t height, double fx, double fy) {
+	fx -= 0.5;
+	fy -= 0.5;
+	int32_t x0 = (int32_t)floor(fx);
+	int32_t y0 = (int32_t)floor(fy);
+	uint32_t wx = (uint32_t)((fx - x0) * 256.0);
+	uint32_t wy = (uint32_t)((fy - y0) * 256.0);
+	int32_t x1 = x0 + 1, y1 = y0 + 1;
+	if (x0 < 0) x0 = 0;
+	if (y0 < 0) y0 = 0;
+	if (x1 > width - 1) x1 = width - 1;
+	if (y1 > height - 1) y1 = height - 1;
+	if (x0 > width - 1) x0 = width - 1;
+	if (y0 > height - 1) y0 = height - 1;
+	const uint32_t *r0 = (const uint32_t *)(src + (size_t)y0 * stride);
+	const uint32_t *r1 = (const uint32_t *)(src + (size_t)y1 * stride);
+	const uint32_t p[4] = { r0[x0], r0[x1], r1[x0], r1[x1] };
+	const uint32_t w[4] = {
+		(256 - wx) * (256 - wy), wx * (256 - wy),
+		(256 - wx) * wy, wx * wy };
+	uint32_t out = 0;
+	for (int shift = 0; shift < 32; shift += 8) {
+		uint32_t sum = 0;
+		for (int i = 0; i < 4; i++)
+			sum += ((p[i] >> shift) & 0xff) * w[i];
+		out |= ((sum + 32768) >> 16) << shift;
+	}
+	return out;
+}
+
 /* wlr_surface_for_each_surface() iterator: draw one surface of the tree
  * over what is already composed (root first, children in stacking order).
  * Clients put their content in subsurfaces (Firefox renders the whole
@@ -246,18 +283,18 @@ static inline uint32_t blend_pixel(uint32_t s, uint32_t d, bool opaque) {
  * The surface covers current.width x current.height surface units at
  * (sx, sy), which is target->scale times as many target pixels. Its buffer
  * (or the viewport's source crop of it) is mapped onto those: 1:1 when the
- * client rendered at the output's scale (buffer_scale == target scale, no
- * viewport), otherwise nearest-neighbour. Buffer transforms are not
- * applied. */
+ * client rendered at the target's scale (a wp_fractional_scale_v1 client,
+ * or buffer_scale == target scale), otherwise filtered (sample_bilinear()).
+ * Buffer transforms are not applied. */
 static void compose_surface(struct wlr_surface *surface, int sx, int sy,
 			    void *data) {
 	struct compose_target *t = data;
 	if (!surface->buffer)
 		return;
 
-	const int32_t scale = t->scale;
-	const int32_t dw = surface->current.width * scale;
-	const int32_t dh = surface->current.height * scale;
+	const float scale = t->scale;
+	const int32_t dw = (int32_t)lroundf(surface->current.width * scale);
+	const int32_t dh = (int32_t)lroundf(surface->current.height * scale);
 	if (dw <= 0 || dh <= 0)
 		return;
 
@@ -295,12 +332,17 @@ static void compose_surface(struct wlr_surface *surface, int sx, int sy,
 		srcH = surface->current.viewport.src.height
 			* surface->current.scale;
 	}
+	/* 1:1 when the buffer has the composed size: a client that rendered at
+	 * the target's scale. wp_fractional_scale_v1 leaves rounding the
+	 * scaled size to the client (Firefox truncates 106.75 to 106 where the
+	 * target rounds to 107), so one pixel either way is still a copy; the
+	 * missing row or column repeats the buffer's last. */
 	bool direct = !surface->current.viewport.has_src
-		&& buffer->width == dw && buffer->height == dh;
+		&& abs(buffer->width - dw) <= 1 && abs(buffer->height - dh) <= 1;
 
 	/* Destination rectangle in target pixels, clipped to the target. */
-	const int32_t ox = (sx - t->box.x) * scale;
-	const int32_t oy = (sy - t->box.y) * scale;
+	const int32_t ox = (int32_t)lroundf((sx - t->box.x) * scale);
+	const int32_t oy = (int32_t)lroundf((sy - t->box.y) * scale);
 	int32_t x0 = ox < 0 ? -ox : 0;
 	int32_t y0 = oy < 0 ? -oy : 0;
 	int32_t x1 = dw;
@@ -313,21 +355,21 @@ static void compose_surface(struct wlr_surface *surface, int sx, int sy,
 	const double stepX = srcW / dw;
 	const double stepY = srcH / dh;
 	for (int32_t y = y0; y < y1; y++) {
-		int32_t by = direct ? y : (int32_t)(srcY + (y + 0.5) * stepY);
-		if (by < 0 || by >= buffer->height)
-			continue;
-		const uint32_t *in = (const uint32_t *)((const uint8_t *)src
-			+ (size_t)by * stride);
 		uint32_t *out = t->pixels + (size_t)(oy + y) * t->width + ox;
 		if (direct) {
+			const int32_t by = y < buffer->height ? y : buffer->height - 1;
+			const uint32_t *in = (const uint32_t *)((const uint8_t *)src
+				+ (size_t)by * stride);
+			const int32_t lastX = buffer->width - 1;
 			for (int32_t x = x0; x < x1; x++)
-				out[x] = blend_pixel(in[x], out[x], opaque);
+				out[x] = blend_pixel(in[x < lastX ? x : lastX], out[x], opaque);
 			continue;
 		}
+		const double fy = srcY + (y + 0.5) * stepY;
 		for (int32_t x = x0; x < x1; x++) {
-			int32_t bx = (int32_t)(srcX + (x + 0.5) * stepX);
-			if (bx >= 0 && bx < buffer->width)
-				out[x] = blend_pixel(in[bx], out[x], opaque);
+			uint32_t pixel = sample_bilinear((const uint8_t *)src, stride,
+				buffer->width, buffer->height, srcX + (x + 0.5) * stepX, fy);
+			out[x] = blend_pixel(pixel, out[x], opaque);
 		}
 	}
 

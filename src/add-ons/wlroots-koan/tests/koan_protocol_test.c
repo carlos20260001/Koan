@@ -109,6 +109,7 @@
 
 #include "xdg-shell-client-protocol.h"
 #include "viewporter-client-protocol.h"
+#include "fractional-scale-v1-client-protocol.h"
 #include "koan-test-v1-client-protocol.h"
 #include "koan_test.h"
 
@@ -167,7 +168,7 @@ static void *sFrame;
 static int32_t sFrameWidth;
 static int32_t sFrameHeight;
 static int32_t sFrameStride;
-static int32_t sFrameScale;
+static float sFrameScale;
 
 static void
 fake_create_window(void *userdata, struct koan_queue *queue,
@@ -217,7 +218,7 @@ fake_set_size(void *userdata, struct koan_queue *queue, void *window,
 static void
 fake_set_buffer(void *userdata, struct koan_queue *queue, void *window,
 	void *data, int32_t width, int32_t height, int32_t stride,
-	uint32_t format, int32_t scale)
+	uint32_t format, float scale)
 {
 	(void)userdata;
 	(void)queue;
@@ -428,6 +429,7 @@ struct conn {
 	struct wl_output *output;   /* bound so wl_surface.enter can name it */
 	struct wl_data_device_manager *data_device_manager;
 	struct wp_viewporter *viewporter;
+	struct wp_fractional_scale_manager_v1 *fractional_scale_manager;
 	uint32_t seat_caps;
 	struct global globals[MAX_GLOBALS];
 	int global_count;
@@ -507,6 +509,11 @@ registry_global(void *data, struct wl_registry *registry, uint32_t name,
 		&& c->output == NULL) {
 		c->output = wl_registry_bind(registry, name, &wl_output_interface,
 			min_u32(version, 2));
+	} else if (strcmp(interface,
+			wp_fractional_scale_manager_v1_interface.name) == 0
+		&& c->fractional_scale_manager == NULL) {
+		c->fractional_scale_manager = wl_registry_bind(registry, name,
+			&wp_fractional_scale_manager_v1_interface, 1);
 	} else if (strcmp(interface, wp_viewporter_interface.name) == 0
 		&& c->viewporter == NULL) {
 		c->viewporter = wl_registry_bind(registry, name,
@@ -645,7 +652,6 @@ static const char *const kCoreGlobals[] = {
 /* Protocols the audit lists as not implemented yet. */
 static const char *const kNotImplementedGlobals[] = {
 	"wp_presentation",
-	"wp_fractional_scale_manager_v1",
 	"zwp_input_timestamps_manager_v1",
 	"zwp_text_input_manager_v3",
 };
@@ -2151,12 +2157,13 @@ test_compose_scale(struct conn *c, struct toplevel *t)
 
 	bool ok = commit_scaled(c, t, 128, 96, 2, COLOR_CHILD);
 	pthread_mutex_lock(&sFrameLock);
-	int32_t w = sFrameWidth, h = sFrameHeight, scale = sFrameScale;
+	int32_t w = sFrameWidth, h = sFrameHeight;
+	float scale = sFrameScale;
 	pthread_mutex_unlock(&sFrameLock);
 	uint32_t corner = frame_pixel(127, 95);
 	result(ok && w == 128 && h == 96 && scale == 2 && corner == COLOR_CHILD
 			? ST_PASS : ST_FAIL, "compose-scale-hidpi-buffer",
-		"%s; frame %dx%d at scale %d, corner 0x%08x",
+		"%s; frame %dx%d at scale %.2f, corner 0x%08x",
 		ok ? "delivered" : "NOT delivered", w, h, scale, corner);
 
 	ok = commit_scaled(c, t, 64, 48, 1, COLOR_ROOT);
@@ -2168,7 +2175,7 @@ test_compose_scale(struct conn *c, struct toplevel *t)
 	corner = frame_pixel(127, 95);
 	result(ok && w == 128 && h == 96 && scale == 2 && corner == COLOR_ROOT
 			? ST_PASS : ST_FAIL, "compose-scale-lowdpi-buffer",
-		"%s; frame %dx%d at scale %d, corner 0x%08x",
+		"%s; frame %dx%d at scale %.2f, corner 0x%08x",
 		ok ? "delivered" : "NOT delivered", w, h, scale, corner);
 
 	set_output_scale(c, 1.0f);
@@ -2242,6 +2249,127 @@ test_compose_viewport(struct conn *c, struct toplevel *t)
 	settle(c);
 }
 
+/* wp_fractional_scale_v1: at 150% a client that asks for its preferred
+ * scale is told 1.5 (180/120), renders a buffer of exactly that many
+ * pixels and gives the surface its size with a viewport. The window then
+ * reaches app_server at that density, copied 1:1: a 64x48 window is a
+ * 96x72 frame at scale 1.5, not a 2x frame for app_server to shrink. */
+static uint32_t sPreferredScale;
+
+static void
+fractional_preferred_scale(void *data,
+	struct wp_fractional_scale_v1 *fractional, uint32_t scale)
+{
+	(void)data;
+	(void)fractional;
+	sPreferredScale = scale;
+}
+
+static const struct wp_fractional_scale_v1_listener sFractionalListener = {
+	.preferred_scale = fractional_preferred_scale,
+};
+
+static void
+test_compose_fractional(struct conn *c, struct toplevel *t)
+{
+	if (c->fractional_scale_manager == NULL || c->viewporter == NULL) {
+		result(ST_FAIL, "compose-fractional-scale",
+			"no wp_fractional_scale_manager_v1 (or wp_viewporter) global");
+		return;
+	}
+
+	struct wp_fractional_scale_v1 *fractional
+		= wp_fractional_scale_manager_v1_get_fractional_scale(
+			c->fractional_scale_manager, t->surface);
+	wp_fractional_scale_v1_add_listener(fractional, &sFractionalListener,
+		NULL);
+	sPreferredScale = 0;
+	bool ok = set_output_scale(c, 1.5f);
+	for (int i = 0; ok && i < 100 && sPreferredScale != 180; i++) {
+		ok = settle(c);
+		usleep(2000);
+	}
+	result(ok && sPreferredScale == 180 ? ST_PASS : ST_FAIL,
+		"compose-fractional-preferred-scale",
+		"preferred scale %u/120 (expected 180)", sPreferredScale);
+
+	struct wp_viewport *viewport = wp_viewporter_get_viewport(c->viewporter,
+		t->surface);
+	wp_viewport_set_destination(viewport, 64, 48);
+	ok = commit_scaled(c, t, 96, 72, 1, COLOR_CHILD);
+	pthread_mutex_lock(&sFrameLock);
+	int32_t w = sFrameWidth, h = sFrameHeight;
+	float scale = sFrameScale;
+	pthread_mutex_unlock(&sFrameLock);
+	uint32_t corner = frame_pixel(95, 71);
+	result(ok && w == 96 && h == 72 && scale == 1.5f
+			&& corner == COLOR_CHILD ? ST_PASS : ST_FAIL,
+		"compose-fractional-scale",
+		"%s; frame %dx%d at scale %.2f, corner 0x%08x (expected 96x72 at "
+		"1.50, 0x%08x)", ok ? "delivered" : "NOT delivered", w, h, scale,
+		corner, COLOR_CHILD);
+
+	/* A size whose scaled width has a fraction above one half: 61 x 1.75
+	 * is 106.75. The protocol leaves rounding to the client; Firefox
+	 * truncates (106) where the window is composed 107 wide. The buffer
+	 * must still be copied as it is, not resampled: a filtered copy
+	 * blends the two colours along the boundary between them. */
+	if (set_output_scale(c, 1.75f)) {
+		const int bw = 106, bh = 84; /* 61 x 48 at 1.75: 106.75 x 84 */
+		size_t size = (size_t)bw * bh * 4;
+		int fd = make_shm_fd(size);
+		uint32_t *pixels = fd >= 0 ? mmap(NULL, size,
+			PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0) : MAP_FAILED;
+		if (pixels != MAP_FAILED) {
+			for (int y = 0; y < bh; y++) {
+				for (int x = 0; x < bw; x++)
+					pixels[y * bw + x] = x < 53 ? COLOR_ROOT : COLOR_CHILD;
+			}
+			munmap(pixels, size);
+			struct wl_shm_pool *pool = wl_shm_create_pool(c->shm, fd,
+				(int32_t)size);
+			struct wl_buffer *buffer = wl_shm_pool_create_buffer(pool, 0,
+				bw, bh, bw * 4, WL_SHM_FORMAT_ARGB8888);
+			wl_shm_pool_destroy(pool);
+			close(fd);
+
+			int before = atomic_load(&sSetBufferCount);
+			xdg_surface_set_window_geometry(t->xdg_surface, 0, 0, 61, 48);
+			wp_viewport_set_destination(viewport, 61, 48);
+			wl_surface_attach(t->surface, buffer, 0, 0);
+			wl_surface_damage(t->surface, 0, 0, bw, bh);
+			wl_surface_commit(t->surface);
+			for (int i = 0; i < 200
+					&& atomic_load(&sSetBufferCount) == before; i++) {
+				settle(c);
+				usleep(2000);
+			}
+			uint32_t left = frame_pixel(52, 10), right = frame_pixel(53, 10);
+			uint32_t edge = frame_pixel(106, 10);
+			pthread_mutex_lock(&sFrameLock);
+			w = sFrameWidth;
+			pthread_mutex_unlock(&sFrameLock);
+			result(left == COLOR_ROOT && right == COLOR_CHILD
+					&& edge == COLOR_CHILD ? ST_PASS : ST_FAIL,
+				"compose-fractional-rounding",
+				"frame %d wide; pixels 52, 53, 106: 0x%08x 0x%08x 0x%08x "
+				"(expected 0x%08x 0x%08x 0x%08x, copied, not filtered)", w,
+				left, right, edge, COLOR_ROOT, COLOR_CHILD, COLOR_CHILD);
+			xdg_surface_set_window_geometry(t->xdg_surface, 0, 0, 64, 48);
+		} else if (fd >= 0) {
+			close(fd);
+		}
+	} else {
+		result(ST_FAIL, "compose-fractional-rounding",
+			"output scale never became 1.75");
+	}
+
+	wp_viewport_destroy(viewport);
+	wp_fractional_scale_v1_destroy(fractional);
+	set_output_scale(c, 1.0f);
+	commit_scaled(c, t, 64, 48, 1, COLOR_ROOT);
+}
+
 static int
 run_compose(void)
 {
@@ -2265,6 +2393,7 @@ run_compose(void)
 	test_nested_sync(&c, &t);
 	test_compose_scale(&c, &t);
 	test_compose_viewport(&c, &t);
+	test_compose_fractional(&c, &t);
 
 	struct conn after;
 	bool alive = conn_open(&after, s.socket);

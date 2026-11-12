@@ -44,6 +44,17 @@ add_custom_command(
     DEPENDS "${_koan_test_viewporter_xml}"
     VERBATIM
 )
+set(_koan_test_fractional_xml
+    "${CMAKE_CURRENT_SOURCE_DIR}/../protocol/staging/fractional-scale/fractional-scale-v1.xml")
+set(_koan_test_fractional_header
+    "${CMAKE_CURRENT_BINARY_DIR}/fractional-scale-v1-client-protocol.h")
+add_custom_command(
+    OUTPUT "${_koan_test_fractional_header}"
+    COMMAND "${WAYLAND_SCANNER}" client-header
+        "${_koan_test_fractional_xml}" "${_koan_test_fractional_header}"
+    DEPENDS "${_koan_test_fractional_xml}"
+    VERBATIM
+)
 set(_koan_test_ctl_xml "${CMAKE_CURRENT_SOURCE_DIR}/../protocol/koan-test-v1.xml")
 set(_koan_test_ctl_header "${CMAKE_CURRENT_BINARY_DIR}/koan-test-v1-client-protocol.h")
 add_custom_command(
@@ -85,6 +96,7 @@ add_executable(koan_protocol_test
     "${_koan_test_xdg_header}"
     "${_koan_test_ctl_header}"
     "${_koan_test_viewporter_header}"
+    "${_koan_test_fractional_header}"
 )
 target_include_directories(koan_protocol_test PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}/../server"

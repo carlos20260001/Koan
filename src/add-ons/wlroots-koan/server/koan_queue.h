@@ -141,7 +141,7 @@ struct koan_cmd_set_buffer {
 	int32_t height;
 	int32_t stride;
 	uint32_t format;    /* DRM fourcc format (e.g. DRM_FORMAT_ARGB8888) */
-	int32_t scale;      /* pixels per window coordinate unit (>= 1) */
+	float scale;        /* pixels per window coordinate unit (>= 1) */
 };
 
 /* KOAN_CMD_SET_VISIBILITY */

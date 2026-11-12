@@ -147,7 +147,7 @@ private:
 			void *window, int32_t width, int32_t height);
 	static void s_set_buffer(void *userdata, struct koan_queue *queue,
 			void *window, void *data, int32_t width, int32_t height,
-			int32_t stride, uint32_t format, int32_t scale);
+			int32_t stride, uint32_t format, float scale);
 	static void s_set_visibility(void *userdata, struct koan_queue *queue,
 			void *window, bool visible);
 	static void s_request_state(void *userdata, struct koan_queue *queue,

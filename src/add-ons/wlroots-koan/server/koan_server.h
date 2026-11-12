@@ -60,10 +60,16 @@ void koan_server_run(struct wl_display *display);
 bool koan_server_set_output_dimensions(int32_t width, int32_t height,
 				       int32_t refresh_mhz, float scale);
 
-/* The integer scale clients are told to render at (wl_output.scale: the
- * output scale rounded up, at least 1). Client content is composed at this
- * many pixels per logical unit. Wayland thread only. */
+/* The integer scale clients without wp_fractional_scale_v1 are told to
+ * render at (wl_output.scale: the output scale rounded up, at least 1).
+ * Wayland thread only. */
 int32_t koan_server_output_scale(void);
+
+/* The exact output scale (at least 1): what wp_fractional_scale_v1 tells
+ * clients, and how many pixels per logical unit client content is composed
+ * at, so it reaches app_server at the screen's density. Wayland thread
+ * only. */
+float koan_server_output_scale_exact(void);
 
 /* Input from app_server's native window, on the Wayland thread. The
  * toplevel must be known to be alive (the adapter checks). Coordinates are
