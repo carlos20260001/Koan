@@ -13,7 +13,6 @@
 
 
 #include "Painter.h"
-#include "DeviceTransform.h"
 
 #include <new>
 
@@ -49,7 +48,6 @@
 #include "drawing_support.h"
 
 #include "DrawState.h"
-#include "ScreenScaleTransform.h"
 
 #include <AutoDeleter.h>
 #include <View.h>
@@ -209,14 +207,8 @@ Painter::Painter()
 	fSubpixelPrecise(false),
 	fValidClipping(false),
 	fAttached(false),
-	fIdentityTransform(true),
 
-	fUserTransform(),
-	fTransformOffsetX(0),
-	fTransformOffsetY(0),
-	fScale(1.0f),
 	fPenSize(1.0),
-	fOriginalClippingRegion(NULL),
 	fClippingRegion(NULL),
 	fDrawingMode(B_OP_COPY),
 	fAlphaSrcMode(B_PIXEL_ALPHA),
@@ -364,118 +356,30 @@ Painter::SetDrawState(const DrawState* state, int32 xOffset, int32 yOffset)
 void
 Painter::ConstrainClipping(const BRegion* region)
 {
-	fOriginalClippingRegion = region;
-	_UpdateClipping();
-}
+	fClippingRegion = region;
+	fBaseRenderer.set_clipping_region(const_cast<BRegion*>(region));
+	fValidClipping = region->Frame().IsValid() && fAttached;
 
-
-void
-Painter::SetScale(float scale)
-{
-	scale = ScreenScaleTransform::Normalize(scale);
-	if (scale == fScale)
-		return;
-
-	fScale = scale;
-	_UpdateTransform();
-	_UpdateClipping();
-}
-
-
-BPoint
-Painter::ScalePoint(const BPoint& point) const
-{
-	return BPoint(point.x * fScale, point.y * fScale);
-}
-
-
-BRect
-Painter::ScaleRect(const BRect& rect) const
-{
-	return ScreenScaleTransform::ToPhysicalPartitionRect(rect, fScale);
-}
-
-
-void
-Painter::ScaleRegion(const BRegion& source, BRegion& destination) const
-{
-	if (fScale == 1.0f) {
-		destination = source;
-		return;
+	if (fValidClipping) {
+		clipping_rect cb = fClippingRegion->FrameInt();
+		fRasterizer.clip_box(cb.left, cb.top, cb.right + 1, cb.bottom + 1);
+		fSubpixRasterizer.clip_box(cb.left, cb.top, cb.right + 1, cb.bottom + 1);
 	}
-
-	destination.MakeEmpty();
-	for (int32 i = 0; i < source.CountRects(); i++)
-		destination.Include(ScreenScaleTransform::ToPhysicalPartitionRect(
-			source.RectAt(i), fScale));
-}
-
-
-void
-Painter::_UpdateClipping()
-{
-	if (fOriginalClippingRegion == NULL) {
-		fClippingRegion = NULL;
-		fValidClipping = false;
-		return;
-	}
-
-	if (fScale == 1.0f) {
-		fClippingRegion = fOriginalClippingRegion;
-	} else {
-		ScaleRegion(*fOriginalClippingRegion, fScaledClippingRegion);
-		fClippingRegion = &fScaledClippingRegion;
-	}
-
-	// Nothing may be drawn outside the attached buffer. Clipping regions
-	// lie inside it except after a scale change that leaves a window
-	// larger than the logical screen; InvertRect() writes the region's
-	// rects straight into the buffer. Copy only in that case.
-	if (fAttached) {
-		clipping_rect frame = fClippingRegion->FrameInt();
-		if (frame.left < 0 || frame.top < 0
-			|| frame.right >= (int32)fBuffer.width()
-			|| frame.bottom >= (int32)fBuffer.height()) {
-			if (fClippingRegion != &fScaledClippingRegion)
-				fScaledClippingRegion = *fClippingRegion;
-			BRegion bounds(BRect(0, 0, (int32)fBuffer.width() - 1,
-				(int32)fBuffer.height() - 1));
-			fScaledClippingRegion.IntersectWith(&bounds);
-			fClippingRegion = &fScaledClippingRegion;
-		}
-	}
-
-	fBaseRenderer.set_clipping_region(
-		const_cast<BRegion*>(fClippingRegion));
-	fValidClipping = fClippingRegion->Frame().IsValid() && fAttached;
-	if (!fValidClipping)
-		return;
-
-	clipping_rect cb = fClippingRegion->FrameInt();
-	fRasterizer.clip_box(cb.left, cb.top, cb.right + 1, cb.bottom + 1);
-	fSubpixRasterizer.clip_box(cb.left, cb.top, cb.right + 1, cb.bottom + 1);
 }
 
 
 void
 Painter::SetTransform(BAffineTransform transform, int32 xOffset, int32 yOffset)
 {
-	fUserTransform = transform;
-	fTransformOffsetX = xOffset;
-	fTransformOffsetY = yOffset;
-	_UpdateTransform();
-}
-
-
-void
-Painter::_UpdateTransform()
-{
-	fIdentityTransform = fUserTransform.IsIdentity() && fScale == 1.0f;
-	fTransform = DeviceTransform::Compose(agg::trans_affine(fUserTransform.sx,
-			fUserTransform.shy, fUserTransform.shx, fUserTransform.sy,
-			fUserTransform.tx, fUserTransform.ty),
-		fUserTransform.IsIdentity(), fTransformOffsetX, fTransformOffsetY,
-		fScale);
+	fIdentityTransform = transform.IsIdentity();
+	if (!fIdentityTransform) {
+		fTransform = agg::trans_affine_translation(-xOffset, -yOffset);
+		fTransform *= agg::trans_affine(transform.sx, transform.shy,
+			transform.shx, transform.sy, transform.tx, transform.ty);
+		fTransform *= agg::trans_affine_translation(xOffset, yOffset);
+	} else {
+		fTransform.reset();
+	}
 }
 
 
@@ -659,27 +563,6 @@ Painter::StrokeLine(BPoint a, BPoint b)
 		} else
 			_StrokePath(fPath);
 	}
-}
-
-
-void
-Painter::StrokeLineNoTransform(const BPoint& start, const BPoint& end)
-{
-	Transformable transform = fTransform;
-	bool identityTransform = fIdentityTransform;
-	float penSize = fPenSize;
-	bool subpixelPrecise = fSubpixelPrecise;
-
-	fTransform.reset();
-	fIdentityTransform = true;
-	fPenSize = fScale;
-	fSubpixelPrecise = true;
-	StrokeLine(ScalePoint(start), ScalePoint(end));
-
-	fTransform = transform;
-	fIdentityTransform = identityTransform;
-	fPenSize = penSize;
-	fSubpixelPrecise = subpixelPrecise;
 }
 
 

@@ -57,12 +57,6 @@ public:
 			Screen*				ScreenByID(int32 id) const;
 			int32				ScreenIndex(const Screen* screen) const;
 			BRect				ScreenFrameAt(int32 index) const;
-			// Logical frame of the screen (physical / scale), used for
-			// window placement and input hit-testing.
-			BRect				ScreenLogicalFrameAt(int32 index) const;
-			// Per-output fractional scaling factor.
-			float				ScreenScaleAt(int32 index) const;
-			float				ScreenScaleByID(int32 id) const;
 			int32				CountScreens() const;
 
 private:

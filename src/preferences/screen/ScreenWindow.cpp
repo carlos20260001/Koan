@@ -191,10 +191,7 @@ ScreenWindow::ScreenWindow(ScreenSettings* settings)
 	fScreenMode(this),
 	fUndoScreenMode(this),
 	fModified(false),
-	fAlertWindow(NULL),
-	fScaleSlider(NULL),
-	fOriginalScale(1.0f),
-	fScaleSupported(false)
+	fAlertWindow(NULL)
 {
 	BScreen screen(this);
 
@@ -261,28 +258,6 @@ ScreenWindow::ScreenWindow(ScreenSettings* settings)
 		// so hide the slider
 		fBrightnessSlider->Hide();
 		fOriginalBrightness = -1;
-	}
-
-	// fractional scaling slider (wlroots-inspired per-output scale)
-	fScaleSlider = new BSlider("scale", B_TRANSLATE("Scale:"),
-		new BMessage(SLIDER_SCALE_MSG), 100, 200, B_HORIZONTAL);
-	fScaleSlider->SetLimitLabels(B_TRANSLATE("1.0x"), B_TRANSLATE("2.0x"));
-	fScaleSlider->SetHashMarks(B_HASH_MARKS_BOTTOM);
-	fScaleSlider->SetHashMarkCount(5);
-	groupView->AddChild(fScaleSlider);
-
-	float currentScale = 1.0f;
-	if (screen.GetScale(&currentScale) == B_OK) {
-		fScaleSlider->SetModificationMessage(
-			new BMessage(SLIDER_SCALE_MSG));
-		fScaleSlider->SetValue(int32(currentScale * 100.0f));
-		fOriginalScale = currentScale;
-		fScaleSupported = true;
-	} else {
-		// Scaling not supported by this output
-		fScaleSlider->Hide();
-		fOriginalScale = 1.0f;
-		fScaleSupported = false;
 	}
 
 	// colour temperature presets; hidden when the output has no gamma LUT
@@ -1562,11 +1537,6 @@ ScreenWindow::MessageReceived(BMessage* message)
 				_MarkTemperaturePreset(fTemperature);
 			}
 
-			if (fScaleSupported) {
-				screen.SetScale(fOriginalScale);
-				fScaleSlider->SetValue(int32(fOriginalScale * 100.0f));
-			}
-
 			fScreenMode.SetRotation(fOriginalRotation);
 			BMenuItem* rotationItem
 				= fRotationMenu->ItemAt(fOriginalRotation);
@@ -1598,18 +1568,6 @@ ScreenWindow::MessageReceived(BMessage* message)
 		{
 			BScreen screen(this);
 			screen.SetBrightness(message->FindInt32("be:value") / 255.f);
-			_CheckApplyEnabled();
-			break;
-		}
-
-		case SLIDER_SCALE_MSG:
-		{
-			if (!fScaleSupported)
-				break;
-
-			BScreen screen(this);
-			float scale = message->FindInt32("be:value") / 100.0f;
-			screen.SetScale(scale);
 			_CheckApplyEnabled();
 			break;
 		}
@@ -1811,13 +1769,9 @@ ScreenWindow::_CheckApplyEnabled()
 	float brightness = -1;
 	screen.GetBrightness(&brightness);
 
-	float scale = 1.0f;
-	screen.GetScale(&scale);
-
 	fRevertButton->SetEnabled(columns != fOriginalWorkspacesColumns
 		|| rows != fOriginalWorkspacesRows
 		|| brightness != fOriginalBrightness
-		|| scale != fOriginalScale
 		|| fSelected != fOriginal);
 }
 
@@ -1832,9 +1786,6 @@ ScreenWindow::_UpdateOriginal()
 	fScreenMode.UpdateOriginalModes();
 	fOriginalRotation = fScreenMode.Rotation();
 	fOriginalReflection = fScreenMode.Reflection();
-
-	BScreen screen(this);
-	screen.GetScale(&fOriginalScale);
 }
 
 

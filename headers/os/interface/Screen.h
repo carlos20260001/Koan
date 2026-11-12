@@ -90,11 +90,6 @@ public:
 			status_t			GetTemperature(float* kelvin);
 			status_t			SetTemperature(float kelvin);
 
-			// Per-output fractional scaling factor (1.0 = no scaling).
-			status_t			GetScale(float* scale);
-			status_t			SetScale(float scale);
-
-
 private:
 	// Forbidden and deprecated methods
 								BScreen(const BScreen& other);

@@ -159,16 +159,6 @@ public:
 			status_t			SetTemperature(int32 id, float kelvin);
 			float				Temperature(int32 id) const;
 
-			// Per-output fractional scaling (wlroots-inspired).
-			status_t			SetScreenScale(int32 id, float scale);
-			float				ScreenScale(int32 id) const;
-
-			// Transform a physical input coordinate to logical coordinates
-			// using the containing screen's scale factor.
-			BPoint				PhysicalToLogical(const BPoint& physical) const;
-			BPoint				LogicalToPhysical(const BPoint& logical) const;
-			BRect				LogicalToDeviceRect(const BRect& logical) const;
-
 	// Unconfirmed display change: the deadline lives here so that the
 	// revert does not depend on the client surviving.
 			status_t			BeginScreenChange(team_id owner);
@@ -399,8 +389,7 @@ private:
 			void				_SuspendDirectFrameBufferAccess();
 			void				_ResumeDirectFrameBufferAccess();
 
-			void				_ScreenChanged(Screen* screen,
-									const BRect* oldLogicalFrame = NULL);
+			void				_ScreenChanged(Screen* screen);
 			void				_RelayoutWindowsForScreen(Screen* screen,
 									const BRect& oldFrame,
 									const BRect& newFrame);

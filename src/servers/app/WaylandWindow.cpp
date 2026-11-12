@@ -658,7 +658,8 @@ WaylandWindowBridge::ScreenChanged(::Screen *screen)
 	payload.output_mode.height = frame.IntegerHeight() + 1;
 	payload.output_mode.refresh_mhz = frequency > 0.0f
 		? (int32_t)roundf(frequency * 1000.0f) : 0;
-	payload.output_mode.scale = screen->Scale();
+	// Logical pixels only until the airOS render scale is ported.
+	payload.output_mode.scale = 1.0f;
 	push_to_wayland(KOAN_CMD_OUTPUT_MODE, payload);
 }
 
@@ -2059,7 +2060,7 @@ WaylandWindowBridge::fullscreen_window(wayland_window *ww, bool enter)
 		if (!fDesktop->LockSingleWindow())
 			return;
 		const ::Screen *screen = window->Screen();
-		BRect screenFrame = screen ? screen->LogicalFrame()
+		BRect screenFrame = screen ? screen->Frame()
 			: BRect(0, 0, 1023, 767);
 		ww->fullscreen_restore_look = window->Look();
 		fDesktop->UnlockSingleWindow();
@@ -2102,7 +2103,7 @@ WaylandWindowBridge::zoom_window(wayland_window *ww)
 		if (!fDesktop->LockSingleWindow())
 			return;
 		const ::Screen *screen = window->Screen();
-		BRect screenFrame = screen ? screen->LogicalFrame()
+		BRect screenFrame = screen ? screen->Frame()
 			: BRect(0, 0, 1023, 767);
 		/* Keep the decorator (tab and borders) on screen. */
 		BRect footprint = frame;

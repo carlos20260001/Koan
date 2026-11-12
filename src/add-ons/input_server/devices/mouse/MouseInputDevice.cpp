@@ -935,20 +935,10 @@ MouseDevice::_ControlThread()
 
 	// Initialize screen size and sync cursor position
 	{
-		// BScreen::Frame() is the logical frame, but the bounds notice
-		// (B_SCREEN_BOUNDS_CHANGED) carries the physical frame that
-		// Screen::Frame() is built from. Start in physical space: a
-		// device whose thread starts after the last notice would
-		// otherwise clamp the cursor to the logical (1/scale) region.
-		// Leave fScreenW/fScreenH alone if the mode is unavailable:
-		// they keep the constructor value or the last bounds notice.
-		display_mode mode;
 		BScreen screen;
-		if (screen.GetMode(&mode) == B_OK && mode.virtual_width > 0
-			&& mode.virtual_height > 0) {
-			fScreenW = mode.virtual_width;
-			fScreenH = mode.virtual_height;
-		}
+		BRect frame = screen.Frame();
+		fScreenW = (int32)(frame.Width() + 1);
+		fScreenH = (int32)(frame.Height() + 1);
 	}
 	_UpdateTouchpadScale();
 	if (fTarget.fCursorLock.Lock()) {

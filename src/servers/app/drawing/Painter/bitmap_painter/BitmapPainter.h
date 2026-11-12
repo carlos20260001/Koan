@@ -28,9 +28,7 @@ public:
 private:
 			bool				_DetermineTransform(
 									BRect sourceRect,
-									const BRect& destinationRect,
-									bool deviceSpace);
-			bool				_CanDrawInDeviceSpace() const;
+									const BRect& destinationRect);
 
 			bool				_HasScale();
 			bool				_HasAffineTransform();
@@ -56,9 +54,6 @@ private:
 			uint32					fOptions;
 
 			BRect					fDestinationRect;
-				// in framebuffer pixels when fDeviceSpace is true,
-				// otherwise in logical (screen) coordinates
-			bool					fDeviceSpace;
 			double					fScaleX;
 			double					fScaleY;
 			BPoint					fOffset;

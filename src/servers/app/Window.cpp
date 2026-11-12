@@ -505,13 +505,8 @@ Window::CopyContents(BRegion* region, int32 xOffset, int32 yOffset)
 					copyRegion->Exclude(allDirtyRegions);
 
 				if (fDrawingEngine->LockParallelAccess()) {
-					bool copied = fDrawingEngine->CopyRegion(copyRegion,
-						xOffset, yOffset);
+					fDrawingEngine->CopyRegion(copyRegion, xOffset, yOffset);
 					fDrawingEngine->UnlockParallelAccess();
-					// At a fractional scale an inexact offset is not
-					// copied; leave it all in newDirty to be repainted.
-					if (!copied)
-						copyRegion->MakeEmpty();
 
 					// Prevent those parts from being added to the dirty region...
 					newDirty->Exclude(copyRegion);
@@ -683,14 +678,6 @@ Window::SetScreen(const ::Screen* screen)
 {
 	// TODO this assert fails in Desktop::ShowWindow
 	//ASSERT_BRW_WRITE_LOCKED(fDesktop->ScreenLocker());
-	float scale = screen != NULL ? screen->Scale() : 1.0f;
-	status_t status = fDrawingEngine->SetScale(scale);
-	if (status != B_OK) {
-		debug_printf("app_server: Failed to update window drawing scale (%d)\n",
-			status);
-		return;
-	}
-
 	fScreen = screen;
 }
 

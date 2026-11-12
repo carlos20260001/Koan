@@ -20,23 +20,8 @@ add_executable(test_display_change_tracker
 target_include_directories(test_display_change_tracker PRIVATE
 	${CMAKE_SOURCE_DIR}/src/servers/app)
 
-# Fractional screen coordinate and raster-boundary transforms.
-Application(test_screen_scale_transform
-	SOURCES test_screen_scale_transform.cpp
-	INCLUDES ${CMAKE_SOURCE_DIR}/src/servers/app)
-UsePrivateHeaders(test_screen_scale_transform interface)
-
 # BBitmap density and screen-scale icon bitmaps (BIconUtils).
 Application(test_icon_density SOURCES test_icon_density.cpp)
-
-# Fractional-scale render/hit-test consistency: device transform order,
-# region edge partition vs pointer hit-test, move blit vs repaint.
-Application(test_fractional_scaling
-	SOURCES test_fractional_scaling.cpp
-	LIBS agg
-	INCLUDES ${CMAKE_SOURCE_DIR}/src/servers/app
-		${CMAKE_SOURCE_DIR}/headers/libs/agg)
-UsePrivateHeaders(test_fractional_scaling interface)
 
 # XDG desktop-entry and MIME-default discovery.
 Application(test_xdg_discovery

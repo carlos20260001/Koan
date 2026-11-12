@@ -515,24 +515,12 @@ EventDispatcher::GetMouse(BPoint& where, int32& buttons)
 	uint32 liveButtons;
 	BPoint liveWhere;
 	if (fStream != NULL && fStream->GetCurrentMouseState(liveWhere, liveButtons)) {
-		where = fDesktop != NULL ? fDesktop->PhysicalToLogical(liveWhere)
-			: liveWhere;
+		where = liveWhere;
 		buttons = (int32)liveButtons;
 	} else {
-		where = _LogicalCursorPosition();
+		where = fLastCursorPosition;
 		buttons = fLastButtons;
 	}
-}
-
-
-BPoint
-EventDispatcher::_LogicalCursorPosition() const
-{
-	// Keep fLastCursorPosition in physical pixels for hardware cursor APIs;
-	// BeAPI screen coordinates follow the logical screen frame.
-	return fDesktop != NULL
-		? fDesktop->PhysicalToLogical(fLastCursorPosition)
-		: fLastCursorPosition;
 }
 
 
@@ -595,7 +583,7 @@ EventDispatcher::_SendFakeMouseMoved(BMessage* message)
 		return;
 
 	BMessage moved(B_MOUSE_MOVED);
-	moved.AddPoint("screen_where", _LogicalCursorPosition());
+	moved.AddPoint("screen_where", fLastCursorPosition);
 	moved.AddInt32("buttons", fLastButtons);
 
 	if (fDraggingMessage)
@@ -818,7 +806,7 @@ EventDispatcher::_DeliverDragMessage()
 		BMessage::Private(fDragMessage).SetWasDropped(true);
 		fDragMessage.RemoveName("_original_what");
 		fDragMessage.AddInt32("_original_what", fDragMessage.what);
-		fDragMessage.AddPoint("_drop_point_", _LogicalCursorPosition());
+		fDragMessage.AddPoint("_drop_point_", fLastCursorPosition);
 		fDragMessage.AddPoint("_drop_offset_", fDragOffset);
 		fDragMessage.what = _MESSAGE_DROPPED_;
 
@@ -919,20 +907,6 @@ EventDispatcher::_EventLoop()
 #endif
 				pointerEvent = true;
 
-				// The one physical -> logical conversion of the pointer:
-				// streams report framebuffer pixels (kept above in
-				// fLastCursorPosition for the hardware cursor); from here
-				// on "where" is in BeAPI (logical) screen coordinates for
-				// every consumer: filters, decorators, desktop listeners.
-				BPoint logicalWhere;
-				bool hasWhere = false;
-				if (fDesktop != NULL
-					&& event->FindPoint("where", &logicalWhere) == B_OK) {
-					logicalWhere = fDesktop->PhysicalToLogical(logicalWhere);
-					event->ReplacePoint("where", logicalWhere);
-					hasWhere = true;
-				}
-
 				EventTarget* grabTarget = fDesktop != NULL
 					? fDesktop->PointerGrabTarget() : NULL;
 
@@ -947,10 +921,13 @@ EventDispatcher::_EventLoop()
 					// The mouse filter is skipped, so keep the state
 					// BView::GetMouse() reads (AS_GET_CURSOR_POSITION)
 					// current here.
-					if (hasWhere && fDesktop->LockAllWindows()) {
-						fDesktop->SetLastMouseState(logicalWhere,
+					BPoint grabWhere;
+					if (fDesktop != NULL
+						&& event->FindPoint("where", &grabWhere) == B_OK
+						&& fDesktop->LockAllWindows()) {
+						fDesktop->SetLastMouseState(grabWhere,
 							event->GetInt32("buttons", 0),
-							fDesktop->WindowAt(logicalWhere));
+							fDesktop->WindowAt(grabWhere));
 						fDesktop->UnlockAllWindows();
 					}
 				} else {
@@ -980,7 +957,7 @@ EventDispatcher::_EventLoop()
 				// The "where" field will be filled in by the receiver
 				// (it's supposed to be expressed in local window coordinates)
 				event->RemoveName("where");
-				event->AddPoint("screen_where", _LogicalCursorPosition());
+				event->AddPoint("screen_where", fLastCursorPosition);
 
 				if (event->what == B_MOUSE_MOVED
 					&& fPreviousMouseTarget != NULL

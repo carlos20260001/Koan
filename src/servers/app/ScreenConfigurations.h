@@ -24,10 +24,6 @@ struct screen_configuration {
 	BRect			frame;
 	display_mode	mode;
 	float			brightness;
-	// Per-output fractional scaling factor (wlroots-inspired).
-	// Logical coordinates = physical / scale; rendering is scaled up by
-	// this factor to physical pixels. Defaults to 1.0f (no scaling).
-	float			scale;
 	// The user's rotation, relative to the panel mounting.
 	int32			rotation;
 	// An absolute rotation saved before rotation became relative, or -1;
@@ -61,8 +57,6 @@ public:
 			int32				Reflection(int32 id);
 			void				SetTemperature(int32 id, float temperature);
 			float				Temperature(int32 id);
-			void				SetScale(int32 id, float scale);
-			float				Scale(int32 id);
 			void				Remove(screen_configuration* configuration);
 
 			status_t			Store(BMessage& settings) const;

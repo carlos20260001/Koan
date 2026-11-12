@@ -122,11 +122,6 @@ private:
 
 			BSlider*		fBrightnessSlider;
 
-			// Per-output fractional scaling control (1.0x - 2.0x)
-			BSlider*		fScaleSlider;
-			float			fOriginalScale;
-			bool			fScaleSupported;
-
 			BMenuField*		fTemperatureField;
 			BPopUpMenu*		fTemperatureMenu;
 			float			fTemperature;

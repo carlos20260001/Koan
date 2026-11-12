@@ -15,7 +15,6 @@
 #include "BitmapManager.h"
 #include "DrawingEngine.h"
 #include "HWInterface.h"
-#include "ScreenScaleTransform.h"
 
 #include <Accelerant.h>
 #include <Point.h>
@@ -44,7 +43,6 @@ get_mode_frequency(const display_mode& mode)
 Screen::Screen(::HWInterface *interface, int32 id)
 	:
 	fID(id),
-	fScale(1.0f),
 	fHWInterface(interface),
 	fDriver(interface != NULL ? interface->CreateDrawingEngine() : NULL)
 {
@@ -53,8 +51,7 @@ Screen::Screen(::HWInterface *interface, int32 id)
 
 Screen::Screen()
 	:
-	fID(-1),
-	fScale(1.0f)
+	fID(-1)
 {
 }
 
@@ -235,42 +232,6 @@ Screen::Frame() const
 	fHWInterface->GetMode(&mode);
 
 	return BRect(0, 0, mode.virtual_width - 1, mode.virtual_height - 1);
-}
-
-
-BRect
-Screen::LogicalFrame() const
-{
-	return ScreenScaleTransform::ToLogicalFrame(Frame(), Scale());
-}
-
-
-status_t
-Screen::SetScale(float scale)
-{
-	scale = ScreenScaleTransform::Normalize(scale);
-
-	if (scale == fScale)
-		return B_OK;
-
-	DrawingEngine* engine = GetDrawingEngine();
-	if (engine != NULL) {
-		status_t status = engine->SetScale(scale);
-		if (status != B_OK)
-			return status;
-	}
-
-	fScale = scale;
-	return B_OK;
-}
-
-
-float
-Screen::Scale() const
-{
-	if (fScale <= 0.0f)
-		return 1.0f;
-	return fScale;
 }
 
 

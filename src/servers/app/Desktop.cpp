@@ -64,8 +64,6 @@
 #include "Screen.h"
 #include "ScreenManager.h"
 #include "ScreenRelayout.h"
-#include "ScreenScaleTransform.h"
-
 #include "ServerApp.h"
 #include "ServerConfig.h"
 #include "ServerCursor.h"
@@ -322,9 +320,6 @@ MouseFilter::Filter(BMessage* message, EventTarget** _target, int32* _viewToken,
 	BPoint where;
 	if (message->FindPoint("where", &where) != B_OK)
 		return B_DISPATCH_MESSAGE;
-
-	// EventDispatcher has already converted "where" to logical (BeAPI)
-	// screen coordinates; do not convert it again.
 
 	int32 buttons;
 	if (message->FindInt32("buttons", &buttons) != B_OK)
@@ -723,13 +718,9 @@ Desktop::Init()
 
 	fCursorManager.InitializeCursors(fSettings->DefaultBoldFont().Size() / 12.0f);
 
-	Screen* primaryScreen = fVirtualScreen.ScreenAt(0);
-	if (primaryScreen == NULL)
-		return B_ERROR;
-
-	BRect primaryFrame = primaryScreen->Frame();
 	fVirtualScreen.HWInterface()->MoveCursorTo(
-		primaryFrame.Width() / 2, primaryFrame.Height() / 2);
+		fVirtualScreen.Frame().Width() / 2,
+		fVirtualScreen.Frame().Height() / 2);
 
 #if TEST_MODE
 	gInputManager->AddStream(new InputServerStream);
@@ -759,7 +750,7 @@ Desktop::Init()
 
 	// _ScreenChanged() normally does this, but nothing calls it at cold
 	// boot, only on later mode changes.
-	gInputManager->UpdateScreenBounds(primaryScreen->Frame(),
+	gInputManager->UpdateScreenBounds(fVirtualScreen.Frame(),
 		HWInterface()->PanelScanoutOrientation(),
 		HWInterface()->PanelReflection());
 
@@ -983,13 +974,9 @@ Desktop::SetScreenMode(int32 workspace, int32 id, const display_mode& mode,
 
 	fWorkspaces[workspace].CurrentScreenConfiguration().Set(id,
 		hasInfo ? &info : NULL, screen->Frame(), mode);
-	fWorkspaces[workspace].CurrentScreenConfiguration().SetScale(id,
-		screen->Scale());
 	if (makeDefault && !_ScreenChangeStoreDeferred()) {
 		fWorkspaces[workspace].StoredScreenConfiguration().Set(id,
 			hasInfo ? &info : NULL, screen->Frame(), mode);
-		fWorkspaces[workspace].StoredScreenConfiguration().SetScale(id,
-			screen->Scale());
 		StoreWorkspaceConfiguration(workspace);
 	}
 
@@ -1050,7 +1037,7 @@ Desktop::GetScreenFrame(int32 workspace, int32 id, BRect& frame)
 		if (screen == NULL)
 			return B_NAME_NOT_FOUND;
 
-		frame = screen->LogicalFrame();
+		frame = screen->Frame();
 		return B_OK;
 	}
 
@@ -1060,8 +1047,7 @@ Desktop::GetScreenFrame(int32 workspace, int32 id, BRect& frame)
 	if (configuration == NULL)
 		return B_NAME_NOT_FOUND;
 
-	frame = ScreenScaleTransform::ToLogicalFrame(configuration->frame,
-		configuration->scale);
+	frame = configuration->frame;
 	return B_OK;
 }
 
@@ -1396,7 +1382,6 @@ Desktop::_StoreScreenChange()
 		ScreenConfigurations& stored
 			= fWorkspaces[workspace].StoredScreenConfiguration();
 		stored.Set(id, hasInfo ? &info : NULL, screen->Frame(), mode);
-		stored.SetScale(id, screen->Scale());
 		stored.SetRotation(id, HWInterface()->PanelOrientation());
 		stored.SetReflection(id, HWInterface()->PanelReflection());
 
@@ -1504,151 +1489,6 @@ Desktop::Temperature(int32 id) const
 	float temp = 6500.0f;
 	HWInterface()->GetTemperature(&temp);
 	return temp;
-}
-
-
-status_t
-Desktop::SetScreenScale(int32 id, float scale)
-{
-	scale = ScreenScaleTransform::Normalize(scale);
-
-	AutoWriteLocker windowLocker(fWindowLock);
-
-	Screen* screen = fVirtualScreen.ScreenByID(id);
-	if (screen == NULL)
-		return B_NAME_NOT_FOUND;
-
-	BRect oldLogicalFrame = screen->LogicalFrame();
-
-	ScreenConfigurations& stored
-		= fWorkspaces[0].StoredScreenConfiguration();
-	screen_configuration* current
-		= fWorkspaces[0].CurrentScreenConfiguration().CurrentByID(id);
-	if (stored.CurrentByID(id) == NULL && current != NULL) {
-		status_t status = stored.Set(id,
-			current->has_info ? &current->info : NULL,
-			current->frame, current->mode);
-		if (status != B_OK)
-			return status;
-	}
-
-	{
-		AutoWriteLocker screenLocker(fScreenLock);
-		status_t status = screen->SetScale(scale);
-		if (status != B_OK)
-			return status;
-	}
-
-	stored.SetScale(id, scale);
-	fWorkspaces[0].CurrentScreenConfiguration().SetScale(id, scale);
-	StoreWorkspaceConfiguration(0);
-
-	fVirtualScreen.UpdateFrame();
-	_ScreenChanged(screen, &oldLogicalFrame);
-
-	return B_OK;
-}
-
-
-float
-Desktop::ScreenScale(int32 id) const
-{
-	// Prefer the live screen scale.
-	Screen* screen = fVirtualScreen.ScreenByID(id);
-	if (screen != NULL)
-		return screen->Scale();
-
-	// Fall back to the stored configuration.
-	screen_configuration* configuration
-		= fWorkspaces[0].CurrentScreenConfiguration().CurrentByID(id);
-	if (configuration != NULL)
-		return configuration->scale;
-
-	return 1.0f;
-}
-
-
-BPoint
-Desktop::PhysicalToLogical(const BPoint& physical) const
-{
-	// Find the screen containing the physical point and divide by its
-	// scale factor. Input events arrive in physical pixels; window
-	// hit-testing and positioning happen in logical space.
-	for (int32 i = 0; i < fVirtualScreen.CountScreens(); i++) {
-		Screen* screen = fVirtualScreen.ScreenAt(i);
-		if (screen == NULL)
-			continue;
-
-		BRect screenFrame = fVirtualScreen.ScreenFrameAt(i);
-		if (screenFrame.Contains(physical)) {
-			BRect logicalFrame = fVirtualScreen.ScreenLogicalFrameAt(i);
-			return ScreenScaleTransform::ToLogical(physical, screenFrame,
-				logicalFrame, screen->Scale());
-		}
-	}
-
-	// Fallback: use the primary screen's scale.
-	Screen* screen = fVirtualScreen.ScreenAt(0);
-	if (screen != NULL) {
-		return ScreenScaleTransform::ToLogical(physical, screen->Frame(),
-			screen->LogicalFrame(), screen->Scale());
-	}
-
-	return physical;
-}
-
-
-BPoint
-Desktop::LogicalToPhysical(const BPoint& logical) const
-{
-	for (int32 i = 0; i < fVirtualScreen.CountScreens(); i++) {
-		Screen* screen = fVirtualScreen.ScreenAt(i);
-		if (screen == NULL)
-			continue;
-
-		BRect screenFrame = fVirtualScreen.ScreenFrameAt(i);
-		BRect logicalFrame = fVirtualScreen.ScreenLogicalFrameAt(i);
-		if (logicalFrame.Contains(logical)) {
-			return ScreenScaleTransform::ToPhysical(logical, screenFrame,
-				logicalFrame, screen->Scale());
-		}
-	}
-
-	Screen* screen = fVirtualScreen.ScreenAt(0);
-	if (screen != NULL) {
-		return ScreenScaleTransform::ToPhysical(logical, screen->Frame(),
-			screen->LogicalFrame(), screen->Scale());
-	}
-
-	return logical;
-}
-
-
-/*!	Converts a logical (BeAPI screen) rect to the framebuffer rect the
-	pointing devices clamp to. Invalid rects (no confinement) pass through.
-*/
-BRect
-Desktop::LogicalToDeviceRect(const BRect& logical) const
-{
-	if (!logical.IsValid())
-		return logical;
-
-	int32 index = 0;
-	for (int32 i = 0; i < fVirtualScreen.CountScreens(); i++) {
-		if (fVirtualScreen.ScreenLogicalFrameAt(i).Contains(
-				logical.LeftTop())) {
-			index = i;
-			break;
-		}
-	}
-
-	Screen* screen = fVirtualScreen.ScreenAt(index);
-	if (screen == NULL)
-		return logical;
-
-	return ScreenScaleTransform::ToDeviceConfineRect(logical,
-		fVirtualScreen.ScreenFrameAt(index),
-		fVirtualScreen.ScreenLogicalFrameAt(index), screen->Scale());
 }
 
 
@@ -2229,20 +2069,15 @@ Desktop::MoveWindowBy(Window* window, float x, float y, int32 workspace)
 
 	// NOTE: Having all windows locked should prevent any
 	// problems with locking the drawing engine here.
-	bool copied = false;
 	if (GetDrawingEngine()->LockParallelAccess()) {
-		copied = GetDrawingEngine()->CopyRegion(&copyRegion, (int32)x,
-			(int32)y);
+		GetDrawingEngine()->CopyRegion(&copyRegion, (int32)x, (int32)y);
 		GetDrawingEngine()->UnlockParallelAccess();
 	}
 
 	// in the dirty region, exclude the parts that we
-	// could move by blitting (none when the move is not a whole number
-	// of framebuffer pixels at a fractional scale: repaint all of it)
-	if (copied) {
-		copyRegion.OffsetBy((int32)x, (int32)y);
-		newDirtyRegion.Exclude(&copyRegion);
-	}
+	// could move by blitting
+	copyRegion.OffsetBy((int32)x, (int32)y);
+	newDirtyRegion.Exclude(&copyRegion);
 
 	MarkDirty(newDirtyRegion);
 	_SetBackground(background);
@@ -2903,12 +2738,8 @@ Desktop::AcquirePointerGrab(team_id team, int32 token, EventTarget* target,
 		constraint |= kPointerConstraintConfined;
 	if ((flags & B_POINTER_GRAB_RELATIVE) != 0)
 		constraint |= kPointerConstraintRelative;
-	// confineTo is in BeAPI (logical) screen coordinates; input_server
-	// clamps in framebuffer pixels (see UpdateScreenBounds()).
-	if (gInputManager != NULL) {
-		gInputManager->SetPointerConstraint(constraint,
-			LogicalToDeviceRect(confineTo));
-	}
+	if (gInputManager != NULL)
+		gInputManager->SetPointerConstraint(constraint, confineTo);
 
 	return B_OK;
 }
@@ -4685,21 +4516,18 @@ Desktop::_RelayoutWindowsForScreen(Screen* screen, const BRect& oldFrame,
 
 
 void
-Desktop::_ScreenChanged(Screen* screen, const BRect* oldLogicalFrame)
+Desktop::_ScreenChanged(Screen* screen)
 {
 	ASSERT_BRW_WRITE_LOCKED(fWindowLock);
 
 	// item->frame is still the old size; Screen::Frame() is already the new.
 	const int32 screenIndex = fVirtualScreen.ScreenIndex(screen);
-	const BRect physicalFrame = screen->Frame();
-	const BRect newFrame = screen->LogicalFrame();
+	const BRect newFrame = screen->Frame();
 
 	if (screenIndex >= 0) {
-		const BRect oldFrame = oldLogicalFrame != NULL
-			? *oldLogicalFrame
-			: fVirtualScreen.ScreenLogicalFrameAt(screenIndex);
+		const BRect oldFrame = fVirtualScreen.ScreenFrameAt(screenIndex);
 		_RelayoutWindowsForScreen(screen, oldFrame, newFrame);
-		fVirtualScreen.SetScreenFrame(screenIndex, physicalFrame);
+		fVirtualScreen.SetScreenFrame(screenIndex, newFrame);
 	}
 
 	// the entire screen is dirty, because we're actually
@@ -4708,7 +4536,7 @@ Desktop::_ScreenChanged(Screen* screen, const BRect* oldLogicalFrame)
 
 	// update our cached screen region
 	fScreenRegion.Set(newFrame);
-	gInputManager->UpdateScreenBounds(physicalFrame,
+	gInputManager->UpdateScreenBounds(newFrame,
 		screen->HWInterface()->PanelScanoutOrientation(),
 		screen->HWInterface()->PanelReflection());
 
@@ -4739,10 +4567,8 @@ Desktop::_ScreenChanged(Screen* screen, const BRect* oldLogicalFrame)
 
 	for (Window* window = fAllWindows.FirstWindow(); window != NULL;
 			window = window->NextWindow(kAllWindowList)) {
-		if (window->Screen() == screen) {
-			window->SetScreen(screen);
+		if (window->Screen() == screen)
 			window->ServerWindow()->ScreenChanged(&update);
-		}
 	}
 }
 
@@ -4791,10 +4617,6 @@ Desktop::_SetCurrentWorkspaceConfiguration()
 {
 	ASSERT_BRW_WRITE_LOCKED(fWindowLock);
 
-	Screen* primaryScreen = fVirtualScreen.ScreenAt(0);
-	BRect oldPrimaryFrame = primaryScreen != NULL
-		? primaryScreen->LogicalFrame() : BRect();
-
 	status_t status = fDirectScreenLock.LockWithTimeout(1000000L);
 	if (status != B_OK) {
 		// The application having the direct screen lock didn't give it up in
@@ -4816,13 +4638,8 @@ Desktop::_SetCurrentWorkspaceConfiguration()
 		&changedScreens);
 
 	for (int32 i = 0; changedScreens != 0; i++, changedScreens /= 2) {
-		if ((changedScreens & (1 << i)) != 0) {
-			Screen* screen = fVirtualScreen.ScreenAt(i);
-			if (i == 0 && oldPrimaryFrame.IsValid())
-				_ScreenChanged(screen, &oldPrimaryFrame);
-			else
-				_ScreenChanged(screen);
-		}
+		if ((changedScreens & (1 << i)) != 0)
+			_ScreenChanged(fVirtualScreen.ScreenAt(i));
 	}
 }
 

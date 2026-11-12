@@ -50,14 +50,7 @@ public:
 			void				SetFrame(const BRect& rect);
 
 			BRect				Frame() const;
-			// The physical frame scaled down to logical coordinates
-			// (physical / scale). Used for window placement and input.
-			BRect				LogicalFrame() const;
 			color_space			ColorSpace() const;
-
-			// Per-output fractional scaling factor (wlroots-inspired).
-			status_t			SetScale(float scale);
-			float				Scale() const;
 
 	inline	DrawingEngine*		GetDrawingEngine() const
 									{ return fDriver.Get(); }
@@ -70,7 +63,6 @@ private:
 									uint32 colorspace, float frequency) const;
 
 			int32				fID;
-			float				fScale;
 			ObjectDeleter< ::HWInterface>
 								fHWInterface;
 			ObjectDeleter<DrawingEngine>

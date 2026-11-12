@@ -370,24 +370,6 @@ BScreen::SetTemperature(float kelvin)
 }
 
 
-status_t
-BScreen::GetScale(float* scale)
-{
-	if (fScreen != NULL)
-		return fScreen->GetScale(scale);
-	return B_ERROR;
-}
-
-
-status_t
-BScreen::SetScale(float scale)
-{
-	if (fScreen != NULL)
-		return fScreen->SetScale(scale);
-	return B_ERROR;
-}
-
-
 //	#pragma mark - Deprecated methods
 
 

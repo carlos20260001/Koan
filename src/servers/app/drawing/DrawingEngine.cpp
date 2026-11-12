@@ -13,7 +13,6 @@
 #include <Bitmap.h>
 #include <StackOrHeapArray.h>
 
-#include <math.h>
 #include <stdio.h>
 
 #include <algorithm>
@@ -25,7 +24,6 @@
 #include "ServerBitmap.h"
 #include "ServerCursor.h"
 #include "RenderingBuffer.h"
-#include "ScreenScaleTransform.h"
 
 #include "drawing_support.h"
 
@@ -289,24 +287,7 @@ DrawingEngine::SetCopyToFrontEnabled(bool enable)
 void
 DrawingEngine::CopyToFront(/*const*/ BRegion& region)
 {
-	BRegion physicalRegion;
-	fPainter->ScaleRegion(region, physicalRegion);
-	fGraphicsCard->InvalidateRegion(physicalRegion);
-}
-
-
-status_t
-DrawingEngine::SetScale(float scale)
-{
-	if (fPainter->Scale() == scale)
-		return B_OK;
-
-	if (!LockExclusiveAccess())
-		return B_ERROR;
-
-	fPainter->SetScale(scale);
-	UnlockExclusiveAccess();
-	return B_OK;
+	fGraphicsCard->InvalidateRegion(region);
 }
 
 
@@ -538,55 +519,42 @@ is_above(const BRect& a, const BRect& b)
 }
 
 
-bool
+void
 DrawingEngine::CopyRegion(/*const*/ BRegion* region, int32 xOffset,
 	int32 yOffset)
 {
 	// NOTE: region is already clipped
 	ASSERT_PARALLEL_LOCKED();
 
-	// With a fractional scale the content moves by offset * scale pixels;
-	// a whole-pixel copy would not match a repaint, so refuse it.
-	float scale = fPainter->Scale();
-	int32 physicalXOffset;
-	int32 physicalYOffset;
-	if (!ScreenScaleTransform::ToPhysicalOffset(xOffset, scale,
-			physicalXOffset)
-		|| !ScreenScaleTransform::ToPhysicalOffset(yOffset, scale,
-			physicalYOffset)) {
-		return false;
-	}
+	BRect frame = region->Frame();
+	frame = frame | frame.OffsetByCopy(xOffset, yOffset);
 
-	BRegion physicalRegion;
-	fPainter->ScaleRegion(*region, physicalRegion);
-
-	BRect frame = physicalRegion.Frame();
-	frame = frame | frame.OffsetByCopy(physicalXOffset, physicalYOffset);
 	AutoFloatingOverlaysHider _(fGraphicsCard, frame);
 
-	int32 count = physicalRegion.CountRects();
+	int32 count = region->CountRects();
+
 	// TODO: make this step unnecessary
 	// (by using different stack impl inside node)
 	BStackOrHeapArray<node, 64> nodes(count);
 	for (int32 i= 0; i < count; i++) {
-		nodes[i].init(physicalRegion.RectAt(i), count);
+		nodes[i].init(region->RectAt(i), count);
 		if (nodes[i].pointers == NULL)
-			return false;
+			return;
 	}
 
 	for (int32 i = 0; i < count; i++) {
-		BRect a = physicalRegion.RectAt(i);
+		BRect a = region->RectAt(i);
 		for (int32 k = i + 1; k < count; k++) {
-			BRect b = physicalRegion.RectAt(k);
+			BRect b = region->RectAt(k);
 			int cmp = 0;
 			// compare horizontally
-			if (physicalXOffset > 0) {
+			if (xOffset > 0) {
 				if (is_left_of(a, b)) {
 					cmp -= 1;
 				} else if (is_left_of(b, a)) {
 					cmp += 1;
 				}
-			} else if (physicalXOffset < 0) {
+			} else if (xOffset < 0) {
 				if (is_left_of(a, b)) {
 					cmp += 1;
 				} else if (is_left_of(b, a)) {
@@ -594,13 +562,13 @@ DrawingEngine::CopyRegion(/*const*/ BRegion* region, int32 xOffset,
 				}
 			}
 			// compare vertically
-			if (physicalYOffset > 0) {
+			if (yOffset > 0) {
 				if (is_above(a, b)) {
 					cmp -= 1;
 				} else if (is_above(b, a)) {
 					cmp += 1;
 				}
-			} else if (physicalYOffset < 0) {
+			} else if (yOffset < 0) {
 				if (is_above(a, b)) {
 					cmp += 1;
 				} else if (is_above(b, a)) {
@@ -634,7 +602,7 @@ DrawingEngine::CopyRegion(/*const*/ BRegion* region, int32 xOffset,
 		node* n = inDegreeZeroNodes.top();
 		inDegreeZeroNodes.pop();
 
-		BRect touched = CopyRect(n->rect, physicalXOffset, physicalYOffset);
+		BRect touched = CopyRect(n->rect, xOffset, yOffset);
 		fGraphicsCard->Invalidate(touched);
 
 		for (int32 k = 0; k < n->next_pointer; k++) {
@@ -643,8 +611,6 @@ DrawingEngine::CopyRegion(/*const*/ BRegion* region, int32 xOffset,
 				inDegreeZeroNodes.push(n->pointers[k]);
 		}
 	}
-
-	return true;
 }
 
 
@@ -655,8 +621,7 @@ DrawingEngine::InvertRect(BRect r)
 
 	make_rect_valid(r);
 	// NOTE: Currently ignores view transformation, so no TransformAndClipRect()
-	r = fPainter->ClipRect(fPainter->ScaleRect(r));
-	DrawTransaction transaction(this, r);
+	DrawTransaction transaction(this, fPainter->ClipRect(r));
 	if (!transaction.IsDirty())
 		return;
 
@@ -855,26 +820,18 @@ DrawingEngine::StrokeLine(const BPoint& start, const BPoint& end,
 {
 	ASSERT_PARALLEL_LOCKED();
 
-	BPoint physicalStart = fPainter->ScalePoint(start);
-	BPoint physicalEnd = fPainter->ScalePoint(end);
-	BRect touched(physicalStart, physicalEnd);
+	BRect touched(start, end);
 	make_rect_valid(touched);
 	touched = fPainter->ClipRect(touched);
 	DrawTransaction transaction(this, touched);
 
-	if (fPainter->Scale() == 1.0f
-		&& fPainter->StraightLine(start, end, color)) {
-		return;
-	} else {
+	if (!fPainter->StraightLine(start, end, color)) {
 		rgb_color previousColor = fPainter->HighColor();
 		drawing_mode previousMode = fPainter->DrawingMode();
 
 		fPainter->SetHighColor(color);
 		fPainter->SetDrawingMode(B_OP_OVER);
-		if (fPainter->Scale() == 1.0f)
-			fPainter->StrokeLine(start, end);
-		else
-			fPainter->StrokeLineNoTransform(start, end);
+		fPainter->StrokeLine(start, end);
 
 		fPainter->SetDrawingMode(previousMode);
 		fPainter->SetHighColor(previousColor);
@@ -889,12 +846,11 @@ DrawingEngine::StrokeRect(BRect r, const rgb_color& color)
 	ASSERT_PARALLEL_LOCKED();
 
 	make_rect_valid(r);
-	BRect physicalRect = fPainter->ScaleRect(r);
-	DrawTransaction transaction(this, fPainter->ClipRect(physicalRect));
+	DrawTransaction transaction(this, fPainter->ClipRect(r));
 	if (!transaction.IsDirty())
 		return;
 
-	fPainter->StrokeRect(physicalRect, color);
+	fPainter->StrokeRect(r, color);
 }
 
 
@@ -904,7 +860,7 @@ DrawingEngine::FillRect(BRect r, const rgb_color& color)
 	ASSERT_PARALLEL_LOCKED();
 
 	make_rect_valid(r);
-	r = fPainter->ClipRect(fPainter->ScaleRect(r));
+	r = fPainter->ClipRect(r);
 	DrawTransaction transaction(this, r);
 	if (!transaction.IsDirty())
 		return;
@@ -919,9 +875,7 @@ DrawingEngine::FillRegion(BRegion& r, const rgb_color& color)
 	ASSERT_PARALLEL_LOCKED();
 
 	// NOTE: region expected to be already clipped correctly!!
-	BRegion physicalRegion;
-	fPainter->ScaleRegion(r, physicalRegion);
-	BRect frame = physicalRegion.Frame();
+	BRect frame = r.Frame();
 	if (!fPainter->Bounds().Contains(frame)) {
 		// NOTE: I am not quite sure yet how this can happen, but apparently it
 		// can (see bug #634).
@@ -937,11 +891,11 @@ DrawingEngine::FillRegion(BRegion& r, const rgb_color& color)
 		return;
 	}
 
-	DrawTransaction transaction(this, physicalRegion);
+	DrawTransaction transaction(this, r);
 
-	int32 count = physicalRegion.CountRects();
+	int32 count = r.CountRects();
 	for (int32 i = 0; i < count; i++)
-		fPainter->FillRectNoClipping(physicalRegion.RectAtInt(i), color);
+		fPainter->FillRectNoClipping(r.RectAtInt(i), color);
 }
 
 

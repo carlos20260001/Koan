@@ -110,11 +110,6 @@ public:
 			status_t			GetTemperature(float*);
 			status_t			SetTemperature(float);
 
-			// Per-output fractional scaling factor (1.0 = no scaling).
-			status_t			GetScale(float*);
-			status_t			SetScale(float);
-
-
 			// Kernel connector name, e.g. "HDMI-A-1" or "eDP-1".
 			status_t			GetConnectorName(BString& name);
 

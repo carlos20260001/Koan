@@ -1029,8 +1029,6 @@ DefaultWindowBehaviour::_RegionFor(const BMessage* message, int32& tab) const
 	if (message->FindPoint("where", &where) != B_OK)
 		return Decorator::REGION_NONE;
 
-	// "where" is already logical: EventDispatcher converts it once.
-
 	return decorator->RegionAt(where, tab);
 }
 

@@ -526,13 +526,9 @@ ServerApp::_DispatchMessage(int32 code, BPrivate::LinkReceiver& link)
 			// A fresh input_server otherwise only learns the screen
 			// bounds and panel orientation on the next mode change.
 			if (stream != NULL) {
-				Screen* primaryScreen
-					= fDesktop->VirtualScreen().ScreenAt(0);
-				if (primaryScreen != NULL) {
-					stream->UpdateScreenBounds(primaryScreen->Frame(),
+				stream->UpdateScreenBounds(fDesktop->VirtualScreen().Frame(),
 					fDesktop->HWInterface()->PanelScanoutOrientation(),
 					fDesktop->HWInterface()->PanelReflection());
-				}
 			}
 
 			// TODO: this should be done using notifications (so that an
@@ -3481,35 +3477,6 @@ ServerApp::_DispatchMessage(int32 code, BPrivate::LinkReceiver& link)
 			fLink.StartMessage(result);
 			if (result == B_OK)
 				fLink.Attach<float>(brightness);
-			fLink.Flush();
-			break;
-		}
-
-		case AS_SCREEN_SET_SCALE:
-		{
-			STRACE(("ServerApp %s: AS_SCREEN_SET_SCALE\n", Signature()));
-			int32 id;
-			link.Read<int32>(&id);
-
-			float scale;
-			link.Read<float>(&scale);
-
-			status_t status = fDesktop->SetScreenScale(id, scale);
-			fLink.StartMessage(status);
-
-			fLink.Flush();
-			break;
-		}
-
-		case AS_SCREEN_GET_SCALE:
-		{
-			STRACE(("ServerApp %s: AS_SCREEN_GET_SCALE\n", Signature()));
-			int32 id;
-			link.Read<int32>(&id);
-
-			float scale = fDesktop->ScreenScale(id);
-			fLink.StartMessage(B_OK);
-			fLink.Attach<float>(scale);
 			fLink.Flush();
 			break;
 		}

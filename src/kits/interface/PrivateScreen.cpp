@@ -835,39 +835,6 @@ BPrivateScreen::SetTemperature(float kelvin)
 
 
 status_t
-BPrivateScreen::GetScale(float* scale)
-{
-	if (scale == NULL)
-		return B_BAD_VALUE;
-
-	BPrivate::AppServerLink link;
-	link.StartMessage(AS_SCREEN_GET_SCALE);
-	link.Attach<int32>(ID());
-
-	status_t status;
-	if (link.FlushWithReply(status) == B_OK && status == B_OK)
-		link.Read<float>(scale);
-
-	return status;
-}
-
-
-status_t
-BPrivateScreen::SetScale(float scale)
-{
-	BPrivate::AppServerLink link;
-	link.StartMessage(AS_SCREEN_SET_SCALE);
-	link.Attach<int32>(ID());
-	link.Attach<float>(scale);
-
-	status_t status = B_ERROR;
-	link.FlushWithReply(status);
-
-	return status;
-}
-
-
-status_t
 BPrivateScreen::GetConnectorName(BString& name)
 {
 	BPrivate::AppServerLink link;

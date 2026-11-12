@@ -49,7 +49,6 @@ public:
 			bool			CopyToFrontEnabled() const
 								{ return fCopyToFront; }
 	virtual	void			CopyToFront(/*const*/ BRegion& region);
-			status_t		SetScale(float scale);
 
 	// locking
 			bool			LockParallelAccess();
@@ -92,9 +91,7 @@ public:
 								int32 xOffset, int32 yOffset);
 
 	// drawing functions
-	// Returns false, copying nothing, when the offset is not a whole number
-	// of framebuffer pixels at the current scale; the caller must repaint.
-	virtual	bool			CopyRegion(/*const*/ BRegion* region,
+	virtual	void			CopyRegion(/*const*/ BRegion* region,
 								int32 xOffset, int32 yOffset);
 
 	virtual	void			InvertRect(BRect r);
