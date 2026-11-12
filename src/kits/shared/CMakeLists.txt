@@ -58,5 +58,5 @@ AddOn(
 	"${PROJECT_SOURCE_DIR}/src/add-ons/input_server/devices/keyboard"
 )
 
-UsePrivateHeaders(shared shared locale interface kernel libroot system)
+UsePrivateHeaders(shared shared locale interface kernel libroot system app)
 target_link_libraries(shared PRIVATE xkbcommon)
