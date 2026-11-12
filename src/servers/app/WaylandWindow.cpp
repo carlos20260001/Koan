@@ -654,12 +654,18 @@ WaylandWindowBridge::ScreenChanged(::Screen *screen)
 
 	union koan_cmd_payload payload;
 	memset(&payload, 0, sizeof(payload));
-	payload.output_mode.width = frame.IntegerWidth() + 1;
-	payload.output_mode.height = frame.IntegerHeight() + 1;
+	/* Frame() is logical; the screen is drawn at the render scale. The
+	 * output mode is in buffer pixels and wlroots divides it by the scale,
+	 * so the output's logical size is app_server's screen again. */
+	float scale = screen->HWInterface() != NULL
+		? screen->HWInterface()->RenderScaleFactor() : 1.0f;
+	payload.output_mode.width
+		= (int32_t)roundf((frame.IntegerWidth() + 1) * scale);
+	payload.output_mode.height
+		= (int32_t)roundf((frame.IntegerHeight() + 1) * scale);
 	payload.output_mode.refresh_mhz = frequency > 0.0f
 		? (int32_t)roundf(frequency * 1000.0f) : 0;
-	// Logical pixels only until the airOS render scale is ported.
-	payload.output_mode.scale = 1.0f;
+	payload.output_mode.scale = scale;
 	push_to_wayland(KOAN_CMD_OUTPUT_MODE, payload);
 }
 

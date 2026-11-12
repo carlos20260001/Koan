@@ -12,7 +12,9 @@
 #include <math.h>
 #include <new>
 
+#include <Application.h>
 #include <Bitmap.h>
+#include <Screen.h>
 
 #include <InterfacePrivate.h>
 
@@ -44,9 +46,17 @@ BIconUtils::IconScale()
 	if (scale > 0.0f)
 		return scale;
 
-	// app_server draws at one logical density until the airOS render
-	// scale (BScreen::DeviceScale()) is ported; icons follow it then.
+	// The density app_server draws at (BScreen::DeviceScale(), from the
+	// memory it shares with applications); 1 without a connection.
 	scale = 1.0f;
+	if (be_app != NULL) {
+		BScreen screen(B_MAIN_SCREEN_ID);
+		if (screen.IsValid()) {
+			float deviceScale = screen.DeviceScale();
+			if (deviceScale >= 1.0f)
+				scale = deviceScale;
+		}
+	}
 
 	sIconScale.store(scale, std::memory_order_relaxed);
 	return scale;
