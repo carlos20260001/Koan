@@ -2417,7 +2417,30 @@ DrmHWInterface::SetSoftwareScale(uint16 percent)
 }
 
 
-/*!	Where the cursor plane goes for a pointer at the logical  location:
+/*!	Draws at \a percent of the logical size into the unchanged buffers.
+	The drawing engines take the new density from FrameBufferChanged(), as
+	after a mode change; the caller (Desktop) then redraws everything.
+	Exclusive lock first, then the overlays lock in the base class, as in
+	SetMode().
+*/
+status_t
+DrmHWInterface::SetRenderScale(uint16 percent)
+{
+	if (percent == RenderScale())
+		return B_OK;
+	if (!LockExclusiveAccess())
+		return B_ERROR;
+
+	status_t status = HWInterface::SetRenderScale(percent);
+	if (status == B_OK)
+		_NotifyFrameBufferChanged();
+
+	UnlockExclusiveAccess();
+	return status;
+}
+
+
+/*!	Where the cursor plane goes for a pointer at the logical \a location:
 	the location in buffer pixels (render scale), as _CursorFrame() puts
 	the software cursor, less the hot spot of the sprite, which is already
 	at the buffer's density.

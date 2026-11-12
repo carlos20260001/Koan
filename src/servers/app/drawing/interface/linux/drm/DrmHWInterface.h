@@ -141,6 +141,7 @@ public:
 
 	// No software scaling: the render buffer stays at the mode's size.
 	virtual	status_t			SetSoftwareScale(uint16 percent);
+	virtual	status_t			SetRenderScale(uint16 percent);
 
 			void				_CursorPlanePosition(BPoint location,
 									BPoint hot, int32& px, int32& py) const;
