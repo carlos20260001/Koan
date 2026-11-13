@@ -287,27 +287,92 @@ static inline uint32_t sample_bilinear(const uint8_t *src, size_t stride,
 	return out;
 }
 
-/* wlr_surface_for_each_surface() iterator: draw one surface of the tree
- * over what is already composed (root first, children in stacking order).
- * Clients put their content in subsurfaces (Firefox renders the whole
- * window into one, the root only carries the transparent CSD frame), so
- * the root buffer alone is not what the user should see.
- *
- * The surface covers current.width x current.height surface units at
- * (sx, sy), which is target->scale times as many target pixels. Its buffer
- * (or the viewport's source crop of it) is mapped onto those: 1:1 when the
- * client rendered at the target's scale (a wp_fractional_scale_v1 client,
- * or buffer_scale == target scale), otherwise filtered (sample_bilinear()).
- * Buffer transforms are not applied. */
-static void compose_surface(struct wlr_surface *surface, int sx, int sy,
-			    void *data) {
-	struct compose_target *t = data;
-	if (!surface->buffer)
-		return;
+/* One surface of a tree being composed, at (sx, sy) in root-surface
+ * coordinates. */
+struct compose_item {
+	struct wlr_surface *surface;
+	int sx, sy;
+};
 
+struct compose_items {
+	struct compose_item *items;
+	size_t count, capacity;
+	bool failed;
+};
+
+/* wlr_surface_for_each_surface() iterator: list the surfaces with a
+ * buffer, root first, children in stacking order. */
+static void compose_collect(struct wlr_surface *surface, int sx, int sy,
+		void *data) {
+	struct compose_items *list = data;
+	if (!surface->buffer || list->failed)
+		return;
+	if (list->count == list->capacity) {
+		size_t capacity = list->capacity ? list->capacity * 2 : 8;
+		struct compose_item *items = realloc(list->items,
+			capacity * sizeof(*items));
+		if (!items) {
+			list->failed = true;
+			return;
+		}
+		list->items = items;
+		list->capacity = capacity;
+	}
+	list->items[list->count++] = (struct compose_item){ surface, sx, sy };
+}
+
+/* The target pixels a surface covers: current.width x current.height
+ * surface units at (sx, sy) are target->scale times as many pixels. */
+static void compose_item_rect(const struct compose_target *t,
+		const struct compose_item *item, int32_t *ox, int32_t *oy,
+		int32_t *dw, int32_t *dh) {
 	const float scale = t->scale;
-	const int32_t dw = (int32_t)lroundf(surface->current.width * scale);
-	const int32_t dh = (int32_t)lroundf(surface->current.height * scale);
+	*dw = (int32_t)lroundf(item->surface->current.width * scale);
+	*dh = (int32_t)lroundf(item->surface->current.height * scale);
+	*ox = (int32_t)lroundf((item->sx - t->box.x) * scale);
+	*oy = (int32_t)lroundf((item->sy - t->box.y) * scale);
+}
+
+/* Add the target pixels the surface's opaque region fully covers to
+ * covered. A pixel counts only when it lies wholly inside the region, so
+ * at a fractional scale the edges round inwards and a partly covered
+ * pixel is still composed from the surfaces below. */
+static void compose_add_opaque(const struct compose_target *t,
+		const struct compose_item *item, pixman_region32_t *covered) {
+	int32_t ox, oy, dw, dh;
+	compose_item_rect(t, item, &ox, &oy, &dw, &dh);
+	const double scale = t->scale;
+	int nrects = 0;
+	const pixman_box32_t *rects = pixman_region32_rectangles(
+		&item->surface->opaque_region, &nrects);
+	for (int i = 0; i < nrects; i++) {
+		int32_t x1 = (int32_t)ceil(rects[i].x1 * scale);
+		int32_t y1 = (int32_t)ceil(rects[i].y1 * scale);
+		int32_t x2 = (int32_t)floor(rects[i].x2 * scale);
+		int32_t y2 = (int32_t)floor(rects[i].y2 * scale);
+		if (x2 > dw)
+			x2 = dw;
+		if (y2 > dh)
+			y2 = dh;
+		if (x1 < x2 && y1 < y2)
+			pixman_region32_union_rect(covered, covered, ox + x1, oy + y1,
+				(unsigned)(x2 - x1), (unsigned)(y2 - y1));
+	}
+}
+
+/* Draw the part of one surface that lies in region (target pixels) over
+ * what is already composed.
+ *
+ * Its buffer (or the viewport's source crop of it) is mapped onto the
+ * surface's target pixels (compose_item_rect()): 1:1 when the client
+ * rendered at the target's scale (a wp_fractional_scale_v1 client, or
+ * buffer_scale == target scale), otherwise filtered (sample_bilinear()).
+ * Buffer transforms are not applied. */
+static void compose_draw(struct compose_target *t,
+		const struct compose_item *item, pixman_region32_t *region) {
+	struct wlr_surface *surface = item->surface;
+	int32_t ox, oy, dw, dh;
+	compose_item_rect(t, item, &ox, &oy, &dw, &dh);
 	if (dw <= 0 || dh <= 0)
 		return;
 
@@ -352,41 +417,86 @@ static void compose_surface(struct wlr_surface *surface, int sx, int sy,
 	 * missing row or column repeats the buffer's last. */
 	bool direct = !surface->current.viewport.has_src
 		&& abs(buffer->width - dw) <= 1 && abs(buffer->height - dh) <= 1;
-
-	/* Destination rectangle in target pixels, clipped to the target. */
-	const int32_t ox = (int32_t)lroundf((sx - t->box.x) * scale);
-	const int32_t oy = (int32_t)lroundf((sy - t->box.y) * scale);
-	int32_t x0 = ox < 0 ? -ox : 0;
-	int32_t y0 = oy < 0 ? -oy : 0;
-	int32_t x1 = dw;
-	int32_t y1 = dh;
-	if (ox + x1 > t->width)
-		x1 = t->width - ox;
-	if (oy + y1 > t->height)
-		y1 = t->height - oy;
-
 	const double stepX = srcW / dw;
 	const double stepY = srcH / dh;
-	for (int32_t y = y0; y < y1; y++) {
-		uint32_t *out = t->pixels + (size_t)(oy + y) * t->width + ox;
-		if (direct) {
-			const int32_t by = y < buffer->height ? y : buffer->height - 1;
-			const uint32_t *in = (const uint32_t *)((const uint8_t *)src
-				+ (size_t)by * stride);
-			const int32_t lastX = buffer->width - 1;
-			for (int32_t x = x0; x < x1; x++)
-				out[x] = blend_pixel(in[x < lastX ? x : lastX], out[x], opaque);
-			continue;
-		}
-		const double fy = srcY + (y + 0.5) * stepY;
-		for (int32_t x = x0; x < x1; x++) {
-			uint32_t pixel = sample_bilinear((const uint8_t *)src, stride,
-				buffer->width, buffer->height, srcX + (x + 0.5) * stepX, fy);
-			out[x] = blend_pixel(pixel, out[x], opaque);
+	const int32_t lastX = buffer->width - 1;
+
+	int nrects = 0;
+	const pixman_box32_t *rects = pixman_region32_rectangles(region,
+		&nrects);
+	for (int r = 0; r < nrects; r++) {
+		/* The rectangle in the surface's own target pixels. */
+		const int32_t x0 = rects[r].x1 - ox, x1 = rects[r].x2 - ox;
+		const int32_t y0 = rects[r].y1 - oy, y1 = rects[r].y2 - oy;
+		for (int32_t y = y0; y < y1; y++) {
+			uint32_t *out = t->pixels + (size_t)(oy + y) * t->width + ox;
+			if (direct) {
+				const int32_t by = y < buffer->height ? y : buffer->height - 1;
+				const uint32_t *in = (const uint32_t *)((const uint8_t *)src
+					+ (size_t)by * stride);
+				for (int32_t x = x0; x < x1; x++)
+					out[x] = blend_pixel(in[x < lastX ? x : lastX], out[x],
+						opaque);
+				continue;
+			}
+			const double fy = srcY + (y + 0.5) * stepY;
+			for (int32_t x = x0; x < x1; x++) {
+				uint32_t pixel = sample_bilinear((const uint8_t *)src, stride,
+					buffer->width, buffer->height, srcX + (x + 0.5) * stepX,
+					fy);
+				out[x] = blend_pixel(pixel, out[x], opaque);
+			}
 		}
 	}
 
 	wlr_buffer_end_data_ptr_access(buffer);
+}
+
+/* Compose a surface tree into the target: every surface over the ones
+ * below it, root first. Clients put their content in subsurfaces (Firefox
+ * renders the whole window into one, the root only carries GTK's CSD
+ * frame), so the root buffer alone is not what the user should see.
+ *
+ * What a surface declares opaque (wl_surface.set_opaque_region, or an
+ * XRGB buffer) hides the surfaces below, so those parts of them are not
+ * composed: Firefox's root is drawn at the integer scale and would be
+ * resampled on every frame of a video, only to be covered by the page. */
+static void compose_tree(struct compose_target *t,
+		struct wlr_surface *root) {
+	struct compose_items list = {0};
+	wlr_surface_for_each_surface(root, compose_collect, &list);
+	pixman_region32_t *draw = list.failed || list.count == 0 ? NULL
+		: calloc(list.count, sizeof(*draw));
+	if (!draw) {
+		free(list.items);
+		return;
+	}
+
+	/* Top down: each surface draws what the ones above leave visible. */
+	pixman_region32_t covered;
+	pixman_region32_init(&covered);
+	for (size_t i = list.count; i-- > 0;) {
+		int32_t ox, oy, dw, dh;
+		compose_item_rect(t, &list.items[i], &ox, &oy, &dw, &dh);
+		pixman_region32_init(&draw[i]);
+		if (dw > 0 && dh > 0) {
+			pixman_region32_union_rect(&draw[i], &draw[i], ox, oy,
+				(unsigned)dw, (unsigned)dh);
+			pixman_region32_intersect_rect(&draw[i], &draw[i], 0, 0,
+				(unsigned)t->width, (unsigned)t->height);
+			pixman_region32_subtract(&draw[i], &draw[i], &covered);
+		}
+		compose_add_opaque(t, &list.items[i], &covered);
+	}
+	pixman_region32_fini(&covered);
+
+	for (size_t i = 0; i < list.count; i++) {
+		if (pixman_region32_not_empty(&draw[i]))
+			compose_draw(t, &list.items[i], &draw[i]);
+		pixman_region32_fini(&draw[i]);
+	}
+	free(draw);
+	free(list.items);
 }
 
 /* -------------------------------------------------------------------------- */
@@ -683,7 +793,7 @@ void koan_adapter_popup_committed(struct wlr_xdg_popup *popup) {
 	struct compose_target t;
 	if (!compose_target_init(&t, popup_box(kp, &x, &y)))
 		return;
-	wlr_surface_for_each_surface(popup->base->surface, compose_surface, &t);
+	compose_tree(&t, popup->base->surface);
 	int32_t stride = t.width * 4;
 
 	if (kp->native_window) {
@@ -1019,7 +1129,7 @@ static void deliver_buffer(struct koan_toplevel *kt) {
 	struct compose_target t;
 	if (!compose_target_init(&t, window_box(kt->toplevel)))
 		return;
-	wlr_surface_for_each_surface(surface, compose_surface, &t);
+	compose_tree(&t, surface);
 
 	void *data = t.pixels;
 	int32_t width = t.width;

@@ -1055,7 +1055,7 @@ struct wl_display *koan_server_create(void) {
 	 * Firefox gives its content subsurface its size this way on a scaled
 	 * output; without it the subsurface is as large as its buffer.
 	 * wlroots applies the viewport to surface->current, which
-	 * compose_surface() maps. */
+	 * compose_draw() in koan_adapter.c maps. */
 	struct wlr_viewporter *viewporter = wlr_viewporter_create(
 		server->display);
 	/* wp_fractional_scale_v1: clients that bind it are told the exact

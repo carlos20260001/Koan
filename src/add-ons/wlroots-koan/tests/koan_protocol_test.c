@@ -2370,6 +2370,62 @@ test_compose_fractional(struct conn *c, struct toplevel *t)
 	commit_scaled(c, t, 64, 48, 1, COLOR_ROOT);
 }
 
+/* A surface's opaque region hides what is under it, so Koan does not
+ * compose that part of the surfaces below. Firefox shows its page in a
+ * subsurface that declares itself opaque over the whole window; the root
+ * under it is GTK's frame, drawn at the integer scale and resampled. At
+ * 150% in fullscreen, composing that hidden root took 45 of the 50 ms
+ * per frame and dropped half the frames of a 25 fps video (QEMU,
+ * 2560x1440). The protocol leaves what is under an opaque region to the
+ * compositor, which the test uses to see the skip: the child declares its
+ * left half opaque but draws premultiplied green at alpha 0x80. Under the
+ * opaque half the frame holds the child's pixel alone; on the right half
+ * it is blended over the red root. At 1.5 the root is a 2x buffer, the
+ * resampled case, and the opaque edge (32 units) falls on pixel 48. */
+#define COLOR_HALF 0x80006600u
+#define COLOR_HALF_OVER_ROOT 0xff656600u /* COLOR_HALF over COLOR_ROOT */
+
+static void
+test_compose_occluded(struct conn *c, struct toplevel *t)
+{
+	struct wl_surface *child = wl_compositor_create_surface(c->compositor);
+	struct wl_subsurface *sub = wl_subcompositor_get_subsurface(
+		c->subcompositor, child, t->surface);
+	struct wl_region *opaque = wl_compositor_create_region(c->compositor);
+	wl_region_add(opaque, 0, 0, 32, 48);
+	wl_surface_set_opaque_region(child, opaque);
+	wl_region_destroy(opaque);
+	attach_color(c, child, 64, 48, COLOR_HALF);
+	wl_surface_commit(child);
+
+	static const struct { float scale; int32_t bufferScale; int32_t edge;
+		const char *name; } kCases[] = {
+		{ 1.0f, 1, 32, "compose-occluded" },
+		{ 1.5f, 2, 48, "compose-occluded-fractional" },
+	};
+	for (size_t i = 0; i < sizeof(kCases) / sizeof(kCases[0]); i++) {
+		bool ok = set_output_scale(c, kCases[i].scale)
+			&& commit_scaled(c, t, 64 * kCases[i].bufferScale,
+				48 * kCases[i].bufferScale, kCases[i].bufferScale,
+				COLOR_ROOT);
+		const int32_t edge = kCases[i].edge;
+		uint32_t first = frame_pixel(0, 10);
+		uint32_t inside = frame_pixel(edge - 1, 10);
+		uint32_t outside = frame_pixel(edge, 10);
+		result(ok && first == COLOR_HALF && inside == COLOR_HALF
+				&& outside == COLOR_HALF_OVER_ROOT ? ST_PASS : ST_FAIL,
+			kCases[i].name, "%s; x 0 0x%08x, x %d 0x%08x (expected "
+			"0x%08x), x %d 0x%08x (expected 0x%08x)",
+			ok ? "delivered" : "NOT delivered", first, edge - 1, inside,
+			COLOR_HALF, edge, outside, COLOR_HALF_OVER_ROOT);
+	}
+
+	wl_subsurface_destroy(sub);
+	wl_surface_destroy(child);
+	set_output_scale(c, 1.0f);
+	commit_scaled(c, t, 64, 48, 1, COLOR_ROOT);
+}
+
 /* wp_viewport.set_destination sizes a surface independently of its
  * buffer: a 4 x 4 buffer can cover a 1000000 x 10 surface, and Koan
  * composes the window box at that size. Without a limit app_server
@@ -2436,6 +2492,7 @@ run_compose(void)
 	test_compose_scale(&c, &t);
 	test_compose_viewport(&c, &t);
 	test_compose_fractional(&c, &t);
+	test_compose_occluded(&c, &t);
 	test_compose_oversize(&c, &t);
 
 	struct conn after;
