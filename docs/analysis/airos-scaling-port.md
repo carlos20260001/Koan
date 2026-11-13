@@ -93,6 +93,17 @@ Quality (after the core works in QEMU):
 | 30d7feae, 3232a571, d3799ca2 | bilinear filter and area sampling for bitmaps |
 | fefba40e, 189f6f33, 6e588412, 5f046f17, 1062c0fb | frames, separators and window borders on the pixel grid |
 | 2827a995 | translucent outlines on the pixel grid |
+| 60b208db | text drawn glyph by glyph shows in layers (opacity groups) and pictures |
+| 6ccec44d, 5f55b76b | scaled screenshots read the drawing buffer, averaged straight into the caller's bitmap |
+| 7a2a4f22, b804c0c3, 0acdbac7 | direct windows stay connected at a higher density (`B_DIRECT_DEVICE_PIXELS`), get app_server's drawing copy, and can mark it stale |
+
+Already in the tree from upstream Haiku, not ported: 1176d379
+(ProcessController MIDI icons), 737c27b2 (DiskUsage menu icons).
+348a5d8c is the same change as 5f55b76b, merged twice in air/OS.
+
+On the DRM backend a direct window still gets no frame buffer (`bits`
+NULL, `bits_area` -1): the scanout buffers are DRM dumb buffers, not
+areas. It does get the drawing copy (a `MallocBuffer`, now an area).
 
 Our own follow-up: `DrmHWInterface::SetRenderScale()` (the frame buffer
 in physical pixels, logical mode exposed to app_server), the Screen
