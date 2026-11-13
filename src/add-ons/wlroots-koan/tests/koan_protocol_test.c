@@ -2426,6 +2426,101 @@ test_compose_occluded(struct conn *c, struct toplevel *t)
 	commit_scaled(c, t, 64, 48, 1, COLOR_ROOT);
 }
 
+/* A commit that changes no pixels is not composed again. Firefox answers
+ * every frame callback with a commit, damaged or not: a 25 fps video
+ * made about 80 commits a second, each composing the whole window
+ * (2561x1440 at 150%, 37% of a core in QEMU). The frame callbacks are
+ * still answered. What does change the window is still delivered:
+ * damage on the root, on a synchronized child applied with the root's
+ * commit, on a desynchronized child's own commit, and a child moved
+ * without damage. */
+static int
+deliveries_after(struct conn *c, int before)
+{
+	for (int i = 0; i < 50; i++) {
+		if (!settle(c))
+			break;
+		usleep(2000);
+	}
+	return atomic_load(&sSetBufferCount) - before;
+}
+
+static void
+test_compose_skip(struct conn *c, struct toplevel *t)
+{
+	/* Frame-callback-only commits: no attach, no damage. */
+	int before = atomic_load(&sSetBufferCount);
+	struct frame_wait wait = {0};
+	bool ok = true;
+	for (int i = 0; ok && i < 5; i++) {
+		struct wl_callback *cb = wl_surface_frame(t->surface);
+		wl_callback_add_listener(cb, &sFrameListener, &wait);
+		wl_surface_commit(t->surface);
+		ok = wait_for_count(c, &wait.done, i + 1);
+	}
+	int delivered = deliveries_after(c, before);
+	result(ok && delivered == 0 ? ST_PASS : ST_FAIL, "compose-skip-unchanged",
+		"%d of 5 undamaged commits composed (expected 0), %d frame "
+		"callbacks answered (expected 5)", delivered, wait.done);
+
+	before = atomic_load(&sSetBufferCount);
+	attach_color(c, t->surface, 64, 48, COLOR_CHILD);
+	wl_surface_commit(t->surface);
+	delivered = deliveries_after(c, before);
+	uint32_t pixel = frame_pixel(10, 10);
+	result(delivered == 1 && pixel == COLOR_CHILD ? ST_PASS : ST_FAIL,
+		"compose-skip-damage-delivers", "%d deliveries (expected 1), "
+		"pixel 0x%08x (expected 0x%08x)", delivered, pixel, COLOR_CHILD);
+
+	/* root (COLOR_ROOT) <- child (sync, 16x16 at 0,0). */
+	attach_color(c, t->surface, 64, 48, COLOR_ROOT);
+	wl_surface_commit(t->surface);
+	struct wl_surface *child = wl_compositor_create_surface(c->compositor);
+	struct wl_subsurface *sub = wl_subcompositor_get_subsurface(
+		c->subcompositor, child, t->surface);
+	attach_color(c, child, 16, 16, COLOR_GRAND);
+	wl_surface_commit(child);
+	wl_surface_commit(t->surface);
+	deliveries_after(c, 0);
+
+	before = atomic_load(&sSetBufferCount);
+	attach_color(c, child, 16, 16, COLOR_GRAND_2);
+	wl_surface_commit(child);
+	wl_surface_commit(t->surface); /* applies the child; root undamaged */
+	delivered = deliveries_after(c, before);
+	pixel = frame_pixel(4, 4);
+	result(delivered >= 1 && pixel == COLOR_GRAND_2 ? ST_PASS : ST_FAIL,
+		"compose-skip-sync-child-delivers", "%d deliveries, pixel 0x%08x "
+		"(expected 0x%08x)", delivered, pixel, COLOR_GRAND_2);
+
+	before = atomic_load(&sSetBufferCount);
+	wl_subsurface_set_position(sub, 32, 0);
+	wl_surface_commit(t->surface); /* no damage anywhere */
+	delivered = deliveries_after(c, before);
+	uint32_t old_place = frame_pixel(4, 4), new_place = frame_pixel(36, 4);
+	result(delivered >= 1 && old_place == COLOR_ROOT
+			&& new_place == COLOR_GRAND_2 ? ST_PASS : ST_FAIL,
+		"compose-skip-move-delivers", "%d deliveries, x 4 0x%08x (expected "
+		"0x%08x), x 36 0x%08x (expected 0x%08x)", delivered, old_place,
+		COLOR_ROOT, new_place, COLOR_GRAND_2);
+
+	before = atomic_load(&sSetBufferCount);
+	wl_subsurface_set_desync(sub);
+	attach_color(c, child, 16, 16, COLOR_GRAND_3);
+	wl_surface_commit(child);
+	delivered = deliveries_after(c, before);
+	pixel = frame_pixel(36, 4);
+	result(delivered >= 1 && pixel == COLOR_GRAND_3 ? ST_PASS : ST_FAIL,
+		"compose-skip-desync-child-delivers", "%d deliveries, pixel 0x%08x "
+		"(expected 0x%08x)", delivered, pixel, COLOR_GRAND_3);
+
+	wl_subsurface_destroy(sub);
+	wl_surface_destroy(child);
+	attach_color(c, t->surface, 64, 48, COLOR_ROOT);
+	wl_surface_commit(t->surface);
+	settle(c);
+}
+
 /* wp_viewport.set_destination sizes a surface independently of its
  * buffer: a 4 x 4 buffer can cover a 1000000 x 10 surface, and Koan
  * composes the window box at that size. Without a limit app_server
@@ -2493,6 +2588,7 @@ run_compose(void)
 	test_compose_viewport(&c, &t);
 	test_compose_fractional(&c, &t);
 	test_compose_occluded(&c, &t);
+	test_compose_skip(&c, &t);
 	test_compose_oversize(&c, &t);
 
 	struct conn after;

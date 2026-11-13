@@ -74,6 +74,12 @@ struct koan_toplevel {
 	uint32_t buffer_format;
 	float buffer_scale;
 
+	/* The tree's layout when it was last composed (tree_signature()), and
+	 * whether it has been composed at all: a commit that changes neither
+	 * that nor any pixel is not composed again. */
+	bool composed;
+	uint64_t composed_signature;
+
 	/* xdg_toplevel role event listeners. */
 	struct wl_listener toplevel_destroy;
 	struct wl_listener toplevel_request_maximize;
@@ -1117,6 +1123,51 @@ static void create_native_window(struct koan_toplevel *kt,
 	g_cbs.create_window(g_userdata, g_queue, kt->toplevel, width, height);
 }
 
+/* FNV-1a over the bytes of one value. */
+static void signature_add(uint64_t *hash, const void *data, size_t size) {
+	const uint8_t *bytes = data;
+	for (size_t i = 0; i < size; i++) {
+		*hash ^= bytes[i];
+		*hash *= 0x100000001b3ull;
+	}
+}
+
+static void signature_add_surface(struct wlr_surface *surface, int sx,
+		int sy, void *data) {
+	uint64_t *hash = data;
+	const struct wlr_surface_state *state = &surface->current;
+	const bool has_buffer = surface->buffer != NULL;
+	signature_add(hash, &surface, sizeof(surface));
+	signature_add(hash, &sx, sizeof(sx));
+	signature_add(hash, &sy, sizeof(sy));
+	signature_add(hash, &has_buffer, sizeof(has_buffer));
+	signature_add(hash, &state->width, sizeof(state->width));
+	signature_add(hash, &state->height, sizeof(state->height));
+	signature_add(hash, &state->buffer_width, sizeof(state->buffer_width));
+	signature_add(hash, &state->buffer_height, sizeof(state->buffer_height));
+	signature_add(hash, &state->scale, sizeof(state->scale));
+	signature_add(hash, &state->viewport.has_src,
+		sizeof(state->viewport.has_src));
+	if (state->viewport.has_src)
+		signature_add(hash, &state->viewport.src,
+			sizeof(state->viewport.src));
+}
+
+/* What composing the tree depends on besides its pixels: the window box,
+ * the output scale and, for each surface in stacking order, where it is,
+ * its size, its buffer's size and its viewport source. These change
+ * without buffer damage (a subsurface moved, a new window geometry, the
+ * screen's scale), so they are compared rather than tracked. */
+static uint64_t tree_signature(struct koan_toplevel *kt) {
+	uint64_t hash = 0xcbf29ce484222325ull;
+	struct wlr_box box = window_box(kt->toplevel);
+	float scale = koan_server_output_scale_exact();
+	signature_add(&hash, &box, sizeof(box));
+	signature_add(&hash, &scale, sizeof(scale));
+	wlr_surface_for_each_surface(kt->surface, signature_add_surface, &hash);
+	return hash;
+}
+
 /* Deliver the toplevel's current content to app_server: the whole surface
  * tree composed into its window geometry, in Koan-owned memory. If the
  * native window doesn't exist yet (creation pending), keep the data for
@@ -1251,19 +1302,28 @@ void koan_adapter_toplevel_unmapped(struct wlr_xdg_toplevel *toplevel) {
 		g_cbs.set_visibility(g_userdata, g_queue, kt->native_window, false);
 	}
 	kt->mapped = false;
+	kt->composed = false; /* the next map is composed whatever it damages */
 
 	wlr_log(WLR_INFO, "Koan adapter: toplevel unmapped (%s)",
 		toplevel->title ? toplevel->title : "(null)");
 }
 
-/* Called by the server when a toplevel surface commits new content. */
-void koan_adapter_toplevel_committed(struct wlr_xdg_toplevel *toplevel) {
+/* Called by the server when a surface of the toplevel's tree commits. */
+void koan_adapter_toplevel_committed(struct wlr_xdg_toplevel *toplevel,
+		bool damaged) {
 	if (!toplevel)
 		return;
 	struct koan_toplevel *kt = find_toplevel(toplevel);
-	if (kt == NULL)
+	if (kt == NULL || !kt->surface || !kt->surface->buffer)
 		return;
 
+	/* Clients commit without new pixels too (Firefox answers every frame
+	 * callback with a commit): compose only what changed. */
+	uint64_t signature = tree_signature(kt);
+	if (kt->composed && !damaged && signature == kt->composed_signature)
+		return;
+	kt->composed = true;
+	kt->composed_signature = signature;
 	deliver_buffer(kt);
 }
 

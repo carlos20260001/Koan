@@ -260,6 +260,9 @@ struct koan_surface {
 	bool frame_pending;
 	/* An xdg_popup root that was mapped at its last commit. */
 	bool popup_mapped;
+	/* A toplevel root whose tree committed buffer damage since it was
+	 * last handed to the adapter (koan_adapter_toplevel_committed()). */
+	bool damaged;
 };
 
 static void koan_send_frame_done(struct wlr_surface *surface, int sx, int sy,
@@ -297,18 +300,23 @@ static void koan_send_enter(struct wlr_surface *surface, int sx, int sy,
  * callbacks at the next frame tick. Answering inside the commit makes a
  * client that requests a frame from every callback (Firefox) spin without
  * ever sleeping. */
+static struct koan_surface *koan_surface_find(struct wlr_surface *surface) {
+	struct koan_surface *ks;
+	wl_list_for_each(ks, &g_server.surfaces, link) {
+		if (ks->surface == surface)
+			return ks;
+	}
+	return NULL;
+}
+
 static void koan_tree_presented(struct wlr_surface *root) {
 	struct koan_server *server = &g_server;
 	if (server->output)
 		wlr_surface_for_each_surface(root, koan_send_enter, server->output);
 
-	struct koan_surface *ks;
-	wl_list_for_each(ks, &server->surfaces, link) {
-		if (ks->surface == root) {
-			ks->frame_pending = true;
-			break;
-		}
-	}
+	struct koan_surface *ks = koan_surface_find(root);
+	if (ks)
+		ks->frame_pending = true;
 	if (server->frame_timer && !server->frame_timer_armed) {
 		wl_event_source_timer_update(server->frame_timer,
 			server->frame_interval_ms);
@@ -339,6 +347,16 @@ static void koan_any_surface_handle_commit(struct wl_listener *listener,
 	(void)data;
 	struct koan_surface *ks = wl_container_of(listener, ks, commit);
 	struct wlr_surface *surface = ks->surface;
+	struct wlr_surface *root = wlr_surface_get_root_surface(surface);
+
+	/* Remember new pixels anywhere in the tree for the root. wlroots
+	 * applies a synchronized child's state (and emits its commit) before
+	 * the parent's commit event, so the root sees them when it commits. */
+	if (pixman_region32_not_empty(&surface->buffer_damage)) {
+		struct koan_surface *root_ks = koan_surface_find(root);
+		if (root_ks)
+			root_ks->damaged = true;
+	}
 
 	/* A synchronized subsurface's state is applied with its parent's
 	 * commit, which delivers the whole tree. */
@@ -346,8 +364,6 @@ static void koan_any_surface_handle_commit(struct wl_listener *listener,
 		wlr_subsurface_try_from_wlr_surface(surface);
 	if (subsurface && subsurface->synchronized)
 		return;
-
-	struct wlr_surface *root = wlr_surface_get_root_surface(surface);
 
 	/* xdg_popup: like a toplevel, the initial commit must be answered
 	 * with a configure (geometry from the client's positioner), or menus
@@ -390,7 +406,11 @@ static void koan_any_surface_handle_commit(struct wl_listener *listener,
 	if (!root->mapped)
 		return;
 
-	koan_adapter_toplevel_committed(toplevel);
+	struct koan_surface *root_ks = koan_surface_find(root);
+	bool damaged = root_ks == NULL || root_ks->damaged;
+	if (root_ks)
+		root_ks->damaged = false;
+	koan_adapter_toplevel_committed(toplevel, damaged);
 
 	/* The pixels were copied out on commit, so every surface of the tree
 	 * may draw its next frame. Clients that throttle on wl_surface.frame

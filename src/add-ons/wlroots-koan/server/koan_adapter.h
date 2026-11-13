@@ -35,6 +35,8 @@ extern "C" {
 
 /* wlroots public headers are C-only and have no extern "C" guards. Include
  * them inside the block so C++ consumers (app_server) get C linkage. */
+#include <stdbool.h>
+
 #include <wlr/util/box.h>
 #include <wlr/types/wlr_xdg_shell.h>
 
@@ -164,8 +166,12 @@ void koan_adapter_toplevel_mapped(struct wlr_xdg_toplevel *toplevel);
 /* Called by the server when a toplevel is unmapped. */
 void koan_adapter_toplevel_unmapped(struct wlr_xdg_toplevel *toplevel);
 
-/* Called by the server when a toplevel surface commits new content. */
-void koan_adapter_toplevel_committed(struct wlr_xdg_toplevel *toplevel);
+/* Called by the server when a surface of a toplevel's tree commits.
+ * damaged: a surface of the tree committed buffer damage since the last
+ * call. Without damage the window is composed again only if its layout
+ * changed (a surface moved or resized, the window geometry, the scale). */
+void koan_adapter_toplevel_committed(struct wlr_xdg_toplevel *toplevel,
+		bool damaged);
 
 /* The native window's content box in root-surface coordinates: the xdg
  * window geometry clamped to the live extents of the surface tree. This is
