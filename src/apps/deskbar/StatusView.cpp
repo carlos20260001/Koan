@@ -1566,8 +1566,8 @@ TDragRegion::SwitchModeForRegion(BPoint where, BRegion region,
 		return false;
 	}
 
-	if (fBarView->Cupertino()) {
-		// the Cupertino menu bar stays across the top
+	if (fBarView->GlobalMenuLayout()) {
+		// the global menu bar stays across the top
 		return true;
 	}
 

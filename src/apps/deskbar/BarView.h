@@ -59,14 +59,14 @@ enum {
 };
 
 // Deskbar layouts. The classic layout is placed by the vertical, left,
-// top and state settings. The Cupertino layout pins the bar across the
+// top and state settings. The global menu layout pins the bar across the
 // top of the screen as a menu bar (Deskbar menu, active application
-// menu, replicant tray and clock) and adds a Dock of running
+// menu, replicant tray and clock) and adds a launcher of running
 // applications at the bottom centre. The classic placement settings are
-// kept untouched while Cupertino is on, so switching back restores them.
+// kept untouched while that layout is on, so switching back restores them.
 enum {
 	kClassicLayout = 0,
-	kCupertinoLayout = 1
+	kGlobalMenuLayout = 1
 };
 
 const float kHModeHeight = 21.0f;
@@ -86,7 +86,7 @@ class TDragRegion;
 class TResizeControl;
 class TInlineScrollView;
 class TTeamMenuItem;
-class TCupertinoAppMenuBar;
+class TGlobalAppMenuBar;
 
 class TBarView : public BView {
 public:
@@ -114,8 +114,8 @@ public:
 
 			void			SetDeskbarLayout(int32 layout);
 			int32			DeskbarLayout() const;
-			bool			Cupertino() const
-								{ return DeskbarLayout() == kCupertinoLayout; };
+			bool			GlobalMenuLayout() const
+								{ return DeskbarLayout() == kGlobalMenuLayout; };
 
 			void			RaiseDeskbar(bool raise);
 			void			HideDeskbar(bool hide);
@@ -204,8 +204,8 @@ private:
 			void			_UpdateLayout(bool oldVertical, bool oldLeft,
 								bool oldTop, int32 oldState);
 
-			void			_PlaceCupertino();
-			void			_RemoveCupertino();
+			void			_PlaceGlobalMenu();
+			void			_RemoveGlobalMenu();
 
 			TBarApp*			fBarApp;
 			TBarWindow*			fBarWindow;
@@ -235,8 +235,8 @@ private:
 
 			float			fTabHeight;
 
-			TCupertinoAppMenuBar*	fAppMenuBar;
-			BMessenger		fDockMessenger;
+			TGlobalAppMenuBar*	fAppMenuBar;
+			BMessenger		fLauncherMessenger;
 };
 
 

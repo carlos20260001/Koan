@@ -89,7 +89,7 @@ const int32 kWindowIconCacheCount = (kMaximumFontSize - kMinimumFontSize)
 // update preferences message constant
 const uint32 kUpdatePreferences = 'Pref';
 
-// switch the Deskbar layout, "layout": kClassicLayout or kCupertinoLayout
+// switch the Deskbar layout, "layout": kClassicLayout or kGlobalMenuLayout
 const uint32 kSetLayout = 'Layt';
 
 // realign replicants message constant

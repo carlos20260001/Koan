@@ -8,12 +8,12 @@ Application(
 	BarView.cpp
 	BarWindow.cpp
 	CalendarMenuWindow.cpp
-	CupertinoDock.cpp
-	CupertinoMenuBar.cpp
 	DeskbarMenu.cpp
 	DeskbarUtils.cpp
 	ExpandoMenuBar.cpp
+	GlobalMenuBar.cpp
 	InlineScrollView.cpp
+	LauncherBar.cpp
 	PreferencesWindow.cpp
 	ShowHideMenuItem.cpp
 	StatusView.cpp

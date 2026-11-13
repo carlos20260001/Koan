@@ -55,13 +55,13 @@ All rights reserved.
 #include "BarApp.h"
 #include "BarMenuBar.h"
 #include "BarWindow.h"
-#include "CupertinoDock.h"
-#include "CupertinoMenuBar.h"
 #include "DeskbarMenu.h"
 #include "DeskbarUtils.h"
 #include "ExpandoMenuBar.h"
 #include "FSUtils.h"
+#include "GlobalMenuBar.h"
 #include "InlineScrollView.h"
+#include "LauncherBar.h"
 #include "ResourceSet.h"
 #include "StatusView.h"
 #include "TeamMenuItem.h"
@@ -248,9 +248,9 @@ TBarView::AttachedToWindow()
 void
 TBarView::DetachedFromWindow()
 {
-	// the Dock is a separate window; it goes away with the bar
-	fDockMessenger.SendMessage(B_QUIT_REQUESTED);
-	fDockMessenger = BMessenger();
+	// the launcher is a separate window; it goes away with the bar
+	fLauncherMessenger.SendMessage(B_QUIT_REQUESTED);
+	fLauncherMessenger = BMessenger();
 
 	Window()->RemoveCommonFilter(fMouseFilter);
 	delete fMouseFilter;
@@ -326,7 +326,7 @@ TBarView::MessageReceived(BMessage* message)
 				fAppMenuBar->SetActiveTeam(
 					message->GetInt32("be:team", -1));
 			}
-			fDockMessenger.SendMessage(message);
+			fLauncherMessenger.SendMessage(message);
 			break;
 
 		default:
@@ -479,7 +479,7 @@ TBarView::PlaceDeskbarMenu()
 
 	// Calculate the size of the deskbar menu
 	BRect menuFrame(Bounds());
-	if (Cupertino()) {
+	if (GlobalMenuLayout()) {
 		// menu bar: just the Deskbar menu's icon at the left edge
 		height = std::max(TeamMenuItemHeight(),
 			kGutter + fReplicantTray->MaxReplicantHeight() + kGutter);
@@ -509,7 +509,7 @@ TBarView::PlaceDeskbarMenu()
 	} else
 		fBarMenuBar->SmartResize(-1, -1);
 
-	if (Cupertino()) {
+	if (GlobalMenuLayout()) {
 		// the application menu sits next to the Deskbar menu
 		fBarMenuBar->RemoveSeperatorItem();
 		fBarMenuBar->RemoveTeamMenu();
@@ -610,8 +610,8 @@ void
 TBarView::PlaceApplicationBar()
 {
 	BRect screenFrame = DeskbarScreenFrame(Window());
-	if (Cupertino()) {
-		_PlaceCupertino();
+	if (GlobalMenuLayout()) {
+		_PlaceGlobalMenu();
 		return;
 	}
 
@@ -806,8 +806,8 @@ TBarView::_ChangeState(BMessage* message)
 	bool oldTop = Top();
 	int32 oldState = State();
 
-	if (!Cupertino()) {
-		// The Cupertino layout pins the placement; keep the classic
+	if (!GlobalMenuLayout()) {
+		// The global menu layout pins the placement; keep the classic
 		// settings for when the layout is switched back.
 		fBarApp->Settings()->vertical = vertical;
 		fBarApp->Settings()->left = left;
@@ -854,8 +854,8 @@ TBarView::_UpdateLayout(bool oldVertical, bool oldLeft, bool oldTop,
 		}
 	}
 
-	if (!Cupertino())
-		_RemoveCupertino();
+	if (!GlobalMenuLayout())
+		_RemoveGlobalMenu();
 
 	PlaceDeskbarMenu();
 	PlaceTray(vertSwap, leftSwap);
@@ -866,7 +866,7 @@ TBarView::_UpdateLayout(bool oldVertical, bool oldLeft, bool oldTop,
 void
 TBarView::SetDeskbarLayout(int32 layout)
 {
-	if (layout != kClassicLayout && layout != kCupertinoLayout)
+	if (layout != kClassicLayout && layout != kGlobalMenuLayout)
 		layout = kClassicLayout;
 
 	if (layout == DeskbarLayout())
@@ -892,10 +892,10 @@ TBarView::DeskbarLayout() const
 
 
 void
-TBarView::_PlaceCupertino()
+TBarView::_PlaceGlobalMenu()
 {
 	// The application bar is replaced by the active application's menu,
-	// and the running applications move to the Dock.
+	// and the running applications move to the launcher.
 	if (!fInlineScrollView->IsHidden())
 		fInlineScrollView->Hide();
 
@@ -910,7 +910,7 @@ TBarView::_PlaceCupertino()
 		right = left;
 
 	if (fAppMenuBar == NULL) {
-		fAppMenuBar = new TCupertinoAppMenuBar(
+		fAppMenuBar = new TGlobalAppMenuBar(
 			BRect(left, 0, right, height));
 		AddChild(fAppMenuBar);
 	} else {
@@ -918,19 +918,19 @@ TBarView::_PlaceCupertino()
 		fAppMenuBar->ResizeTo(right - left, height);
 	}
 
-	if (!fDockMessenger.IsValid()) {
-		TCupertinoDockWindow* dock = new TCupertinoDockWindow();
-		fDockMessenger = BMessenger(dock);
-		dock->Show();
+	if (!fLauncherMessenger.IsValid()) {
+		TLauncherBarWindow* launcher = new TLauncherBarWindow();
+		fLauncherMessenger = BMessenger(launcher);
+		launcher->Show();
 	} else
-		fDockMessenger.SendMessage(kUpdateDockPlacement);
+		fLauncherMessenger.SendMessage(kUpdateLauncherPlacement);
 
 	Invalidate();
 }
 
 
 void
-TBarView::_RemoveCupertino()
+TBarView::_RemoveGlobalMenu()
 {
 	if (fAppMenuBar != NULL) {
 		RemoveChild(fAppMenuBar);
@@ -938,9 +938,9 @@ TBarView::_RemoveCupertino()
 		fAppMenuBar = NULL;
 	}
 
-	if (fDockMessenger.IsValid()) {
-		fDockMessenger.SendMessage(B_QUIT_REQUESTED);
-		fDockMessenger = BMessenger();
+	if (fLauncherMessenger.IsValid()) {
+		fLauncherMessenger.SendMessage(B_QUIT_REQUESTED);
+		fLauncherMessenger = BMessenger();
 	}
 }
 
@@ -982,34 +982,34 @@ TBarView::HideDeskbar(bool hide)
 }
 
 
-// The Cupertino layout behaves as a horizontal bar across the top of the
+// The global menu layout behaves as a horizontal bar across the top of the
 // screen, whatever the classic placement settings say.
 
 
 bool
 TBarView::Vertical() const
 {
-	return !Cupertino() && fBarApp->Settings()->vertical;
+	return !GlobalMenuLayout() && fBarApp->Settings()->vertical;
 }
 
 
 bool
 TBarView::Left() const
 {
-	return Cupertino() || fBarApp->Settings()->left;
+	return GlobalMenuLayout() || fBarApp->Settings()->left;
 }
 
 
 bool
 TBarView::Top() const {
-	return Cupertino() || fBarApp->Settings()->top;
+	return GlobalMenuLayout() || fBarApp->Settings()->top;
 }
 
 
 int32
 TBarView::State() const
 {
-	return Cupertino() ? kExpandoState : fBarApp->Settings()->state;
+	return GlobalMenuLayout() ? kExpandoState : fBarApp->Settings()->state;
 }
 
 

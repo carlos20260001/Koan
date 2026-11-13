@@ -131,9 +131,10 @@ TBarMenuTitle::DrawContent()
 
 	const BRect frame(Frame());
 
-	if (fBarView != NULL && (fBarView->MiniState() || fBarView->Cupertino())) {
+	if (fBarView != NULL
+		&& (fBarView->MiniState() || fBarView->GlobalMenuLayout())) {
 		// Mini mode: deskbar menu shows atom icon, team menu shows team icon.
-		// The Cupertino menu bar shows the atom icon too.
+		// The global menu bar shows the atom icon too.
 		bool isDeskbarMenu = dynamic_cast<TDeskbarMenu*>(fMenu) != NULL;
 		int32 iconID = isDeskbarMenu ? R_AtomLogoBitmap : R_TeamIcon;
 

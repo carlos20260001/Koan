@@ -2,13 +2,13 @@
  * Copyright 2026, Koan contributors
  * SPDX-License-Identifier: MIT
  */
-#ifndef CUPERTINO_DOCK_H
-#define CUPERTINO_DOCK_H
+#ifndef LAUNCHER_BAR_H
+#define LAUNCHER_BAR_H
 
 
-// The Dock of the Cupertino layout: a window at the bottom centre of the
-// screen with an icon for every running application, from the same team
-// list as the application bar (TBarApp::Subscribe()).
+// The launcher of the global menu layout: a window at the bottom centre
+// of the screen with an icon for every running application, from the same
+// team list as the application bar (TBarApp::Subscribe()).
 //
 // A primary click brings the application's windows to the front, a
 // secondary or Control click opens its window menu (TWindowMenu).
@@ -20,15 +20,15 @@
 #include <Window.h>
 
 
-const uint32 kUpdateDockPlacement = 'CdPl';
+const uint32 kUpdateLauncherPlacement = 'CdPl';
 
 
-class TCupertinoDock;
+class TLauncherBar;
 
 
-class TCupertinoDockWindow : public BWindow {
+class TLauncherBarWindow : public BWindow {
 public:
-							TCupertinoDockWindow();
+							TLauncherBarWindow();
 
 	virtual	void			MenusBeginning();
 	virtual	void			MenusEnded();
@@ -42,15 +42,15 @@ public:
 
 private:
 			BView*			fBackground;
-			TCupertinoDock*	fDock;
+			TLauncherBar*	fLauncher;
 			int32			fMenusShown;
 };
 
 
-class TCupertinoDock : public BMenuBar {
+class TLauncherBar : public BMenuBar {
 public:
-							TCupertinoDock();
-	virtual					~TCupertinoDock();
+							TLauncherBar();
+	virtual					~TLauncherBar();
 
 	virtual	void			AttachedToWindow();
 	virtual	void			DetachedFromWindow();
@@ -61,7 +61,7 @@ public:
 	virtual	void			MouseMoved(BPoint where, uint32 transit,
 								const BMessage* dragMessage);
 
-			void			GetDockSize(float* width, float* height);
+			void			GetLauncherSize(float* width, float* height);
 			team_id			ActiveTeam() const { return fActiveTeam; }
 			void			SetActiveTeam(team_id team);
 
@@ -79,4 +79,4 @@ private:
 };
 
 
-#endif	// CUPERTINO_DOCK_H
+#endif	// LAUNCHER_BAR_H

@@ -137,7 +137,7 @@ TBarApp::TBarApp()
 
 	be_roster->StartWatching(this,
 		B_REQUEST_LAUNCHED | B_REQUEST_QUIT | B_REQUEST_ACTIVATED);
-		// activation drives the Cupertino menu bar and Dock
+		// activation drives the global menu bar and launcher
 
 	gLocalizedNamePreferred
 		= BLocaleRoster::Default()->IsFilesystemTranslationPreferred();
@@ -404,7 +404,7 @@ TBarApp::InitSettings()
 		}
 
 		if (settings.layout != kClassicLayout
-			&& settings.layout != kCupertinoLayout) {
+			&& settings.layout != kGlobalMenuLayout) {
 			settings.layout = kClassicLayout;
 		}
 
@@ -530,7 +530,7 @@ TBarApp::MessageReceived(BMessage* message)
 			break;
 
 		case B_SOME_APP_ACTIVATED:
-			// the Cupertino menu bar and Dock show the active application
+			// the global menu bar and launcher show the active application
 			fBarWindow->PostMessage(message, fBarView);
 			break;
 

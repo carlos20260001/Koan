@@ -4,7 +4,7 @@
  */
 
 
-#include "CupertinoMenuBar.h"
+#include "GlobalMenuBar.h"
 
 #include <strings.h>
 
@@ -40,9 +40,9 @@ delete_team_info_copy(BarTeamInfo* info)
 
 // The menu item owns its copy of the team info: TWindowMenu keeps a
 // pointer to its team list for as long as the item lives.
-class TCupertinoAppMenuItem : public BMenuItem {
+class TGlobalAppMenuItem : public BMenuItem {
 public:
-	TCupertinoAppMenuItem(BarTeamInfo* info)
+	TGlobalAppMenuItem(BarTeamInfo* info)
 		:
 		BMenuItem(new TWindowMenu(info->teams, info->sig)),
 		fInfo(info)
@@ -50,7 +50,7 @@ public:
 		SetLabel(info->name);
 	}
 
-	virtual ~TCupertinoAppMenuItem()
+	virtual ~TGlobalAppMenuItem()
 	{
 		// the submenu only holds on to the list, it does not use it
 		// while it is deleted by ~BMenuItem()
@@ -64,12 +64,12 @@ private:
 };
 
 
-//	#pragma mark - TCupertinoAppMenuBar
+//	#pragma mark - TGlobalAppMenuBar
 
 
-TCupertinoAppMenuBar::TCupertinoAppMenuBar(BRect frame)
+TGlobalAppMenuBar::TGlobalAppMenuBar(BRect frame)
 	:
-	BMenuBar(frame, "CupertinoAppMenuBar", B_FOLLOW_NONE, B_ITEMS_IN_ROW,
+	BMenuBar(frame, "GlobalAppMenuBar", B_FOLLOW_NONE, B_ITEMS_IN_ROW,
 		false),
 	fActiveTeam(-1),
 	fAppItem(NULL),
@@ -81,14 +81,14 @@ TCupertinoAppMenuBar::TCupertinoAppMenuBar(BRect frame)
 }
 
 
-TCupertinoAppMenuBar::~TCupertinoAppMenuBar()
+TGlobalAppMenuBar::~TGlobalAppMenuBar()
 {
 	_ClearTeamList();
 }
 
 
 void
-TCupertinoAppMenuBar::AttachedToWindow()
+TGlobalAppMenuBar::AttachedToWindow()
 {
 	BMenuBar::AttachedToWindow();
 
@@ -103,7 +103,7 @@ TCupertinoAppMenuBar::AttachedToWindow()
 
 
 void
-TCupertinoAppMenuBar::DetachedFromWindow()
+TGlobalAppMenuBar::DetachedFromWindow()
 {
 	BMessage message(kUnsubscribe);
 	message.AddMessenger("messenger", BMessenger(this));
@@ -114,7 +114,7 @@ TCupertinoAppMenuBar::DetachedFromWindow()
 
 
 void
-TCupertinoAppMenuBar::MessageReceived(BMessage* message)
+TGlobalAppMenuBar::MessageReceived(BMessage* message)
 {
 	switch (message->what) {
 		case B_SOME_APP_LAUNCHED:
@@ -153,7 +153,7 @@ TCupertinoAppMenuBar::MessageReceived(BMessage* message)
 
 
 void
-TCupertinoAppMenuBar::Draw(BRect updateRect)
+TGlobalAppMenuBar::Draw(BRect updateRect)
 {
 	// plain menu background like the Deskbar menu next to it
 	BMenu::Draw(updateRect);
@@ -166,7 +166,7 @@ TCupertinoAppMenuBar::Draw(BRect updateRect)
 
 
 void
-TCupertinoAppMenuBar::SetActiveTeam(team_id team)
+TGlobalAppMenuBar::SetActiveTeam(team_id team)
 {
 	// Deskbar itself and background applications are not in the team
 	// list; activating them keeps the previous application shown.
@@ -185,7 +185,7 @@ TCupertinoAppMenuBar::SetActiveTeam(team_id team)
 
 
 team_id
-TCupertinoAppMenuBar::ShownTeam() const
+TGlobalAppMenuBar::ShownTeam() const
 {
 	if (fAppItem == NULL || fAppItem->Info()->teams->CountItems() == 0)
 		return -1;
@@ -195,7 +195,7 @@ TCupertinoAppMenuBar::ShownTeam() const
 
 
 void
-TCupertinoAppMenuBar::_Resubscribe()
+TGlobalAppMenuBar::_Resubscribe()
 {
 	_ClearTeamList();
 	TBarApp::Subscribe(BMessenger(this), &fTeamList);
@@ -203,7 +203,7 @@ TCupertinoAppMenuBar::_Resubscribe()
 
 
 void
-TCupertinoAppMenuBar::_ClearTeamList()
+TGlobalAppMenuBar::_ClearTeamList()
 {
 	for (int32 i = fTeamList.CountItems() - 1; i >= 0; i--)
 		delete_team_info_copy((BarTeamInfo*)fTeamList.ItemAt(i));
@@ -213,7 +213,7 @@ TCupertinoAppMenuBar::_ClearTeamList()
 
 
 BarTeamInfo*
-TCupertinoAppMenuBar::_InfoForTeam(team_id team) const
+TGlobalAppMenuBar::_InfoForTeam(team_id team) const
 {
 	if (team < 0)
 		return NULL;
@@ -229,7 +229,7 @@ TCupertinoAppMenuBar::_InfoForTeam(team_id team) const
 
 
 void
-TCupertinoAppMenuBar::_Update()
+TGlobalAppMenuBar::_Update()
 {
 	// Replacing the item while its menu is open would pull the team list
 	// from under TWindowMenu; try again once the menu has closed.
@@ -264,7 +264,7 @@ TCupertinoAppMenuBar::_Update()
 	}
 
 	if (info != NULL) {
-		fAppItem = new TCupertinoAppMenuItem(new BarTeamInfo(*info));
+		fAppItem = new TGlobalAppMenuItem(new BarTeamInfo(*info));
 		AddItem(fAppItem);
 	}
 

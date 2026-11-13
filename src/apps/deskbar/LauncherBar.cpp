@@ -4,7 +4,7 @@
  */
 
 
-#include "CupertinoDock.h"
+#include "LauncherBar.h"
 
 #include <algorithm>
 #include <strings.h>
@@ -29,12 +29,12 @@ static const uint32 kRetryRebuild = 'CdRb';
 static const bigtime_t kRetryDelay = 250000;
 
 // logical sizes; icons are rendered at the screen's scale
-static const int32 kDockIconSize = 48;
-static const float kDockIconPadding = 6.0f;
+static const int32 kLauncherIconSize = 48;
+static const float kLauncherIconPadding = 6.0f;
 static const float kIndicatorSpace = 8.0f;
 static const float kIndicatorRadius = 2.0f;
-static const float kDockPadding = 6.0f;
-static const float kDockScreenMargin = 4.0f;
+static const float kLauncherPadding = 6.0f;
+static const float kLauncherScreenMargin = 4.0f;
 
 
 static void
@@ -47,14 +47,14 @@ delete_team_info_copy(BarTeamInfo* info)
 }
 
 
-//	#pragma mark - TCupertinoDockItem
+//	#pragma mark - TLauncherBarItem
 
 
 // One running application. The item owns its copy of the team info, as
 // its TWindowMenu keeps a pointer to the team list.
-class TCupertinoDockItem : public BMenuItem {
+class TLauncherBarItem : public BMenuItem {
 public:
-	TCupertinoDockItem(BarTeamInfo* info, BBitmap* icon)
+	TLauncherBarItem(BarTeamInfo* info, BBitmap* icon)
 		:
 		BMenuItem(new TWindowMenu(info->teams, info->sig)),
 		fInfo(info),
@@ -63,7 +63,7 @@ public:
 		SetLabel(info->name);
 	}
 
-	virtual ~TCupertinoDockItem()
+	virtual ~TLauncherBarItem()
 	{
 		delete fIcon;
 		delete_team_info_copy(fInfo);
@@ -81,12 +81,12 @@ public:
 		// LogicalBounds(): the icon's size in view coordinates
 		if (fIcon != NULL)
 			return fIcon->LogicalBounds().Width() + 1;
-		return be_control_look->ComposeIconSize(kDockIconSize).Width() + 1;
+		return be_control_look->ComposeIconSize(kLauncherIconSize).Width() + 1;
 	}
 
-	float ItemWidth() const { return IconSide() + 2 * kDockIconPadding; }
+	float ItemWidth() const { return IconSide() + 2 * kLauncherIconPadding; }
 	float ItemHeight() const
-		{ return kDockIconPadding + IconSide() + kIndicatorSpace; }
+		{ return kLauncherIconPadding + IconSide() + kIndicatorSpace; }
 
 protected:
 	virtual void GetContentSize(float* width, float* height)
@@ -116,7 +116,7 @@ protected:
 		float side = IconSide();
 		if (fIcon != NULL) {
 			BPoint where(frame.left + floorf((frame.Width() - side) / 2),
-				frame.top + kDockIconPadding);
+				frame.top + kLauncherIconPadding);
 			menu->SetDrawingMode(B_OP_ALPHA);
 			menu->SetBlendingMode(B_PIXEL_ALPHA, B_ALPHA_OVERLAY);
 			menu->DrawBitmap(fIcon, where);
@@ -124,10 +124,10 @@ protected:
 		}
 
 		// running indicator; the active application's is highlighted
-		TCupertinoDock* dock = dynamic_cast<TCupertinoDock*>(menu);
-		bool active = dock != NULL && HasTeam(dock->ActiveTeam());
+		TLauncherBar* launcher = dynamic_cast<TLauncherBar*>(menu);
+		bool active = launcher != NULL && HasTeam(launcher->ActiveTeam());
 		BPoint center((frame.left + frame.right) / 2,
-			frame.top + kDockIconPadding + side + kIndicatorSpace / 2);
+			frame.top + kLauncherIconPadding + side + kIndicatorSpace / 2);
 		menu->SetHighColor(active ? ui_color(B_KEYBOARD_NAVIGATION_COLOR)
 			: tint_color(base, B_DARKEN_4_TINT));
 		menu->FillEllipse(center, kIndicatorRadius, kIndicatorRadius);
@@ -141,14 +141,14 @@ private:
 };
 
 
-//	#pragma mark - TCupertinoDockBackground
+//	#pragma mark - TLauncherBarBackground
 
 
-class TCupertinoDockBackground : public BView {
+class TLauncherBarBackground : public BView {
 public:
-	TCupertinoDockBackground(BRect frame)
+	TLauncherBarBackground(BRect frame)
 		:
-		BView(frame, "CupertinoDockBackground", B_FOLLOW_ALL, B_WILL_DRAW)
+		BView(frame, "LauncherBarBackground", B_FOLLOW_ALL, B_WILL_DRAW)
 	{
 		SetViewUIColor(B_MENU_BACKGROUND_COLOR);
 	}
@@ -166,12 +166,12 @@ public:
 };
 
 
-//	#pragma mark - TCupertinoDockWindow
+//	#pragma mark - TLauncherBarWindow
 
 
-TCupertinoDockWindow::TCupertinoDockWindow()
+TLauncherBarWindow::TLauncherBarWindow()
 	:
-	BWindow(BRect(0, 0, 99, 59), "Dock", B_NO_BORDER_WINDOW_LOOK,
+	BWindow(BRect(0, 0, 99, 59), "Launcher", B_NO_BORDER_WINDOW_LOOK,
 		B_FLOATING_ALL_WINDOW_FEEL,
 		B_WILL_ACCEPT_FIRST_CLICK | B_NOT_ZOOMABLE | B_NOT_CLOSABLE
 			| B_NOT_MINIMIZABLE | B_NOT_MOVABLE | B_NOT_RESIZABLE
@@ -179,18 +179,18 @@ TCupertinoDockWindow::TCupertinoDockWindow()
 		B_ALL_WORKSPACES),
 	fMenusShown(0)
 {
-	fBackground = new TCupertinoDockBackground(Bounds());
+	fBackground = new TLauncherBarBackground(Bounds());
 	AddChild(fBackground);
 
-	fDock = new TCupertinoDock();
-	fBackground->AddChild(fDock);
+	fLauncher = new TLauncherBar();
+	fBackground->AddChild(fLauncher);
 
 	UpdatePlacement();
 }
 
 
 void
-TCupertinoDockWindow::MenusBeginning()
+TLauncherBarWindow::MenusBeginning()
 {
 	fMenusShown++;
 	BWindow::MenusBeginning();
@@ -198,7 +198,7 @@ TCupertinoDockWindow::MenusBeginning()
 
 
 void
-TCupertinoDockWindow::MenusEnded()
+TLauncherBarWindow::MenusEnded()
 {
 	fMenusShown--;
 	BWindow::MenusEnded();
@@ -206,7 +206,7 @@ TCupertinoDockWindow::MenusEnded()
 
 
 void
-TCupertinoDockWindow::ScreenChanged(BRect frame, color_space mode)
+TLauncherBarWindow::ScreenChanged(BRect frame, color_space mode)
 {
 	BWindow::ScreenChanged(frame, mode);
 	UpdatePlacement();
@@ -214,15 +214,15 @@ TCupertinoDockWindow::ScreenChanged(BRect frame, color_space mode)
 
 
 void
-TCupertinoDockWindow::MessageReceived(BMessage* message)
+TLauncherBarWindow::MessageReceived(BMessage* message)
 {
 	switch (message->what) {
-		case kUpdateDockPlacement:
+		case kUpdateLauncherPlacement:
 			UpdatePlacement();
 			break;
 
 		case B_SOME_APP_ACTIVATED:
-			fDock->SetActiveTeam(message->GetInt32("be:team", -1));
+			fLauncher->SetActiveTeam(message->GetInt32("be:team", -1));
 			break;
 
 		default:
@@ -233,31 +233,31 @@ TCupertinoDockWindow::MessageReceived(BMessage* message)
 
 
 void
-TCupertinoDockWindow::UpdatePlacement()
+TLauncherBarWindow::UpdatePlacement()
 {
 	float width;
 	float height;
-	fDock->GetDockSize(&width, &height);
+	fLauncher->GetLauncherSize(&width, &height);
 
-	fDock->MoveTo(kDockPadding, kDockPadding);
-	fDock->ResizeTo(width - 1, height - 1);
+	fLauncher->MoveTo(kLauncherPadding, kLauncherPadding);
+	fLauncher->ResizeTo(width - 1, height - 1);
 
-	float windowWidth = width + 2 * kDockPadding - 1;
-	float windowHeight = height + 2 * kDockPadding - 1;
+	float windowWidth = width + 2 * kLauncherPadding - 1;
+	float windowHeight = height + 2 * kLauncherPadding - 1;
 	ResizeTo(windowWidth, windowHeight);
 
 	BRect screenFrame = BScreen(this).Frame();
 	MoveTo(floorf((screenFrame.left + screenFrame.right - windowWidth) / 2),
-		screenFrame.bottom - windowHeight - kDockScreenMargin);
+		screenFrame.bottom - windowHeight - kLauncherScreenMargin);
 }
 
 
-//	#pragma mark - TCupertinoDock
+//	#pragma mark - TLauncherBar
 
 
-TCupertinoDock::TCupertinoDock()
+TLauncherBar::TLauncherBar()
 	:
-	BMenuBar(BRect(0, 0, 9, 9), "CupertinoDock", B_FOLLOW_NONE,
+	BMenuBar(BRect(0, 0, 9, 9), "LauncherBar", B_FOLLOW_NONE,
 		B_ITEMS_IN_ROW, false),
 	fActiveTeam(-1),
 	fRebuildPending(false),
@@ -267,14 +267,14 @@ TCupertinoDock::TCupertinoDock()
 }
 
 
-TCupertinoDock::~TCupertinoDock()
+TLauncherBar::~TLauncherBar()
 {
 	_ClearTeamList();
 }
 
 
 void
-TCupertinoDock::AttachedToWindow()
+TLauncherBar::AttachedToWindow()
 {
 	BMenuBar::AttachedToWindow();
 	SetViewUIColor(B_MENU_BACKGROUND_COLOR);
@@ -291,7 +291,7 @@ TCupertinoDock::AttachedToWindow()
 
 
 void
-TCupertinoDock::DetachedFromWindow()
+TLauncherBar::DetachedFromWindow()
 {
 	BMessage message(kUnsubscribe);
 	message.AddMessenger("messenger", BMessenger(this));
@@ -302,7 +302,7 @@ TCupertinoDock::DetachedFromWindow()
 
 
 void
-TCupertinoDock::MessageReceived(BMessage* message)
+TLauncherBar::MessageReceived(BMessage* message)
 {
 	switch (message->what) {
 		case B_SOME_APP_LAUNCHED:
@@ -338,15 +338,15 @@ TCupertinoDock::MessageReceived(BMessage* message)
 
 
 void
-TCupertinoDock::Draw(BRect updateRect)
+TLauncherBar::Draw(BRect updateRect)
 {
-	// skip the BMenuBar gradient, the background view frames the Dock
+	// skip the BMenuBar gradient, the background view frames the launcher
 	BMenu::Draw(updateRect);
 }
 
 
 void
-TCupertinoDock::DrawBackground(BRect updateRect)
+TLauncherBar::DrawBackground(BRect updateRect)
 {
 	SetHighColor(ViewColor());
 	FillRect(updateRect);
@@ -354,10 +354,10 @@ TCupertinoDock::DrawBackground(BRect updateRect)
 
 
 void
-TCupertinoDock::MouseDown(BPoint where)
+TLauncherBar::MouseDown(BPoint where)
 {
-	TCupertinoDockItem* item
-		= dynamic_cast<TCupertinoDockItem*>(ItemAt(_IndexAt(where)));
+	TLauncherBarItem* item
+		= dynamic_cast<TLauncherBarItem*>(ItemAt(_IndexAt(where)));
 	BMessage* message = Window()->CurrentMessage();
 	if (item == NULL || message == NULL)
 		return;
@@ -385,7 +385,7 @@ TCupertinoDock::MouseDown(BPoint where)
 
 
 void
-TCupertinoDock::MouseMoved(BPoint where, uint32 transit,
+TLauncherBar::MouseMoved(BPoint where, uint32 transit,
 	const BMessage* dragMessage)
 {
 	int32 index = transit == B_EXITED_VIEW ? -1 : _IndexAt(where);
@@ -400,19 +400,19 @@ TCupertinoDock::MouseMoved(BPoint where, uint32 transit,
 
 
 void
-TCupertinoDock::GetDockSize(float* width, float* height)
+TLauncherBar::GetLauncherSize(float* width, float* height)
 {
-	float itemSide = be_control_look->ComposeIconSize(kDockIconSize).Width()
+	float itemSide = be_control_look->ComposeIconSize(kLauncherIconSize).Width()
 		+ 1;
-	*width = itemSide + 2 * kDockIconPadding;
-	*height = kDockIconPadding + itemSide + kIndicatorSpace;
+	*width = itemSide + 2 * kLauncherIconPadding;
+	*height = kLauncherIconPadding + itemSide + kIndicatorSpace;
 
 	if (CountItems() > 0)
 		*width = 0;
 
 	for (int32 i = 0; i < CountItems(); i++) {
-		TCupertinoDockItem* item
-			= dynamic_cast<TCupertinoDockItem*>(ItemAt(i));
+		TLauncherBarItem* item
+			= dynamic_cast<TLauncherBarItem*>(ItemAt(i));
 		if (item == NULL)
 			continue;
 
@@ -426,7 +426,7 @@ TCupertinoDock::GetDockSize(float* width, float* height)
 
 
 void
-TCupertinoDock::SetActiveTeam(team_id team)
+TLauncherBar::SetActiveTeam(team_id team)
 {
 	if (team == fActiveTeam)
 		return;
@@ -437,12 +437,12 @@ TCupertinoDock::SetActiveTeam(team_id team)
 
 
 void
-TCupertinoDock::_Rebuild()
+TLauncherBar::_Rebuild()
 {
 	// Replacing the items while a window menu is open would pull the team
 	// list from under TWindowMenu; try again once the menu has closed.
-	TCupertinoDockWindow* window
-		= dynamic_cast<TCupertinoDockWindow*>(Window());
+	TLauncherBarWindow* window
+		= dynamic_cast<TLauncherBarWindow*>(Window());
 	if (window != NULL && window->IsShowingMenu()) {
 		if (!fRebuildPending) {
 			fRebuildPending = true;
@@ -466,12 +466,12 @@ TCupertinoDock::_Rebuild()
 			continue;
 
 		BBitmap* icon = barApp->CopyTeamIcon(
-			(team_id)(addr_t)info->teams->ItemAt(0), kDockIconSize);
+			(team_id)(addr_t)info->teams->ItemAt(0), kLauncherIconSize);
 		if (icon == NULL && info->icon != NULL)
 			icon = new BBitmap(info->icon);
 
-		TCupertinoDockItem* item
-			= new TCupertinoDockItem(new BarTeamInfo(*info), icon);
+		TLauncherBarItem* item
+			= new TLauncherBarItem(new BarTeamInfo(*info), icon);
 
 		if (settings->trackerAlwaysFirst
 			&& strcasecmp(info->sig, kTrackerSignature) == 0) {
@@ -491,7 +491,7 @@ TCupertinoDock::_Rebuild()
 
 
 void
-TCupertinoDock::_ClearTeamList()
+TLauncherBar::_ClearTeamList()
 {
 	for (int32 i = fTeamList.CountItems() - 1; i >= 0; i--)
 		delete_team_info_copy((BarTeamInfo*)fTeamList.ItemAt(i));
@@ -501,7 +501,7 @@ TCupertinoDock::_ClearTeamList()
 
 
 int32
-TCupertinoDock::_IndexAt(BPoint where)
+TLauncherBar::_IndexAt(BPoint where)
 {
 	for (int32 i = 0; i < CountItems(); i++) {
 		if (ItemAt(i)->Frame().Contains(where))

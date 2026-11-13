@@ -84,7 +84,7 @@ private:
 			BCheckBox*		fWindowAutoHide;
 
 			BRadioButton*	fLayoutClassic;
-			BRadioButton*	fLayoutCupertino;
+			BRadioButton*	fLayoutGlobalMenu;
 
 			BButton*		fDefaultsButton;
 			BButton*		fRevertButton;

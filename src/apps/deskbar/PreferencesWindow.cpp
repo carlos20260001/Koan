@@ -106,10 +106,10 @@ PreferencesWindow::PreferencesWindow(BRect frame)
 	classicMessage->AddInt32("layout", kClassicLayout);
 	fLayoutClassic = new BRadioButton(B_TRANSLATE("Classic"),
 		classicMessage);
-	BMessage* cupertinoMessage = new BMessage(kSetLayout);
-	cupertinoMessage->AddInt32("layout", kCupertinoLayout);
-	fLayoutCupertino = new BRadioButton(
-		B_TRANSLATE("Cupertino (menu bar and Dock)"), cupertinoMessage);
+	BMessage* globalMenuMessage = new BMessage(kSetLayout);
+	globalMenuMessage->AddInt32("layout", kGlobalMenuLayout);
+	fLayoutGlobalMenu = new BRadioButton(
+		B_TRANSLATE("Global menu bar and launcher"), globalMenuMessage);
 
 	// Menu settings
 	fMenuRecentDocuments->SetValue(fSettings.recentDocsEnabled);
@@ -158,7 +158,7 @@ PreferencesWindow::PreferencesWindow(BRect frame)
 	fWindowAutoHide->SetTarget(be_app);
 
 	fLayoutClassic->SetTarget(be_app);
-	fLayoutCupertino->SetTarget(be_app);
+	fLayoutGlobalMenu->SetTarget(be_app);
 
 	const float spacing = be_control_look->DefaultItemSpacing() * 2.3;
 
@@ -229,7 +229,7 @@ PreferencesWindow::PreferencesWindow(BRect frame)
 		.SetExplicitMaxSize(BSize(B_SIZE_UNLIMITED, B_SIZE_UNSET))
 		.AddGroup(B_VERTICAL, 0)
 			.Add(fLayoutClassic)
-			.Add(fLayoutCupertino)
+			.Add(fLayoutGlobalMenu)
 			.AddGlue()
 			.SetInsets(B_USE_DEFAULT_SPACING)
 			.End()
@@ -545,8 +545,8 @@ PreferencesWindow::_UpdatePreferences(desk_settings* settings)
 	}
 
 	if (current->layout != settings->layout) {
-		BRadioButton* button = settings->layout == kCupertinoLayout
-			? fLayoutCupertino : fLayoutClassic;
+		BRadioButton* button = settings->layout == kGlobalMenuLayout
+			? fLayoutGlobalMenu : fLayoutClassic;
 		button->SetValue(B_CONTROL_ON);
 		button->Invoke();
 	}
@@ -578,8 +578,8 @@ PreferencesWindow::_UpdateRecentCounts()
 void
 PreferencesWindow::_UpdateLayoutButtons()
 {
-	bool cupertino = static_cast<TBarApp*>(be_app)->Settings()->layout
-		== kCupertinoLayout;
-	fLayoutClassic->SetValue(cupertino ? B_CONTROL_OFF : B_CONTROL_ON);
-	fLayoutCupertino->SetValue(cupertino ? B_CONTROL_ON : B_CONTROL_OFF);
+	bool globalMenu = static_cast<TBarApp*>(be_app)->Settings()->layout
+		== kGlobalMenuLayout;
+	fLayoutClassic->SetValue(globalMenu ? B_CONTROL_OFF : B_CONTROL_ON);
+	fLayoutGlobalMenu->SetValue(globalMenu ? B_CONTROL_ON : B_CONTROL_OFF);
 }

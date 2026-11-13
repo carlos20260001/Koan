@@ -2,11 +2,11 @@
  * Copyright 2026, Koan contributors
  * SPDX-License-Identifier: MIT
  */
-#ifndef CUPERTINO_MENU_BAR_H
-#define CUPERTINO_MENU_BAR_H
+#ifndef GLOBAL_MENU_BAR_H
+#define GLOBAL_MENU_BAR_H
 
 
-// Application area of the Cupertino menu bar, between the Deskbar menu
+// Application area of the global menu bar, between the Deskbar menu
 // and the replicant tray: the active application's name, opening that
 // application's window menu (its windows, Hide all, Show all, Close all).
 
@@ -17,13 +17,13 @@
 
 
 class BarTeamInfo;
-class TCupertinoAppMenuItem;
+class TGlobalAppMenuItem;
 
 
-class TCupertinoAppMenuBar : public BMenuBar {
+class TGlobalAppMenuBar : public BMenuBar {
 public:
-							TCupertinoAppMenuBar(BRect frame);
-	virtual					~TCupertinoAppMenuBar();
+							TGlobalAppMenuBar(BRect frame);
+	virtual					~TGlobalAppMenuBar();
 
 	virtual	void			AttachedToWindow();
 	virtual	void			DetachedFromWindow();
@@ -43,9 +43,9 @@ private:
 			BList			fTeamList;
 				// BarTeamInfo copies from TBarApp::Subscribe()
 			team_id			fActiveTeam;
-			TCupertinoAppMenuItem* fAppItem;
+			TGlobalAppMenuItem* fAppItem;
 			bool			fUpdatePending;
 };
 
 
-#endif	// CUPERTINO_MENU_BAR_H
+#endif	// GLOBAL_MENU_BAR_H
