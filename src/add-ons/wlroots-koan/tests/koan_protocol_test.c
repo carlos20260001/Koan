@@ -2370,6 +2370,48 @@ test_compose_fractional(struct conn *c, struct toplevel *t)
 	commit_scaled(c, t, 64, 48, 1, COLOR_ROOT);
 }
 
+/* wp_viewport.set_destination sizes a surface independently of its
+ * buffer: a 4 x 4 buffer can cover a 1000000 x 10 surface, and Koan
+ * composes the window box at that size. Without a limit app_server
+ * allocated and imported the full frame on every commit (up to 2 GiB at
+ * once). An oversized box is not delivered; a normal one afterwards is. */
+static void
+test_compose_oversize(struct conn *c, struct toplevel *t)
+{
+	if (c->viewporter == NULL) {
+		result(ST_BLOCKED, "compose-oversize", "no wp_viewporter global");
+		return;
+	}
+	static const struct { int32_t w, h; const char *name; } kCases[] = {
+		{ 1000000, 10, "compose-oversize-wide" },
+		{ 10, 1000000, "compose-oversize-tall" },
+	};
+	struct wp_viewport *viewport = wp_viewporter_get_viewport(
+		c->viewporter, t->surface);
+	for (size_t i = 0; i < sizeof(kCases) / sizeof(kCases[0]); i++) {
+		wp_viewport_set_destination(viewport, kCases[i].w, kCases[i].h);
+		xdg_surface_set_window_geometry(t->xdg_surface, 0, 0, kCases[i].w,
+			kCases[i].h);
+		bool delivered = commit_scaled(c, t, 4, 4, 1, COLOR_ROOT);
+		pthread_mutex_lock(&sFrameLock);
+		int32_t w = sFrameWidth, h = sFrameHeight;
+		pthread_mutex_unlock(&sFrameLock);
+		result(!delivered ? ST_PASS : ST_FAIL, kCases[i].name,
+			"%dx%d surface: %s (frame %dx%d)", kCases[i].w, kCases[i].h,
+			delivered ? "frame delivered" : "refused", w, h);
+	}
+
+	wp_viewport_destroy(viewport);
+	xdg_surface_set_window_geometry(t->xdg_surface, 0, 0, 64, 48);
+	bool delivered = commit_scaled(c, t, 64, 48, 1, COLOR_CHILD);
+	pthread_mutex_lock(&sFrameLock);
+	int32_t w = sFrameWidth, h = sFrameHeight;
+	pthread_mutex_unlock(&sFrameLock);
+	result(delivered && w == 64 && h == 48 ? ST_PASS : ST_FAIL,
+		"compose-oversize-recovers", "%s; frame %dx%d (expected 64x48)",
+		delivered ? "delivered" : "NOT delivered", w, h);
+}
+
 static int
 run_compose(void)
 {
@@ -2394,6 +2436,7 @@ run_compose(void)
 	test_compose_scale(&c, &t);
 	test_compose_viewport(&c, &t);
 	test_compose_fractional(&c, &t);
+	test_compose_oversize(&c, &t);
 
 	struct conn after;
 	bool alive = conn_open(&after, s.socket);

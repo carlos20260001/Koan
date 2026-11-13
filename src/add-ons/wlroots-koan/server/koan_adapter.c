@@ -199,6 +199,15 @@ struct compose_target {
 	int32_t height;       /* box.height * scale, rounded */
 };
 
+/* Largest composed window, in pixels. A client sizes its surfaces
+ * independently of its buffers (wp_viewport.set_destination, subsurface
+ * offsets), so a 4 x 4 buffer can claim any box, and each commit makes
+ * app_server allocate and import a frame of that size. 16384 is the usual
+ * GPU texture limit; the area allows a window across two 8K screens
+ * (15360 x 4320) with room to spare, at 512 MiB. */
+#define KOAN_MAX_COMPOSE_SIDE 16384
+#define KOAN_MAX_COMPOSE_PIXELS (16384.0 * 8192.0)
+
 /* Allocate the target's pixels for its box at the output's scale. Returns
  * false (nothing allocated) when the box is empty or too large. */
 static bool compose_target_init(struct compose_target *t,
@@ -208,13 +217,17 @@ static bool compose_target_init(struct compose_target *t,
 	t->scale = koan_server_output_scale_exact();
 	if (box.width <= 0 || box.height <= 0)
 		return false;
-	t->width = (int32_t)lroundf(box.width * t->scale);
-	t->height = (int32_t)lroundf(box.height * t->scale);
-	if ((int64_t)t->width * t->height * 4 > INT32_MAX) {
+	/* In double: box * scale can exceed int32 before it is checked. */
+	const double width = round((double)box.width * t->scale);
+	const double height = round((double)box.height * t->scale);
+	if (width > KOAN_MAX_COMPOSE_SIDE || height > KOAN_MAX_COMPOSE_SIDE
+			|| width * height > KOAN_MAX_COMPOSE_PIXELS) {
 		wlr_log(WLR_ERROR, "Koan adapter: window too large (%dx%d at "
-			"scale %.2f)", box.width, box.height, t->scale);
+			"scale %.2f), not shown", box.width, box.height, t->scale);
 		return false;
 	}
+	t->width = (int32_t)width;
+	t->height = (int32_t)height;
 	t->pixels = calloc((size_t)t->width * t->height, sizeof(uint32_t));
 	if (!t->pixels) {
 		wlr_log(WLR_ERROR, "Koan adapter: failed to allocate %dx%d window",
