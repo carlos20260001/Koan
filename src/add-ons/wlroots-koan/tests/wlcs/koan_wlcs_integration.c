@@ -70,6 +70,7 @@
 #include <wlcs/touch.h>
 
 #include "koan_adapter.h"
+#include "koan_frame.h"
 #include "koan_queue.h"
 #include "koan_server.h"
 
@@ -300,7 +301,7 @@ cb_set_buffer(void *userdata, struct koan_queue *queue, void *window,
 	(void)height;
 	(void)stride;
 	(void)format;
-	free(data); /* set_buffer takes ownership */
+	koan_frame_release(data); /* set_buffer takes ownership */
 	/* New content may move or resize what is under the pointer; app_server
 	 * sends a fake mouse-moved in that case. */
 	if (window != NULL)

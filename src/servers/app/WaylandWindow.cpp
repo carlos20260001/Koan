@@ -1046,7 +1046,7 @@ WaylandWindowBridge::s_set_buffer(void *userdata, struct koan_queue *queue,
 {
 	WaylandWindowBridge *bridge = (WaylandWindowBridge *)userdata;
 	if (!bridge || !queue || !window || !data) {
-		free(data); /* set_buffer takes ownership */
+		koan_frame_release(data); /* set_buffer takes ownership */
 		return;
 	}
 
@@ -1521,27 +1521,44 @@ WaylandWindowBridge::process_set_buffer(struct koan_command *cmd)
 
 	color_space space = drm_format_to_colorspace(format);
 
-	/* CreateBitmap() returns an owned reference (count 1) and registers the
-	 * bitmap with the manager using a raw pointer. Adopt that reference so
-	 * both the manager registration and the reference are released on every
-	 * path below. */
-	BReference<ServerBitmap> bitmap(gBitmapManager->CreateBitmap(
-		NULL, *ww->server_window->Desktop()->HWInterface(),
-		BRect(0, 0, width - 1, height - 1), space, 0, stride), true);
-	if (!bitmap.IsSet()) {
-		return -1;
+	/* Import into the bitmap the window showed before its current one
+	 * when it has this frame's size: a new bitmap per frame allocated,
+	 * faulted in and unmapped about 100 MB 25 times a second at 5K, and the
+	 * page faults and TLB shootdowns cost more than drawing. The spare is
+	 * not on screen, so it is filled without the window's locks. */
+	BReference<ServerBitmap> bitmap;
+	bool registered = false;
+	ServerBitmap *spare = ww->spare_bitmap.Get();
+	if (spare != NULL && spare->Width() == width
+		&& spare->Height() == height && spare->BytesPerRow() == stride
+		&& spare->ColorSpace() == space) {
+		bitmap = ww->spare_bitmap;
+		ww->spare_bitmap.Unset();
+	} else {
+		ww->spare_bitmap.Unset();
+		/* CreateBitmap() returns an owned reference (count 1) and
+		 * registers the bitmap with the manager using a raw pointer. Adopt
+		 * that reference; the registration is dropped below on every
+		 * path. */
+		bitmap.SetTo(gBitmapManager->CreateBitmap(NULL,
+			*ww->server_window->Desktop()->HWInterface(),
+			BRect(0, 0, width - 1, height - 1), space, 0, stride), true);
+		if (!bitmap.IsSet())
+			return -1;
+		registered = true;
 	}
 
 	status_t status = bitmap->ImportBits(data, stride * height, stride,
 		space);
 	/* Do NOT free 'data' here: koan_queue_drain_direction() calls
-	 * free_payload() which frees set_buffer.data after the processor
+	 * free_payload() which releases set_buffer.data after the processor
 	 * returns. */
 
 	if (status != B_OK) {
 		/* Detach from the manager before the reference is dropped: it
 		 * holds a raw pointer and would otherwise keep a dangling entry. */
-		gBitmapManager->BitmapRemoved(bitmap);
+		if (registered)
+			gBitmapManager->BitmapRemoved(bitmap);
 		return -1;
 	}
 
@@ -1549,7 +1566,8 @@ WaylandWindowBridge::process_set_buffer(struct koan_command *cmd)
 	 * same locks it holds, in the same order: the ServerWindow's own lock,
 	 * then the desktop lock. */
 	if (!fDesktop || !ww->server_window->Lock()) {
-		gBitmapManager->BitmapRemoved(bitmap);
+		if (registered)
+			gBitmapManager->BitmapRemoved(bitmap);
 		return -1;
 	}
 
@@ -1576,7 +1594,8 @@ WaylandWindowBridge::process_set_buffer(struct koan_command *cmd)
 
 	if (!fDesktop->LockSingleWindow()) {
 		ww->server_window->Unlock();
-		gBitmapManager->BitmapRemoved(bitmap);
+		if (registered)
+			gBitmapManager->BitmapRemoved(bitmap);
 		return -1;
 	}
 
@@ -1592,10 +1611,17 @@ WaylandWindowBridge::process_set_buffer(struct koan_command *cmd)
 		? fDesktop->HWInterface()->RenderScaleFactor() : 1.0f;
 	uint32 bitmapOptions = fabsf(scale - renderScale) > 0.001f
 		? B_FILTER_BITMAP_BILINEAR : 0;
+	BReference<ServerBitmap> previous(top_view->ViewBitmap());
 	top_view->SetViewBitmap(bitmap, IntRect(0, 0, width - 1, height - 1),
 		IntRect(0, 0, logicalWidth - 1, logicalHeight - 1),
 		0 /* no tiling */, bitmapOptions);
-	gBitmapManager->BitmapRemoved(bitmap);
+	if (registered)
+		gBitmapManager->BitmapRemoved(bitmap);
+	/* Keep the bitmap just replaced for the next frame, unless anything
+	 * but this reference still holds it. */
+	if (previous.IsSet() && previous.Get() != bitmap.Get()
+		&& previous->CountReferences() == 1)
+		ww->spare_bitmap = previous;
 
 	/* MarkContentDirty() intersects its arguments in place, so pass
 	 * copies: handing it VisibleRegion() itself clipped the window's own

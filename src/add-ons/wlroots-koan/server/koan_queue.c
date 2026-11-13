@@ -32,6 +32,7 @@
 
 #include <wlr/util/log.h>
 
+#include "koan_frame.h"
 #include "koan_queue.h"
 
 struct koan_queue {
@@ -137,7 +138,7 @@ static void free_payload(union koan_cmd_payload *payload,
 		free(payload->set_title.title);
 		break;
 	case KOAN_CMD_SET_BUFFER:
-		free(payload->set_buffer.data);
+		koan_frame_release(payload->set_buffer.data);
 		break;
 	case KOAN_CMD_DESTROY_WINDOW:
 	case KOAN_CMD_SET_SIZE:

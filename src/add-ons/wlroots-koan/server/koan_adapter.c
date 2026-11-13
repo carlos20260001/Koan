@@ -42,6 +42,7 @@
 #include <wlr/util/log.h>
 
 #include "koan_adapter.h"
+#include "koan_frame.h"
 #include "koan_test.h"
 #include "koan_queue.h"
 #include "koan_server.h"
@@ -156,7 +157,7 @@ static void koan_toplevel_destroy(struct koan_toplevel *kt) {
 	wl_list_remove(&kt->toplevel_set_title.link);
 	wl_list_remove(&kt->toplevel_set_app_id.link);
 	/* Free any buffered commit data that was never delivered. */
-	free(kt->buffer_data);
+	koan_frame_release(kt->buffer_data);
 	wl_list_remove(&kt->link);
 	free(kt);
 }
@@ -236,7 +237,9 @@ static bool compose_target_init(struct compose_target *t,
 	}
 	t->width = (int32_t)width;
 	t->height = (int32_t)height;
-	t->pixels = calloc((size_t)t->width * t->height, sizeof(uint32_t));
+	/* Not cleared: compose_tree() writes every pixel. */
+	t->pixels = koan_frame_alloc((size_t)t->width * t->height
+		* sizeof(uint32_t));
 	if (!t->pixels) {
 		wlr_log(WLR_ERROR, "Koan adapter: failed to allocate %dx%d window",
 			t->width, t->height);
@@ -368,8 +371,9 @@ static void compose_add_opaque(const struct compose_target *t,
 	}
 }
 
-/* Draw the part of one surface that lies in region (target pixels) over
- * what is already composed.
+/* Draw the parts of one surface that lie in write and blend (target
+ * pixels): write replaces the target's pixels (the surface is opaque
+ * there), blend draws over what is already composed.
  *
  * Its buffer (or the viewport's source crop of it) is mapped onto the
  * surface's target pixels (compose_item_rect()): 1:1 when the client
@@ -377,7 +381,8 @@ static void compose_add_opaque(const struct compose_target *t,
  * buffer_scale == target scale), otherwise filtered (sample_bilinear()).
  * Buffer transforms are not applied. */
 static void compose_draw(struct compose_target *t,
-		const struct compose_item *item, pixman_region32_t *region) {
+		const struct compose_item *item, pixman_region32_t *write,
+		pixman_region32_t *blend) {
 	struct wlr_surface *surface = item->surface;
 	int32_t ox, oy, dw, dh;
 	compose_item_rect(t, item, &ox, &oy, &dw, &dh);
@@ -428,31 +433,52 @@ static void compose_draw(struct compose_target *t,
 	const double stepX = srcW / dw;
 	const double stepY = srcH / dh;
 	const int32_t lastX = buffer->width - 1;
+	/* XRGB has no alpha: its pixels are written opaque. */
+	const uint32_t alphaFill = opaque ? 0xff000000u : 0;
 
-	int nrects = 0;
-	const pixman_box32_t *rects = pixman_region32_rectangles(region,
-		&nrects);
-	for (int r = 0; r < nrects; r++) {
-		/* The rectangle in the surface's own target pixels. */
-		const int32_t x0 = rects[r].x1 - ox, x1 = rects[r].x2 - ox;
-		const int32_t y0 = rects[r].y1 - oy, y1 = rects[r].y2 - oy;
-		for (int32_t y = y0; y < y1; y++) {
-			uint32_t *out = t->pixels + (size_t)(oy + y) * t->width + ox;
-			if (direct) {
-				const int32_t by = y < buffer->height ? y : buffer->height - 1;
-				const uint32_t *in = (const uint32_t *)((const uint8_t *)src
-					+ (size_t)by * stride);
-				for (int32_t x = x0; x < x1; x++)
-					out[x] = blend_pixel(in[x < lastX ? x : lastX], out[x],
-						opaque);
-				continue;
-			}
-			const double fy = srcY + (y + 0.5) * stepY;
-			for (int32_t x = x0; x < x1; x++) {
-				uint32_t pixel = sample_bilinear((const uint8_t *)src, stride,
-					buffer->width, buffer->height, srcX + (x + 0.5) * stepX,
-					fy);
-				out[x] = blend_pixel(pixel, out[x], opaque);
+	/* write: where the surface declares itself opaque, so nothing under it
+	 * shows and its pixels replace the target's (which are not cleared
+	 * there, koan_frame.h). blend: over what is composed below. */
+	for (int pass = 0; pass < 2; pass++) {
+		const bool replace = pass == 0;
+		int nrects = 0;
+		const pixman_box32_t *rects = pixman_region32_rectangles(
+			replace ? write : blend, &nrects);
+		for (int r = 0; r < nrects; r++) {
+			/* The rectangle in the surface's own target pixels. */
+			const int32_t x0 = rects[r].x1 - ox, x1 = rects[r].x2 - ox;
+			const int32_t y0 = rects[r].y1 - oy, y1 = rects[r].y2 - oy;
+			for (int32_t y = y0; y < y1; y++) {
+				uint32_t *out = t->pixels + (size_t)(oy + y) * t->width + ox;
+				if (direct) {
+					const int32_t by = y < buffer->height
+						? y : buffer->height - 1;
+					const uint32_t *in = (const uint32_t *)
+						((const uint8_t *)src + (size_t)by * stride);
+					if (replace) {
+						/* The bulk of a full-screen video frame: a row
+						 * copy the compiler vectorizes. */
+						const int32_t end = x1 < lastX ? x1 : lastX;
+						int32_t x = x0;
+						for (; x < end; x++)
+							out[x] = in[x] | alphaFill;
+						for (; x < x1; x++)
+							out[x] = in[lastX] | alphaFill;
+						continue;
+					}
+					for (int32_t x = x0; x < x1; x++)
+						out[x] = blend_pixel(in[x < lastX ? x : lastX], out[x],
+							opaque);
+					continue;
+				}
+				const double fy = srcY + (y + 0.5) * stepY;
+				for (int32_t x = x0; x < x1; x++) {
+					uint32_t pixel = sample_bilinear((const uint8_t *)src,
+						stride, buffer->width, buffer->height,
+						srcX + (x + 0.5) * stepX, fy);
+					out[x] = replace ? pixel | alphaFill
+						: blend_pixel(pixel, out[x], opaque);
+				}
 			}
 		}
 	}
@@ -473,20 +499,29 @@ static void compose_tree(struct compose_target *t,
 		struct wlr_surface *root) {
 	struct compose_items list = {0};
 	wlr_surface_for_each_surface(root, compose_collect, &list);
+	/* draw[0..count) and write[0..count) in one allocation. */
 	pixman_region32_t *draw = list.failed || list.count == 0 ? NULL
-		: calloc(list.count, sizeof(*draw));
+		: calloc(list.count * 2, sizeof(*draw));
 	if (!draw) {
+		/* Nothing to draw (or no memory to plan it): a transparent frame,
+		 * since the frame's memory is reused, not cleared. */
+		memset(t->pixels, 0, (size_t)t->width * t->height * sizeof(uint32_t));
 		free(list.items);
 		return;
 	}
 
-	/* Top down: each surface draws what the ones above leave visible. */
-	pixman_region32_t covered;
+	/* Top down: each surface draws what the ones above leave visible;
+	 * where it is opaque itself it replaces the pixels (write), elsewhere
+	 * it blends over the surfaces below (draw minus write). */
+	pixman_region32_t covered, own;
 	pixman_region32_init(&covered);
+	pixman_region32_init(&own);
+	pixman_region32_t *write = draw + list.count;
 	for (size_t i = list.count; i-- > 0;) {
 		int32_t ox, oy, dw, dh;
 		compose_item_rect(t, &list.items[i], &ox, &oy, &dw, &dh);
 		pixman_region32_init(&draw[i]);
+		pixman_region32_init(&write[i]);
 		if (dw > 0 && dh > 0) {
 			pixman_region32_union_rect(&draw[i], &draw[i], ox, oy,
 				(unsigned)dw, (unsigned)dh);
@@ -494,14 +529,36 @@ static void compose_tree(struct compose_target *t,
 				(unsigned)t->width, (unsigned)t->height);
 			pixman_region32_subtract(&draw[i], &draw[i], &covered);
 		}
-		compose_add_opaque(t, &list.items[i], &covered);
+		pixman_region32_clear(&own);
+		compose_add_opaque(t, &list.items[i], &own);
+		pixman_region32_intersect(&write[i], &draw[i], &own);
+		pixman_region32_subtract(&draw[i], &draw[i], &write[i]);
+		pixman_region32_union(&covered, &covered, &own);
 	}
+	pixman_region32_fini(&own);
+
+	/* The frame's memory is reused, not cleared: clear what no surface
+	 * writes, the transparent background the others blend over. */
+	pixman_region32_t clear;
+	pixman_region32_init_rect(&clear, 0, 0, (unsigned)t->width,
+		(unsigned)t->height);
+	pixman_region32_subtract(&clear, &clear, &covered);
 	pixman_region32_fini(&covered);
+	int nrects = 0;
+	const pixman_box32_t *rects = pixman_region32_rectangles(&clear, &nrects);
+	for (int r = 0; r < nrects; r++) {
+		for (int32_t y = rects[r].y1; y < rects[r].y2; y++)
+			memset(t->pixels + (size_t)y * t->width + rects[r].x1, 0,
+				(size_t)(rects[r].x2 - rects[r].x1) * sizeof(uint32_t));
+	}
+	pixman_region32_fini(&clear);
 
 	for (size_t i = 0; i < list.count; i++) {
-		if (pixman_region32_not_empty(&draw[i]))
-			compose_draw(t, &list.items[i], &draw[i]);
+		if (pixman_region32_not_empty(&draw[i])
+				|| pixman_region32_not_empty(&write[i]))
+			compose_draw(t, &list.items[i], &write[i], &draw[i]);
 		pixman_region32_fini(&draw[i]);
+		pixman_region32_fini(&write[i]);
 	}
 	free(draw);
 	free(list.items);
@@ -729,7 +786,7 @@ static void popup_hide(struct koan_popup *kp) {
 	kp->native_window = NULL;
 	kp->create_pending = false;
 	kp->failed = false;
-	free(kp->buffer_data);
+	koan_frame_release(kp->buffer_data);
 	kp->buffer_data = NULL;
 }
 
@@ -751,7 +808,7 @@ static void popup_ready(struct wlr_xdg_popup *popup, void *window) {
 			DRM_FORMAT_ARGB8888, kp->buffer_scale, 0, 0);
 		kp->buffer_data = NULL; /* set_buffer takes it */
 	}
-	free(kp->buffer_data);
+	koan_frame_release(kp->buffer_data);
 	kp->buffer_data = NULL;
 }
 
@@ -814,7 +871,7 @@ void koan_adapter_popup_committed(struct wlr_xdg_popup *popup) {
 		return;
 	}
 	/* Keep the newest frame until the window exists. */
-	free(kp->buffer_data);
+	koan_frame_release(kp->buffer_data);
 	kp->buffer_data = t.pixels;
 	kp->buffer_width = t.width;
 	kp->buffer_height = t.height;
@@ -837,7 +894,7 @@ void koan_adapter_forget_popups(void) {
 		wl_list_remove(&kp->destroy.link);
 		wl_list_remove(&kp->unmap.link);
 		wl_list_remove(&kp->link);
-		free(kp->buffer_data);
+		koan_frame_release(kp->buffer_data);
 		free(kp);
 	}
 }
@@ -1205,7 +1262,7 @@ static void deliver_buffer(struct koan_toplevel *kt) {
 		/* set_buffer takes ownership of data. */
 	} else {
 		/* Window not yet created: buffer the data for later. */
-		free(kt->buffer_data);
+		koan_frame_release(kt->buffer_data);
 		kt->buffer_data = data;
 		kt->buffer_width = width;
 		kt->buffer_height = height;

@@ -114,6 +114,7 @@
 #include "koan_test.h"
 
 #include "koan_adapter.h"
+#include "koan_frame.h"
 #include "koan_queue.h"
 #include "koan_server.h"
 
@@ -228,7 +229,7 @@ fake_set_buffer(void *userdata, struct koan_queue *queue, void *window,
 	(void)format;
 	/* Keep the last delivered frame: what app_server would show. */
 	pthread_mutex_lock(&sFrameLock);
-	free(sFrame);
+	koan_frame_release(sFrame);
 	sFrame = data; /* set_buffer takes ownership */
 	sFrameWidth = width;
 	sFrameHeight = height;
@@ -2606,6 +2607,47 @@ test_compose_acked_size(struct conn *c, struct toplevel *t)
 	deliveries_after(c, 0);
 }
 
+/* Frames reuse memory. Every frame of a window used to be a new calloc()
+ * that app_server freed after importing it; at 5K (about 100 MB a frame)
+ * the page faults and the TLB shootdowns of unmapping it cost more than
+ * composing (koan_frame.h). Here app_server (the fake) releases each frame
+ * as it arrives, so after the first frames every frame reuses one. */
+static void
+test_compose_frame_reuse(struct conn *c, struct toplevel *t)
+{
+	struct koan_frame_stats before, after;
+	koan_frame_get_stats(&before);
+	const int kFrames = 10;
+	int delivered = 0;
+	for (int i = 0; i < kFrames; i++) {
+		int count = atomic_load(&sSetBufferCount);
+		attach_color(c, t->surface, 64, 48,
+			(i & 1) ? COLOR_ROOT : COLOR_CHILD);
+		wl_surface_commit(t->surface);
+		delivered += deliveries_after(c, count);
+	}
+	koan_frame_get_stats(&after);
+	uint64_t reused = after.reused - before.reused;
+	result(delivered == kFrames && reused >= (uint64_t)kFrames - 2
+			? ST_PASS : ST_FAIL, "compose-frame-reuse",
+		"%d frames delivered, %llu reused memory (expected %d, at least "
+		"%d)", delivered, (unsigned long long)reused, kFrames, kFrames - 2);
+
+	/* Reused memory still holds an earlier frame: a transparent window
+	 * must come out transparent, not show it. */
+	int count = atomic_load(&sSetBufferCount);
+	attach_color(c, t->surface, 64, 48, 0x00000000u);
+	wl_surface_commit(t->surface);
+	delivered = deliveries_after(c, count);
+	uint32_t pixel = frame_pixel(10, 10);
+	result(delivered == 1 && pixel == 0 ? ST_PASS : ST_FAIL,
+		"compose-frame-reuse-cleared", "%d deliveries, pixel 0x%08x "
+		"(expected 0, transparent)", delivered, pixel);
+	attach_color(c, t->surface, 64, 48, COLOR_ROOT);
+	wl_surface_commit(t->surface);
+	deliveries_after(c, 0);
+}
+
 /* wp_viewport.set_destination sizes a surface independently of its
  * buffer: a 4 x 4 buffer can cover a 1000000 x 10 surface, and Koan
  * composes the window box at that size. Without a limit app_server
@@ -2675,6 +2717,7 @@ run_compose(void)
 	test_compose_occluded(&c, &t);
 	test_compose_skip(&c, &t);
 	test_compose_acked_size(&c, &t);
+	test_compose_frame_reuse(&c, &t);
 	test_compose_oversize(&c, &t);
 
 	struct conn after;

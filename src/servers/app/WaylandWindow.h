@@ -30,11 +30,13 @@ static const uint32 kMsgWaylandTestFence = 'wltf';
 #include <ObjectList.h>
 #include <PortLink.h>
 #include <Rect.h>
+#include <Referenceable.h>
 #include <String.h>
 #include <Window.h>
 #include <OS.h>
 
 #include "koan_adapter.h"
+#include "koan_frame.h"
 #include "koan_queue.h"
 
 class Desktop;
@@ -64,6 +66,9 @@ struct wayland_window {
 	bool is_popup;
 	struct wlr_xdg_popup *popup;
 	int32 popup_x, popup_y;             /* in the toplevel's content */
+	/* The bitmap the window showed before its current one, kept to import
+	 * the next frame of the same size into (process_set_buffer()). */
+	BReference<ServerBitmap> spare_bitmap;
 };
 
 /* A Wayland client process with native windows, registered with the

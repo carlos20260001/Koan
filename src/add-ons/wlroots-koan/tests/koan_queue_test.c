@@ -24,6 +24,7 @@
 #include <string.h>
 #include <unistd.h>
 
+#include "koan_frame.h"
 #include "koan_queue.h"
 
 static int sOrder[8];
@@ -55,7 +56,7 @@ push_frame(struct koan_queue *queue, char window, char frame)
 {
 	union koan_cmd_payload payload = {0};
 	payload.set_buffer.window = (void *)(uintptr_t)window;
-	payload.set_buffer.data = malloc(1);
+	payload.set_buffer.data = koan_frame_alloc(1);
 	if (payload.set_buffer.data == NULL)
 		return false;
 	*(char *)payload.set_buffer.data = frame;

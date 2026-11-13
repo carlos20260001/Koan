@@ -54,6 +54,7 @@
 #include "xdg-decoration-unstable-v1-client-protocol.h"
 
 #include "koan_adapter.h"
+#include "koan_frame.h"
 #include "koan_queue.h"
 #include "koan_server.h"
 
@@ -154,7 +155,7 @@ fake_set_buffer(void *userdata, struct koan_queue *queue, void *window,
 	if (ok)
 		atomic_store(&sLastSubPixel, sub);
 	atomic_fetch_add(ok ? &sSetBufferCount : &sBadBufferCount, 1);
-	free(data); /* set_buffer takes ownership */
+	koan_frame_release(data); /* set_buffer takes ownership */
 }
 
 static void

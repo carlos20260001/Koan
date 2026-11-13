@@ -408,6 +408,7 @@ set(WLR_KOAN_PLATFORM_SRCS
     backend/koan/backend.c
     backend/koan/output.c
     backend/koan/drm_syncobj.c
+    server/koan_frame.c
     server/koan_queue.c
     server/koan_server.c
     server/koan_adapter.c

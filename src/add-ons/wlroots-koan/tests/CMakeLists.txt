@@ -86,6 +86,14 @@ target_link_libraries(koan_queue_test PRIVATE wlroots)
 add_test(NAME koan_queue COMMAND koan_queue_test)
 set_tests_properties(koan_queue PROPERTIES TIMEOUT 10)
 
+add_executable(koan_frame_test koan_frame_test.c)
+target_include_directories(koan_frame_test PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/../server"
+)
+target_link_libraries(koan_frame_test PRIVATE wlroots)
+add_test(NAME koan_frame COMMAND koan_frame_test)
+set_tests_properties(koan_frame PROPERTIES TIMEOUT 10)
+
 # Protocol smoke, registry and negative cases (Milestone 1 of
 # docs/analysis/wayland-conformance-testing-audit.md). Prints
 # RESULT|<status>|<case>|<detail> lines. Each mode runs in its own process
