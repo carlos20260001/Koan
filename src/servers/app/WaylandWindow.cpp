@@ -340,6 +340,8 @@ public:
 		fInput(input),
 		fClientWidth(0),
 		fClientHeight(0),
+		fRequestedWidth(0),
+		fRequestedHeight(0),
 		fPopup(popup)
 	{
 		/* All Wayland windows share one ServerApp (app_server's team);
@@ -378,6 +380,25 @@ public:
 	{
 		atomic_set(&fClientWidth, width);
 		atomic_set(&fClientHeight, height);
+	}
+
+	/* The size of the last configure app_server sent (0 x 0: none yet).
+	 * A frame resizes the native window only when the client acked that
+	 * configure for it (process_set_buffer()). */
+	void SetRequestedSize(int32 width, int32 height) const
+	{
+		atomic_set(&fRequestedWidth, width);
+		atomic_set(&fRequestedHeight, height);
+	}
+
+	/* Whether a frame that acked a configure of ackedWidth x ackedHeight
+	 * answers the latest size app_server asked for. */
+	bool AnswersRequestedSize(int32 ackedWidth, int32 ackedHeight) const
+	{
+		int32 width = atomic_get(&fRequestedWidth);
+		int32 height = atomic_get(&fRequestedHeight);
+		return width <= 0 || height <= 0
+			|| (ackedWidth == width && ackedHeight == height);
 	}
 
 	virtual status_t SendMessageToClient(const BMessage *message,
@@ -444,9 +465,15 @@ public:
 				width++;
 				height++;
 				fInput->SetSize(width, height);
+				/* The bridge resized the window to follow the client's
+				 * frame: nothing to tell the client. Unless a newer size
+				 * is still requested, in which case the client must hear
+				 * that the user went back to its size. */
 				if (width == atomic_get(&fClientWidth)
-					&& height == atomic_get(&fClientHeight))
+					&& height == atomic_get(&fClientHeight)
+					&& AnswersRequestedSize(width, height))
 					break;
+				SetRequestedSize(width, height);
 				union koan_cmd_payload payload = {};
 				payload.toplevel_configure.toplevel = fToplevel;
 				payload.toplevel_configure.width = width;
@@ -494,6 +521,8 @@ private:
 	WaylandInputLooper *fInput;  /* owned; quit in the destructor */
 	mutable int32 fClientWidth;
 	mutable int32 fClientHeight;
+	mutable int32 fRequestedWidth;
+	mutable int32 fRequestedHeight;
 	bool fPopup;
 };
 
@@ -1012,7 +1041,8 @@ WaylandWindowBridge::s_set_size(void *userdata, struct koan_queue *queue,
 void
 WaylandWindowBridge::s_set_buffer(void *userdata, struct koan_queue *queue,
 		void *window, void *data, int32_t width, int32_t height,
-		int32_t stride, uint32_t format, float scale)
+		int32_t stride, uint32_t format, float scale, int32_t acked_width,
+		int32_t acked_height)
 {
 	WaylandWindowBridge *bridge = (WaylandWindowBridge *)userdata;
 	if (!bridge || !queue || !window || !data) {
@@ -1032,6 +1062,8 @@ WaylandWindowBridge::s_set_buffer(void *userdata, struct koan_queue *queue,
 	payload.set_buffer.stride = stride;
 	payload.set_buffer.format = format;
 	payload.set_buffer.scale = scale >= 1.0f ? scale : 1.0f;
+	payload.set_buffer.acked_width = acked_width;
+	payload.set_buffer.acked_height = acked_height;
 	koan_queue_push(queue, KOAN_CMD_SET_BUFFER, &payload, NULL);
 
 	bridge->_Wake();
@@ -1521,16 +1553,26 @@ WaylandWindowBridge::process_set_buffer(struct koan_command *cmd)
 		return -1;
 	}
 
-	/* Follow the client's size. ResizeWindowBy() takes the all-windows
-	 * write lock itself, as for AS_WINDOW_RESIZE. Record the size first so
-	 * the resulting B_WINDOW_RESIZED is not sent back as a configure. */
-	static_cast<WaylandServerWindow *>(ww->server_window)->SetClientSize(
-		logicalWidth, logicalHeight);
-	BRect frame = native_window->Frame();
-	int32 dw = logicalWidth - (frame.IntegerWidth() + 1);
-	int32 dh = logicalHeight - (frame.IntegerHeight() + 1);
-	if (dw != 0 || dh != 0)
-		fDesktop->ResizeWindowBy(native_window, dw, dh);
+	/* Follow the client's size, unless this frame answers an older
+	 * configure than the latest one sent: during a border drag the window
+	 * already has the user's newer size, and shrinking it back to each
+	 * late frame lost the pointer's steps (Firefox ended about 160 px
+	 * short of the pointer). The late frame is still drawn.
+	 * ResizeWindowBy() takes the all-windows write lock itself, as for
+	 * AS_WINDOW_RESIZE. Record the size first so the resulting
+	 * B_WINDOW_RESIZED is not sent back as a configure. */
+	WaylandServerWindow *serverWindow
+		= static_cast<WaylandServerWindow *>(ww->server_window);
+	if (serverWindow->AnswersRequestedSize(
+			cmd->payload.set_buffer.acked_width,
+			cmd->payload.set_buffer.acked_height)) {
+		serverWindow->SetClientSize(logicalWidth, logicalHeight);
+		BRect frame = native_window->Frame();
+		int32 dw = logicalWidth - (frame.IntegerWidth() + 1);
+		int32 dh = logicalHeight - (frame.IntegerHeight() + 1);
+		if (dw != 0 || dh != 0)
+			fDesktop->ResizeWindowBy(native_window, dw, dh);
+	}
 
 	if (!fDesktop->LockSingleWindow()) {
 		ww->server_window->Unlock();
@@ -2095,6 +2137,8 @@ WaylandWindowBridge::fullscreen_window(wayland_window *ww, bool enter)
 	fDesktop->MoveWindowBy(window, target.left - frame.left,
 		target.top - frame.top);
 
+	static_cast<WaylandServerWindow *>(ww->server_window)->SetRequestedSize(
+		target.IntegerWidth() + 1, target.IntegerHeight() + 1);
 	union koan_cmd_payload payload = {};
 	payload.toplevel_configure.toplevel = ww->toplevel;
 	payload.toplevel_configure.width = target.IntegerWidth() + 1;
@@ -2145,6 +2189,8 @@ WaylandWindowBridge::zoom_window(wayland_window *ww)
 	fDesktop->MoveWindowBy(window, target.left - frame.left,
 		target.top - frame.top);
 
+	static_cast<WaylandServerWindow *>(ww->server_window)->SetRequestedSize(
+		target.IntegerWidth() + 1, target.IntegerHeight() + 1);
 	union koan_cmd_payload payload = {};
 	payload.toplevel_configure.toplevel = ww->toplevel;
 	payload.toplevel_configure.width = target.IntegerWidth() + 1;

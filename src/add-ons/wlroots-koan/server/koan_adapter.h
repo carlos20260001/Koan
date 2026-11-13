@@ -87,11 +87,19 @@ struct koan_window_callbacks {
 	 * pixels: the window's content box times 'scale' (pixels per surface
 	 * coordinate unit, fractional at 125, 150 and 175%), rounded, so the
 	 * content is width / scale x height / scale in window coordinates,
-	 * rounded to whole units. */
+	 * rounded to whole units.
+	 *
+	 * acked_width x acked_height is the size of the configure the client
+	 * acked for this frame, in window coordinates (0 x 0: the client
+	 * chooses). A frame that answers an older configure than the latest
+	 * one app_server sent is drawn, but app_server must not resize the
+	 * window to it: during a border drag that undid the user's newer
+	 * size and the window fell behind the pointer. */
 	void (*set_buffer)(void *userdata, struct koan_queue *queue,
 			   void *window, void *data,
 			   int32_t width, int32_t height, int32_t stride,
-			   uint32_t format, float scale);
+			   uint32_t format, float scale,
+			   int32_t acked_width, int32_t acked_height);
 
 	/* Set window visibility (map/unmap). Pushes a KOAN_CMD_SET_VISIBILITY
 	 * command. */

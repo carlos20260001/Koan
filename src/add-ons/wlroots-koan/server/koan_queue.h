@@ -142,6 +142,10 @@ struct koan_cmd_set_buffer {
 	int32_t stride;
 	uint32_t format;    /* DRM fourcc format (e.g. DRM_FORMAT_ARGB8888) */
 	float scale;        /* pixels per window coordinate unit (>= 1) */
+	/* Size of the configure the client acked for this frame, in window
+	 * coordinates; 0 x 0 when the client chooses (koan_adapter.h). */
+	int32_t acked_width;
+	int32_t acked_height;
 };
 
 /* KOAN_CMD_SET_VISIBILITY */

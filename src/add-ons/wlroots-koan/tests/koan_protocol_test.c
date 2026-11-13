@@ -169,6 +169,8 @@ static int32_t sFrameWidth;
 static int32_t sFrameHeight;
 static int32_t sFrameStride;
 static float sFrameScale;
+static int32_t sFrameAckedWidth;
+static int32_t sFrameAckedHeight;
 
 static void
 fake_create_window(void *userdata, struct koan_queue *queue,
@@ -218,7 +220,7 @@ fake_set_size(void *userdata, struct koan_queue *queue, void *window,
 static void
 fake_set_buffer(void *userdata, struct koan_queue *queue, void *window,
 	void *data, int32_t width, int32_t height, int32_t stride,
-	uint32_t format, float scale)
+	uint32_t format, float scale, int32_t acked_width, int32_t acked_height)
 {
 	(void)userdata;
 	(void)queue;
@@ -232,6 +234,8 @@ fake_set_buffer(void *userdata, struct koan_queue *queue, void *window,
 	sFrameHeight = height;
 	sFrameStride = stride;
 	sFrameScale = scale;
+	sFrameAckedWidth = acked_width;
+	sFrameAckedHeight = acked_height;
 	pthread_mutex_unlock(&sFrameLock);
 	atomic_fetch_add(&sSetBufferCount, 1);
 }
@@ -2521,6 +2525,87 @@ test_compose_skip(struct conn *c, struct toplevel *t)
 	settle(c);
 }
 
+/* Each frame tells app_server the size of the configure the client acked
+ * for it. During a border drag app_server sends a configure per pointer
+ * step while the client is still answering older ones; resizing the
+ * native window to those frames undid the user's newer size, and Firefox
+ * ended about 160 px short of the pointer (QEMU, 150%). With the acked
+ * size app_server follows a frame only when it answers its latest
+ * configure. Here app_server asks for 100x80; a frame committed before
+ * the client acks it still reports the old size, the frame after the ack
+ * reports 100x80. */
+static void
+push_configure_size(int32_t width, int32_t height)
+{
+	union koan_cmd_payload c = {0};
+	c.toplevel_configure.toplevel = atomic_load(&sCreatedToplevel);
+	c.toplevel_configure.width = width;
+	c.toplevel_configure.height = height;
+	c.toplevel_configure.maximized = -1;
+	c.toplevel_configure.activated = -1;
+	koan_queue_push(koan_adapter_queue(), KOAN_CMD_TOPLEVEL_CONFIGURE, &c,
+		NULL);
+}
+
+static void
+frame_acked_size(int32_t *width, int32_t *height)
+{
+	pthread_mutex_lock(&sFrameLock);
+	*width = sFrameAckedWidth;
+	*height = sFrameAckedHeight;
+	pthread_mutex_unlock(&sFrameLock);
+}
+
+static void
+test_compose_acked_size(struct conn *c, struct toplevel *t)
+{
+	int configures = t->configures;
+	push_configure_size(100, 80);
+	for (int i = 0; i < 100 && t->configures == configures; i++) {
+		settle(c);
+		usleep(2000);
+	}
+	bool configured = t->configures > configures && t->width == 100
+		&& t->height == 80;
+
+	/* Not acked yet: the frame answers the earlier configure. */
+	int before = atomic_load(&sSetBufferCount);
+	attach_color(c, t->surface, 64, 48, COLOR_CHILD);
+	wl_surface_commit(t->surface);
+	int delivered = deliveries_after(c, before);
+	int32_t w = 0, h = 0;
+	frame_acked_size(&w, &h);
+	result(configured && delivered == 1 && !(w == 100 && h == 80)
+			? ST_PASS : ST_FAIL, "compose-acked-size-stale",
+		"%s; %d deliveries, acked %dx%d (expected the earlier size, not "
+		"100x80)", configured ? "configured 100x80" : "NOT configured",
+		delivered, w, h);
+
+	xdg_surface_ack_configure(t->xdg_surface, t->configure_serial);
+	xdg_surface_set_window_geometry(t->xdg_surface, 0, 0, 100, 80);
+	before = atomic_load(&sSetBufferCount);
+	attach_color(c, t->surface, 100, 80, COLOR_ROOT);
+	wl_surface_commit(t->surface);
+	delivered = deliveries_after(c, before);
+	frame_acked_size(&w, &h);
+	result(delivered == 1 && w == 100 && h == 80 ? ST_PASS : ST_FAIL,
+		"compose-acked-size-latest", "%d deliveries, acked %dx%d (expected "
+		"100x80)", delivered, w, h);
+
+	/* Back to the 64x48 window the other compose tests expect. */
+	configures = t->configures;
+	push_configure_size(64, 48);
+	for (int i = 0; i < 100 && t->configures == configures; i++) {
+		settle(c);
+		usleep(2000);
+	}
+	xdg_surface_ack_configure(t->xdg_surface, t->configure_serial);
+	xdg_surface_set_window_geometry(t->xdg_surface, 0, 0, 64, 48);
+	attach_color(c, t->surface, 64, 48, COLOR_ROOT);
+	wl_surface_commit(t->surface);
+	deliveries_after(c, 0);
+}
+
 /* wp_viewport.set_destination sizes a surface independently of its
  * buffer: a 4 x 4 buffer can cover a 1000000 x 10 surface, and Koan
  * composes the window box at that size. Without a limit app_server
@@ -2589,6 +2674,7 @@ run_compose(void)
 	test_compose_fractional(&c, &t);
 	test_compose_occluded(&c, &t);
 	test_compose_skip(&c, &t);
+	test_compose_acked_size(&c, &t);
 	test_compose_oversize(&c, &t);
 
 	struct conn after;

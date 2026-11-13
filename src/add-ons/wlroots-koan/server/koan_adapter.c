@@ -73,6 +73,8 @@ struct koan_toplevel {
 	int32_t buffer_stride;
 	uint32_t buffer_format;
 	float buffer_scale;
+	int32_t buffer_acked_width;
+	int32_t buffer_acked_height;
 
 	/* The tree's layout when it was last composed (tree_signature()), and
 	 * whether it has been composed at all: a commit that changes neither
@@ -746,7 +748,7 @@ static void popup_ready(struct wlr_xdg_popup *popup, void *window) {
 	if (window && kp->buffer_data && g_cbs.set_buffer) {
 		g_cbs.set_buffer(g_userdata, g_queue, window, kp->buffer_data,
 			kp->buffer_width, kp->buffer_height, kp->buffer_stride,
-			DRM_FORMAT_ARGB8888, kp->buffer_scale);
+			DRM_FORMAT_ARGB8888, kp->buffer_scale, 0, 0);
 		kp->buffer_data = NULL; /* set_buffer takes it */
 	}
 	free(kp->buffer_data);
@@ -808,7 +810,7 @@ void koan_adapter_popup_committed(struct wlr_xdg_popup *popup) {
 		kp->x = x;
 		kp->y = y;
 		g_cbs.set_buffer(g_userdata, g_queue, kp->native_window, t.pixels,
-			t.width, t.height, stride, DRM_FORMAT_ARGB8888, t.scale);
+			t.width, t.height, stride, DRM_FORMAT_ARGB8888, t.scale, 0, 0);
 		return;
 	}
 	/* Keep the newest frame until the window exists. */
@@ -924,7 +926,9 @@ static int process_app_server_command(struct koan_command *cmd, void *userdata) 
 						kt->buffer_height,
 						kt->buffer_stride,
 						kt->buffer_format,
-						kt->buffer_scale);
+						kt->buffer_scale,
+						kt->buffer_acked_width,
+						kt->buffer_acked_height);
 					/* set_buffer takes ownership of the data. */
 					kt->buffer_data = NULL;
 					kt->buffer_pending = false;
@@ -1188,10 +1192,16 @@ static void deliver_buffer(struct koan_toplevel *kt) {
 	int32_t stride = width * 4;
 	uint32_t format = DRM_FORMAT_ARGB8888;
 
+	/* The configure this frame answers: wlroots applies the acked
+	 * configure's size to toplevel->current with the commit. */
+	const int32_t ackedWidth = kt->toplevel->current.width;
+	const int32_t ackedHeight = kt->toplevel->current.height;
+
 	if (kt->native_window && g_cbs.set_buffer) {
 		/* Window exists: queue the buffer immediately. */
 		g_cbs.set_buffer(g_userdata, g_queue, kt->native_window,
-			data, width, height, stride, format, t.scale);
+			data, width, height, stride, format, t.scale, ackedWidth,
+			ackedHeight);
 		/* set_buffer takes ownership of data. */
 	} else {
 		/* Window not yet created: buffer the data for later. */
@@ -1202,6 +1212,8 @@ static void deliver_buffer(struct koan_toplevel *kt) {
 		kt->buffer_stride = stride;
 		kt->buffer_format = format;
 		kt->buffer_scale = t.scale;
+		kt->buffer_acked_width = ackedWidth;
+		kt->buffer_acked_height = ackedHeight;
 		kt->buffer_pending = true;
 	}
 }
