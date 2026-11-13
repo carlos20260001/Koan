@@ -1583,12 +1583,11 @@ WaylandWindowBridge::process_set_buffer(struct koan_command *cmd)
 	/* The view takes its own reference. The bitmap is not client-visible,
 	 * so drop the manager registration and our creation reference; the
 	 * view owns it until it is replaced or destroyed. */
-	/* Clients render at the integer output scale (2 at 125 to 200%), so at
-	 * a fractional screen scale their buffer is shrunk to the screen's
-	 * density. Nearest neighbour drops whole rows and columns of it and
-	 * leaves strokes of uneven width; filter instead, as macOS and other
-	 * compositors do for surfaces not drawn at the panel's density. At a
-	 * matching density the copy stays 1:1 and unfiltered. */
+	/* A frame drawn at the screen's density (a wp_fractional_scale_v1
+	 * client, or an integer scale that matches) is copied 1:1 and
+	 * unfiltered. Any other frame (a 2x buffer at 150%) is filtered when
+	 * it is scaled: nearest neighbour drops whole rows and columns of it
+	 * and leaves strokes of uneven width. */
 	float renderScale = fDesktop->HWInterface() != NULL
 		? fDesktop->HWInterface()->RenderScaleFactor() : 1.0f;
 	uint32 bitmapOptions = fabsf(scale - renderScale) > 0.001f
