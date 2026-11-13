@@ -367,6 +367,8 @@ void koan_queue_destroy(struct koan_queue *queue);
  * the bridge writes its wake port after each push.
  * For KOAN_CMD_CREATE_WINDOW, pass a completion_sem that the receiver will
  * post once window_out is filled; the sender can wait on it.
+ * A KOAN_CMD_SET_BUFFER replaces (frees) every KOAN_CMD_SET_BUFFER for the
+ * same window still queued, and is appended at the tail.
  * Returns the queued command pointer on success, or NULL on failure.
  */
 struct koan_command *koan_queue_push(struct koan_queue *queue,

@@ -261,11 +261,38 @@ struct koan_command *koan_queue_push(struct koan_queue *q,
 	memcpy(&cmd->payload, dup, sizeof(cmd->payload));
 	free(dup);
 
+	/* A frame supersedes the same window's frame that app_server has not
+	 * drained yet: only the newest is ever shown, and a client committing
+	 * faster than app_server drains would otherwise queue one full-window
+	 * copy per commit, without bound. */
+	struct wl_list superseded;
+	wl_list_init(&superseded);
+
 	/* Append at the tail: consumers drain from the head, so commands
-	 * (frames, show/hide, destroy) are applied in the order pushed. */
+	 * (frames, show/hide, destroy) are applied in the order pushed. The
+	 * newest frame also goes to the tail, so it never overtakes a command
+	 * pushed before it. */
 	pthread_mutex_lock(&q->mutex);
+	if (type == KOAN_CMD_SET_BUFFER) {
+		struct koan_command *old, *tmp;
+		wl_list_for_each_safe(old, tmp, &q->pending, link) {
+			if (old->type == KOAN_CMD_SET_BUFFER
+					&& old->payload.set_buffer.window
+						== cmd->payload.set_buffer.window) {
+				wl_list_remove(&old->link);
+				wl_list_insert(&superseded, &old->link);
+			}
+		}
+	}
 	wl_list_insert(q->pending.prev, &cmd->link);
 	pthread_mutex_unlock(&q->mutex);
+
+	struct koan_command *old, *tmp;
+	wl_list_for_each_safe(old, tmp, &superseded, link) {
+		wl_list_remove(&old->link);
+		free_payload(&old->payload, old->type);
+		free(old);
+	}
 
 	/* Wake the Wayland thread. */
 	if (q->wake_enabled) {
