@@ -37,7 +37,11 @@ protected:
 	- a strip of tabs with adaptive widths, a minimum width, and edge stubs
 	  for tabs that do not fit;
 	- a close button inside each tab that is wide enough (always on the
-	  active tab).
+	  active tab), and on any tab while the pointer is over it;
+	- hover states (HIGHLIGHT_HOVER) for tabs, tab close buttons, window
+	  controls and overflow stubs;
+	- the dragged tab following the pointer while the others make room
+	  (SetDraggedTab()).
 
 	Dragging, reordering, detaching and joining are driven by the window
 	behaviour, see HasTabStrip(). All geometry is in logical coordinates.
@@ -59,8 +63,8 @@ public:
 									BRegion& dirty);
 
 	virtual	bool				HasTabStrip() const { return true; }
-	virtual	int32				TabStripDropIndex(int32 tab,
-									const BPoint& where) const;
+	virtual	int32				SetDraggedTab(int32 tab, float grabOffset,
+									float pointerX, BRegion* dirty);
 
 	virtual	bool				MoveTab(int32 from, int32 to, bool isMoving,
 									BRegion* updateRegion = NULL);
@@ -75,6 +79,9 @@ protected:
 				// close button inside the tab, invalid when not shown
 			bool				isStub;
 				// drawn as an overflow stub at the strip's edge
+			bool				closeAlwaysShown;
+				// otherwise tabCloseRect is only shown (and hit) while
+				// the pointer is over the tab
 	};
 
 	virtual	Decorator::Tab*		_AllocateNewTab();
@@ -120,6 +127,11 @@ protected:
 private:
 			StripTab*			_StripTabAt(int32 index) const;
 			bool				_EnsureSlots(int32 count);
+			void				_PlaceTabs();
+			void				_IncludeHoverRects(BRegion* dirty,
+									Region region, int32 tab) const;
+			bool				_IsHovered(int32 index) const;
+			bool				_IsCloseShown(const StripTab* tab) const;
 			void				_UpdatePalette(DesktopSettings& settings);
 
 			void				_DrawStripBackground(BRect invalid);
@@ -127,7 +139,8 @@ private:
 			void				_DrawTabCloseButton(StripTab* tab);
 			void				_DrawControl(Decorator::Tab* tab, BRect rect,
 									rgb_color color, int32 glyph,
-									bool pressed, bool enabled);
+									bool pressed, bool enabled,
+									bool hovered);
 			void				_DrawSeparatorAfter(int32 index);
 
 			bool				_IsActive(const Decorator::Tab* tab) const
@@ -144,6 +157,19 @@ private:
 
 	mutable	bool				fCloseHitInTab;
 				// the last close button hit was a tab's, not the control
+
+			// hover state, see SetRegionHighlight()
+			Region				fHoverRegion;
+			int32				fHoverTab;
+			bool				fHoverInTabClose;
+
+			// tab drag state, see SetDraggedTab()
+			int32				fDragTab;
+			float				fDragGrabOffset;
+			float				fDragPointerX;
+			float				fDraggedLeft;
+			int32				fDropIndex;
+			float*				fDragOffsets;
 
 			// palette, derived from the system colors in UpdateColors()
 			rgb_color			fStripColor;

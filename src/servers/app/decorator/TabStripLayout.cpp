@@ -164,6 +164,81 @@ TabStripLayout::DropIndex(const TabStripSlot* slots, int32_t count,
 }
 
 
+int32_t
+TabStripLayout::DragLayout(const TabStripSlot* slots, int32_t count,
+	int32_t movingIndex, float grabOffset, float pointerX, float* draggedLeft,
+	float* offsets)
+{
+	if (offsets != NULL) {
+		for (int32_t i = 0; i < count; i++)
+			offsets[i] = 0.0f;
+	}
+
+	if (slots == NULL || movingIndex < 0 || movingIndex >= count
+		|| !slots[movingIndex].visible || slots[movingIndex].stub) {
+		if (draggedLeft != NULL) {
+			*draggedLeft = slots != NULL && movingIndex >= 0
+				&& movingIndex < count ? slots[movingIndex].left : 0.0f;
+		}
+		return movingIndex;
+	}
+
+	// the span of the shown tabs, which the dragged tab cannot leave
+	float spanLeft = slots[movingIndex].left;
+	float spanRight = slots[movingIndex].right;
+	for (int32_t i = 0; i < count; i++) {
+		if (!slots[i].visible || slots[i].stub)
+			continue;
+		if (slots[i].left < spanLeft)
+			spanLeft = slots[i].left;
+		if (slots[i].right > spanRight)
+			spanRight = slots[i].right;
+	}
+
+	const TabStripSlot& moving = slots[movingIndex];
+	float width = moving.right - moving.left;
+	float left = roundf(pointerX - grabOffset);
+	if (left > spanRight - width)
+		left = spanRight - width;
+	if (left < spanLeft)
+		left = spanLeft;
+	if (draggedLeft != NULL)
+		*draggedLeft = left;
+
+	// The dragged tab passes a neighbour once its leading edge crosses the
+	// neighbour's middle; this also reaches the outermost slots while the
+	// tab is clamped at the end of the strip.
+	int32_t target = movingIndex;
+	for (int32_t i = movingIndex - 1; i >= 0; i--) {
+		if (!slots[i].visible || slots[i].stub
+			|| left >= (slots[i].left + slots[i].right) / 2) {
+			break;
+		}
+		target = i;
+	}
+	if (target == movingIndex) {
+		for (int32_t i = movingIndex + 1; i < count; i++) {
+			if (!slots[i].visible || slots[i].stub
+				|| left + width <= (slots[i].left + slots[i].right) / 2) {
+				break;
+			}
+			target = i;
+		}
+	}
+
+	if (offsets != NULL) {
+		// The tabs the dragged one passed take the slot next to theirs,
+		// toward the dragged tab's own slot.
+		for (int32_t i = movingIndex + 1; i <= target; i++)
+			offsets[i] = slots[i - 1].left - slots[i].left;
+		for (int32_t i = target; i < movingIndex; i++)
+			offsets[i] = slots[i + 1].left - slots[i].left;
+	}
+
+	return target;
+}
+
+
 bool
 TabStripLayout::ShouldDetach(float top, float bottom, float y,
 	float threshold)

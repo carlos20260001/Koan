@@ -259,6 +259,116 @@ TestDropIndexDoesNotEnterStubs()
 
 
 static void
+TestDraggedTabFollowsPointer()
+{
+	TabStripSlot slots[4];
+	TabStripLayout::Layout(kMetrics, 4, 0, 800, 1, 0, slots);
+	float grab = 30;
+	float left;
+
+	// No movement: the tab stays in its slot, nothing shifts.
+	float offsets[4];
+	int32_t target = TabStripLayout::DragLayout(slots, 4, 1, grab,
+		slots[1].left + grab, &left, offsets);
+	CHECK(target == 1);
+	CHECK(left == slots[1].left);
+	for (int32_t i = 0; i < 4; i++)
+		CHECK(offsets[i] == 0);
+
+	// The tab keeps the grab point under the pointer, in whole units.
+	target = TabStripLayout::DragLayout(slots, 4, 1, grab,
+		slots[1].left + grab + 17.4f, &left, NULL);
+	CHECK(left == slots[1].left + 17);
+	CHECK(target == 1);
+}
+
+
+static void
+TestDraggedTabIsClamped()
+{
+	TabStripSlot slots[4];
+	TabStripLayout::Layout(kMetrics, 4, 100, 900, 2, 0, slots);
+	float width = slots[2].right - slots[2].left;
+	float left;
+
+	int32_t target = TabStripLayout::DragLayout(slots, 4, 2, 10, -500, &left,
+		NULL);
+	CHECK(left == slots[0].left);
+	CHECK(target == 0);
+
+	target = TabStripLayout::DragLayout(slots, 4, 2, 10, 5000, &left, NULL);
+	CHECK(left == slots[3].right - width);
+	CHECK(target == 3);
+
+	// With overflow the dragged tab stays out of the stubs.
+	const int32_t kCount = 10;
+	TabStripSlot many[kCount];
+	int32_t first = TabStripLayout::Layout(kMetrics, kCount, 0, 330, 5, 4,
+		many);
+	CHECK(first > 0 && many[first - 1].stub);
+	TabStripLayout::DragLayout(many, kCount, 5, 10, -500, &left, NULL);
+	CHECK(left == many[first].left);
+	CHECK(left >= many[first - 1].right);
+}
+
+
+static void
+TestDropSlotAndNeighboursShift()
+{
+	TabStripSlot slots[5];
+	TabStripLayout::Layout(kMetrics, 5, 0, 1000, 1, 0, slots);
+	float width = slots[1].right - slots[1].left;
+	float grab = floorf(width / 2);
+		// grabbed in the middle: the edges are grab and width - grab away
+	float offsets[5];
+	float left;
+
+	// The right edge just short of the next tab's middle: no change.
+	float mid2 = (slots[2].left + slots[2].right) / 2;
+	int32_t target = TabStripLayout::DragLayout(slots, 5, 1, grab,
+		mid2 - (width - grab) - 1, &left, offsets);
+	CHECK(target == 1);
+	for (int32_t i = 0; i < 5; i++)
+		CHECK(offsets[i] == 0);
+
+	// The right edge just past the next tab's middle: one step.
+	target = TabStripLayout::DragLayout(slots, 5, 1, grab,
+		mid2 - (width - grab) + 1, &left, offsets);
+	CHECK(target == 2);
+	CHECK(offsets[2] == slots[1].left - slots[2].left);
+
+	// Past the middle of tab 3: tabs 2 and 3 move one slot to the left.
+	float mid3 = (slots[3].left + slots[3].right) / 2;
+	target = TabStripLayout::DragLayout(slots, 5, 1, grab,
+		mid3 - (width - grab) + 1, &left, offsets);
+	CHECK(target == 3);
+	CHECK(offsets[0] == 0);
+	CHECK(offsets[1] == 0);
+	CHECK(offsets[2] == slots[1].left - slots[2].left);
+	CHECK(offsets[3] == slots[2].left - slots[3].left);
+	CHECK(offsets[4] == 0);
+	// the shifted tabs close up without overlapping
+	CHECK(slots[2].left + offsets[2] == slots[1].left);
+	CHECK(slots[3].left + offsets[3] == slots[2].left);
+
+	// Back to the left of tab 0: tab 0 moves one slot to the right.
+	float mid0 = (slots[0].left + slots[0].right) / 2;
+	target = TabStripLayout::DragLayout(slots, 5, 1, grab, mid0 + grab - 1,
+		&left, offsets);
+	CHECK(target == 0);
+	CHECK(offsets[0] == slots[1].left - slots[0].left);
+	for (int32_t i = 1; i < 5; i++)
+		CHECK(offsets[i] == 0);
+
+	// Bad input changes nothing.
+	CHECK(TabStripLayout::DragLayout(slots, 5, 7, 0, 0, &left, offsets)
+		== 7);
+	for (int32_t i = 0; i < 5; i++)
+		CHECK(offsets[i] == 0);
+}
+
+
+static void
 TestDetachThreshold()
 {
 	// Strip from y=10 to y=38, threshold 20.
@@ -303,6 +413,9 @@ main()
 	TestFirstVisibleIsStable();
 	TestDropIndex();
 	TestDropIndexDoesNotEnterStubs();
+	TestDraggedTabFollowsPointer();
+	TestDraggedTabIsClamped();
+	TestDropSlotAndNeighboursShift();
 	TestDetachThreshold();
 	TestDegenerateInput();
 

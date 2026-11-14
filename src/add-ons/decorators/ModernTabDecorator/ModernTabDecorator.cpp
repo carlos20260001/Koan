@@ -124,7 +124,8 @@ ModernTabDecorator::StripTab::StripTab()
 	:
 	Decorator::Tab(),
 	tabCloseRect(invalid_rect()),
-	isStub(false)
+	isStub(false),
+	closeAlwaysShown(false)
 {
 }
 
@@ -140,7 +141,16 @@ ModernTabDecorator::ModernTabDecorator(DesktopSettings& settings, BRect frame,
 	fSlotCapacity(0),
 	fFirstVisibleTab(0),
 	fStripHeight(kMinStripHeight),
-	fCloseHitInTab(false)
+	fCloseHitInTab(false),
+	fHoverRegion(REGION_NONE),
+	fHoverTab(-1),
+	fHoverInTabClose(false),
+	fDragTab(-1),
+	fDragGrabOffset(0),
+	fDragPointerX(0),
+	fDraggedLeft(0),
+	fDropIndex(-1),
+	fDragOffsets(NULL)
 {
 	fMetrics.minTabWidth = kMinTabWidth;
 	fMetrics.maxTabWidth = kMaxTabWidth;
@@ -158,6 +168,7 @@ ModernTabDecorator::ModernTabDecorator(DesktopSettings& settings, BRect frame,
 ModernTabDecorator::~ModernTabDecorator()
 {
 	free(fSlots);
+	free(fDragOffsets);
 }
 
 
@@ -212,7 +223,7 @@ ModernTabDecorator::RegionAt(BPoint where, int32& tabIndex) const
 
 			for (int32 i = 0; i < fTabList.CountItems(); i++) {
 				StripTab* tab = _StripTabAt(i);
-				if (tab->tabCloseRect.Contains(where)) {
+				if (_IsCloseShown(tab) && tab->tabCloseRect.Contains(where)) {
 					tabIndex = i;
 					fCloseHitInTab = true;
 					return REGION_CLOSE_BUTTON;
@@ -238,7 +249,40 @@ bool
 ModernTabDecorator::SetRegionHighlight(Region region, uint8 highlight,
 	BRegion* dirty, int32 tab)
 {
-	return SATDecorator::SetRegionHighlight(region, highlight, dirty, tab);
+	if (highlight != HIGHLIGHT_HOVER)
+		return SATDecorator::SetRegionHighlight(region, highlight, dirty, tab);
+
+	// The hover state: one region of one tab at a time. Only what the strip
+	// draws differently counts; the borders have no hover look.
+	AutoWriteLocker _(fLocker);
+
+	switch (region) {
+		case REGION_TAB:
+		case REGION_CLOSE_BUTTON:
+		case REGION_MINIMIZE_BUTTON:
+		case REGION_ZOOM_BUTTON:
+			if (_StripTabAt(tab) != NULL)
+				break;
+			// fall through
+		default:
+			region = REGION_NONE;
+			tab = -1;
+			break;
+	}
+
+	bool inTabClose = region == REGION_CLOSE_BUTTON && fCloseHitInTab;
+	if (region == fHoverRegion && tab == fHoverTab
+		&& inTabClose == fHoverInTabClose) {
+		return true;
+	}
+
+	// only the tabs and buttons whose look changes are redrawn
+	_IncludeHoverRects(dirty, fHoverRegion, fHoverTab);
+	fHoverRegion = region;
+	fHoverTab = tab;
+	fHoverInTabClose = inTabClose;
+	_IncludeHoverRects(dirty, fHoverRegion, fHoverTab);
+	return true;
 }
 
 
@@ -266,15 +310,38 @@ ModernTabDecorator::ExtendDirtyRegion(Region region, BRegion& dirty)
 
 
 int32
-ModernTabDecorator::TabStripDropIndex(int32 tab, const BPoint& where) const
+ModernTabDecorator::SetDraggedTab(int32 tab, float grabOffset, float pointerX,
+	BRegion* dirty)
 {
-	AutoReadLocker _(fLocker);
+	AutoWriteLocker _(fLocker);
 
 	int32 count = fTabList.CountItems();
-	if (fSlots == NULL || count > fSlotCapacity)
-		return tab;
+	bool valid = tab >= 0 && tab < count && fTitleBarRect.IsValid()
+		&& fSlots != NULL && count <= fSlotCapacity;
+	if (!valid) {
+		if (fDragTab >= 0) {
+			fDragTab = -1;
+			fDropIndex = -1;
+			_PlaceTabs();
+			if (dirty != NULL) {
+				dirty->Include(fTitleBarRect);
+				dirty->Include(fTopBorder);
+			}
+		}
+		return tab < 0 ? -1 : tab;
+	}
 
-	return TabStripLayout::DropIndex(fSlots, count, tab, where.x);
+	fDragTab = tab;
+	fDragGrabOffset = grabOffset;
+	fDragPointerX = pointerX;
+	_PlaceTabs();
+
+	// the strip, and the top border the active tab flows into
+	if (dirty != NULL) {
+		dirty->Include(fTitleBarRect);
+		dirty->Include(fTopBorder);
+	}
+	return fDropIndex;
 }
 
 
@@ -288,6 +355,10 @@ ModernTabDecorator::MoveTab(int32 from, int32 to, bool isMoving,
 		return false;
 
 	AutoWriteLocker _(fLocker);
+	// tab indexes changed: a running drag restarts with the next move
+	fDragTab = -1;
+	fHoverRegion = REGION_NONE;
+	fHoverTab = -1;
 	_DoLayout();
 	if (updateRegion != NULL && fTitleBarRect.IsValid())
 		updateRegion->Include(fTitleBarRect);
@@ -414,17 +485,25 @@ ModernTabDecorator::_DoLayout()
 	const float minTabSize = stripLeft - fTitleBarRect.left + kMinTabWidth
 		+ kStripEndMargin;
 
-	if (_EnsureSlots(count)) {
+	const bool haveSlots = _EnsureSlots(count);
+	if (haveSlots) {
 		fFirstVisibleTab = TabStripLayout::Layout(fMetrics, count, stripLeft,
 			stripRight, fTabList.IndexOf(fTopTab), fFirstVisibleTab, fSlots);
 	}
 
-	const float tabTop = fTitleBarRect.top + kTabTopInset;
+	if (fDragTab >= count)
+		fDragTab = -1;
+	if (fHoverTab >= count) {
+		fHoverRegion = REGION_NONE;
+		fHoverTab = -1;
+	}
+
 	for (int32 i = 0; i < count; i++) {
 		StripTab* tab = _StripTabAt(i);
 		tab->minTabSize = minTabSize;
 		tab->maxTabSize = kMaxTabWidth;
 		tab->textOffset = kTabPadding;
+		tab->closeAlwaysShown = false;
 
 		if (_IsActive(tab)) {
 			tab->closeRect = closeRect;
@@ -432,34 +511,20 @@ ModernTabDecorator::_DoLayout()
 			tab->zoomRect = zoomRect;
 		}
 
-		if (fSlots == NULL || !fSlots[i].visible) {
-			tab->truncatedTitle = "";
-			tab->truncatedTitleLength = 0;
+		tab->truncatedTitle = "";
+		tab->truncatedTitleLength = 0;
+		if (!haveSlots || !fSlots[i].visible || fSlots[i].stub)
 			continue;
-		}
 
+		// A tab narrower than the close button rule shows its close button
+		// only on hover, over the end of the title.
 		const TabStripSlot& slot = fSlots[i];
-		tab->tabRect.Set(slot.left, tabTop, slot.right - 1,
-			fTitleBarRect.bottom);
-		tab->tabOffset = (uint32)(slot.left - fTitleBarRect.left);
-		tab->isStub = slot.stub;
-		if (tab->isStub) {
-			tab->truncatedTitle = "";
-			tab->truncatedTitleLength = 0;
-			continue;
+		tab->closeAlwaysShown = slot.showsCloseButton;
+		float titleWidth = slot.right - slot.left - 2 * kTabPadding;
+		if (tab->closeAlwaysShown) {
+			titleWidth -= kTabCloseSize + kTabCloseRightInset - kTabPadding
+				+ kTitleCloseGap;
 		}
-
-		float titleRight = tab->tabRect.right - kTabPadding;
-		if (slot.showsCloseButton) {
-			float closeTop = roundf(tabTop
-				+ (fTitleBarRect.bottom - tabTop + 1 - kTabCloseSize) / 2);
-			float closeRight = tab->tabRect.right - kTabCloseRightInset;
-			tab->tabCloseRect.Set(closeRight - kTabCloseSize + 1, closeTop,
-				closeRight, closeTop + kTabCloseSize - 1);
-			titleRight = tab->tabCloseRect.left - kTitleCloseGap;
-		}
-
-		float titleWidth = titleRight - (tab->tabRect.left + kTabPadding);
 		if (titleWidth < 0)
 			titleWidth = 0;
 		tab->truncatedTitle = Title(tab) != NULL ? Title(tab) : "";
@@ -467,6 +532,8 @@ ModernTabDecorator::_DoLayout()
 			titleWidth);
 		tab->truncatedTitleLength = tab->truncatedTitle.Length();
 	}
+
+	_PlaceTabs();
 }
 
 
@@ -509,18 +576,24 @@ ModernTabDecorator::_DrawTabs(BRect invalid)
 
 	_DrawStripBackground(invalid);
 
+	// the active tab goes over the others, a dragged tab over everything
 	Decorator::Tab* active = NULL;
+	Decorator::Tab* dragged = fTabList.ItemAt(fDragTab);
 	for (int32 i = 0; i < fTabList.CountItems(); i++) {
 		Decorator::Tab* tab = fTabList.ItemAt(i);
 		if (_IsActive(tab)) {
 			active = tab;
 			continue;
 		}
-		if (invalid.Intersects(tab->tabRect))
+		if (tab != dragged && invalid.Intersects(tab->tabRect))
 			_DrawTab(tab, invalid);
 	}
-	if (active != NULL && invalid.Intersects(active->tabRect))
+	if (active != NULL && active != dragged
+		&& invalid.Intersects(active->tabRect)) {
 		_DrawTab(active, invalid);
+	}
+	if (dragged != NULL && invalid.Intersects(dragged->tabRect))
+		_DrawTab(dragged, invalid);
 
 	if (fTopTab != NULL)
 		_DrawButtons(fTopTab, invalid);
@@ -537,10 +610,14 @@ ModernTabDecorator::_DrawTab(Decorator::Tab* _tab, BRect invalid)
 	bool focused = _IsFocusedStack();
 	rgb_color strip = focused ? fStripColor : fInactiveStripColor;
 	BRect rect = tab->tabRect;
+	int32 index = fTabList.IndexOf(tab);
 
-	// start from the strip, this may be a lone redraw of one tab
-	fDrawingEngine->FillRect(BRect(rect.left, fTitleBarRect.top, rect.right,
-		fTitleBarRect.bottom), strip);
+	// start from the strip, this may be a lone redraw of one tab (but not
+	// while dragging: tabs overlap then, and the strip was just drawn)
+	if (fDragTab < 0) {
+		fDrawingEngine->FillRect(BRect(rect.left, fTitleBarRect.top,
+			rect.right, fTitleBarRect.bottom), strip);
+	}
 
 	if (tab->isStub) {
 		_DrawStub(tab);
@@ -565,7 +642,15 @@ ModernTabDecorator::_DrawTab(Decorator::Tab* _tab, BRect invalid)
 				fDrawingEngine->FillRect(accent, fAccentColor);
 		}
 	} else {
-		// inactive tabs sit flat on the strip, above its bottom line
+		// inactive tabs sit flat on the strip, above its bottom line; the
+		// one under the pointer gets a faint surface
+		if (_IsHovered(index)) {
+			fDrawingEngine->SetHighColor(blend(strip, fTextColor, 16));
+			fDrawingEngine->DrawRoundRect(BRect(rect.left, rect.top,
+				rect.right, rect.bottom - 1), kTabRadius, kTabRadius, true);
+			fDrawingEngine->FillRect(BRect(rect.left, rect.top + kTabRadius,
+				rect.right, rect.bottom - 1), blend(strip, fTextColor, 16));
+		}
 		fDrawingEngine->StrokeLine(BPoint(rect.left, fTitleBarRect.bottom),
 			BPoint(rect.right, fTitleBarRect.bottom), fSeparatorColor);
 	}
@@ -581,7 +666,6 @@ ModernTabDecorator::_DrawTab(Decorator::Tab* _tab, BRect invalid)
 		_DrawTabCloseButton(tab);
 	}
 
-	int32 index = fTabList.IndexOf(tab);
 	_DrawSeparatorAfter(index - 1);
 	_DrawSeparatorAfter(index);
 
@@ -600,6 +684,8 @@ ModernTabDecorator::_DrawTitle(Decorator::Tab* tab, BRect rect)
 	bool active = _IsActive(tab);
 	rgb_color background = active ? fSurfaceColor
 		: (focused ? fStripColor : fInactiveStripColor);
+	if (!active && _IsHovered(fTabList.IndexOf(tab)))
+		background = blend(background, fTextColor, 16);
 	rgb_color text = active && focused ? fTextColor : fInactiveTextColor;
 
 	font_height fontHeight;
@@ -626,18 +712,25 @@ ModernTabDecorator::_DrawButtons(Decorator::Tab* tab, const BRect& invalid)
 	if (!_IsActive(tab))
 		return;
 
+	int32 index = fTabList.IndexOf(tab);
+	bool hoveredTab = fHoverTab == index;
+
 	if (invalid.Intersects(tab->closeRect)) {
 		_DrawControl(tab, tab->closeRect, fCloseColor, GLYPH_CLOSE,
 			tab->closePressed && !fCloseHitInTab,
-			(tab->flags & B_NOT_CLOSABLE) == 0);
+			(tab->flags & B_NOT_CLOSABLE) == 0,
+			hoveredTab && fHoverRegion == REGION_CLOSE_BUTTON
+				&& !fHoverInTabClose);
 	}
 	if (invalid.Intersects(tab->minimizeRect)) {
 		_DrawControl(tab, tab->minimizeRect, fMinimizeColor, GLYPH_MINIMIZE,
-			tab->minimizePressed, (tab->flags & B_NOT_MINIMIZABLE) == 0);
+			tab->minimizePressed, (tab->flags & B_NOT_MINIMIZABLE) == 0,
+			hoveredTab && fHoverRegion == REGION_MINIMIZE_BUTTON);
 	}
 	if (invalid.Intersects(tab->zoomRect)) {
 		_DrawControl(tab, tab->zoomRect, fZoomColor, GLYPH_ZOOM,
-			tab->zoomPressed, (tab->flags & B_NOT_ZOOMABLE) == 0);
+			tab->zoomPressed, (tab->flags & B_NOT_ZOOMABLE) == 0,
+			hoveredTab && fHoverRegion == REGION_ZOOM_BUTTON);
 	}
 }
 
@@ -713,6 +806,8 @@ ModernTabDecorator::_MoveBy(BPoint offset)
 			fSlots[i].right += offset.x;
 		}
 	}
+	fDraggedLeft += offset.x;
+	fDragPointerX += offset.x;
 
 	fFrame.OffsetBy(offset);
 	fTitleBarRect.OffsetBy(offset);
@@ -753,6 +848,11 @@ bool
 ModernTabDecorator::_AddTab(DesktopSettings& settings, int32 index,
 	BRegion* updateRegion)
 {
+	// tab indexes change: drop index based state
+	fDragTab = -1;
+	fHoverRegion = REGION_NONE;
+	fHoverTab = -1;
+
 	_UpdateFont(settings);
 	_DoLayout();
 	_DoOutlineLayout();
@@ -767,6 +867,11 @@ bool
 ModernTabDecorator::_RemoveTab(int32 index, BRegion* updateRegion)
 {
 	BRect oldTitleBar = fTitleBarRect;
+
+	// tab indexes change: drop index based state
+	fDragTab = -1;
+	fHoverRegion = REGION_NONE;
+	fHoverTab = -1;
 
 	_DoLayout();
 	_DoOutlineLayout();
@@ -856,6 +961,11 @@ ModernTabDecorator::_EnsureSlots(int32 count)
 
 	// grow in steps, layout runs on every resize
 	int32 capacity = max_c(count, max_c(8, fSlotCapacity * 2));
+	float* offsets = (float*)realloc(fDragOffsets, capacity * sizeof(float));
+	if (offsets == NULL)
+		return fSlots != NULL && count <= fSlotCapacity;
+	fDragOffsets = offsets;
+
 	TabStripSlot* slots = (TabStripSlot*)realloc(fSlots,
 		capacity * sizeof(TabStripSlot));
 	if (slots == NULL)
@@ -864,6 +974,120 @@ ModernTabDecorator::_EnsureSlots(int32 count)
 	fSlots = slots;
 	fSlotCapacity = capacity;
 	return true;
+}
+
+
+/*!	Places the tab rectangles from the slots, shifted by a running tab drag:
+	the dragged tab under the pointer, the others making room. Only the
+	positions change, so this is cheap enough for every pointer move.
+*/
+void
+ModernTabDecorator::_PlaceTabs()
+{
+	const int32 count = fTabList.CountItems();
+	if (!fTitleBarRect.IsValid() || fSlots == NULL || count > fSlotCapacity)
+		return;
+
+	bool dragging = fDragTab >= 0 && fDragTab < count;
+	if (dragging) {
+		fDropIndex = TabStripLayout::DragLayout(fSlots, count, fDragTab,
+			fDragGrabOffset, fDragPointerX, &fDraggedLeft, fDragOffsets);
+	} else
+		fDropIndex = -1;
+
+	const float tabTop = fTitleBarRect.top + kTabTopInset;
+	for (int32 i = 0; i < count; i++) {
+		StripTab* tab = _StripTabAt(i);
+		const TabStripSlot& slot = fSlots[i];
+		if (!slot.visible) {
+			tab->tabRect = invalid_rect();
+			tab->tabCloseRect = invalid_rect();
+			tab->isStub = false;
+			continue;
+		}
+
+		float left = slot.left;
+		float right = slot.right;
+		if (dragging && i == fDragTab) {
+			right = fDraggedLeft + (right - left);
+			left = fDraggedLeft;
+		} else if (dragging && fDragOffsets != NULL) {
+			left += fDragOffsets[i];
+			right += fDragOffsets[i];
+		}
+
+		tab->tabRect.Set(left, tabTop, right - 1, fTitleBarRect.bottom);
+		tab->tabOffset = (uint32)(slot.left - fTitleBarRect.left);
+		tab->isStub = slot.stub;
+
+		if (!slot.stub
+			&& right - left >= 2 * kTabPadding + kTabCloseSize) {
+			float closeTop = roundf(tabTop
+				+ (fTitleBarRect.bottom - tabTop + 1 - kTabCloseSize) / 2);
+			float closeRight = tab->tabRect.right - kTabCloseRightInset;
+			tab->tabCloseRect.Set(closeRight - kTabCloseSize + 1, closeTop,
+				closeRight, closeTop + kTabCloseSize - 1);
+		} else
+			tab->tabCloseRect = invalid_rect();
+	}
+}
+
+
+void
+ModernTabDecorator::_IncludeHoverRects(BRegion* dirty, Region region,
+	int32 index) const
+{
+	StripTab* tab = _StripTabAt(index);
+	if (dirty == NULL || tab == NULL)
+		return;
+
+	switch (region) {
+		case REGION_TAB:
+			if (tab->tabRect.IsValid())
+				dirty->Include(tab->tabRect);
+			break;
+
+		case REGION_CLOSE_BUTTON:
+			// either the window control or the tab's own button
+			if (tab->closeRect.IsValid())
+				dirty->Include(tab->closeRect);
+			if (tab->tabRect.IsValid())
+				dirty->Include(tab->tabRect);
+			break;
+
+		case REGION_MINIMIZE_BUTTON:
+			if (tab->minimizeRect.IsValid())
+				dirty->Include(tab->minimizeRect);
+			break;
+
+		case REGION_ZOOM_BUTTON:
+			if (tab->zoomRect.IsValid())
+				dirty->Include(tab->zoomRect);
+			break;
+
+		default:
+			break;
+	}
+}
+
+
+//! Whether the pointer is over the tab at \a index (or its close button).
+bool
+ModernTabDecorator::_IsHovered(int32 index) const
+{
+	if (index < 0 || index != fHoverTab || fDragTab >= 0)
+		return false;
+	return fHoverRegion == REGION_TAB
+		|| (fHoverRegion == REGION_CLOSE_BUTTON && fHoverInTabClose);
+}
+
+
+bool
+ModernTabDecorator::_IsCloseShown(const StripTab* tab) const
+{
+	if (!tab->tabCloseRect.IsValid() || tab->isStub)
+		return false;
+	return tab->closeAlwaysShown || _IsHovered(fTabList.IndexOf(tab));
 }
 
 
@@ -920,7 +1144,10 @@ ModernTabDecorator::_DrawStub(StripTab* tab)
 
 	bool focused = _IsFocusedStack();
 	rgb_color strip = focused ? fStripColor : fInactiveStripColor;
-	fDrawingEngine->SetHighColor(blend(strip, fTextColor, 28));
+	bool hovered = fHoverRegion == REGION_TAB
+		&& fHoverTab == fTabList.IndexOf(tab);
+	fDrawingEngine->SetHighColor(blend(strip, fTextColor,
+		hovered ? 48 : 28));
 	fDrawingEngine->DrawRoundRect(rect, 4, 4, true);
 
 	// a chevron pointing to where the hidden tabs are
@@ -941,16 +1168,31 @@ void
 ModernTabDecorator::_DrawTabCloseButton(StripTab* tab)
 {
 	BRect rect = tab->tabCloseRect;
-	if (!rect.IsValid())
+	if (!_IsCloseShown(tab))
 		return;
 
+	int32 index = fTabList.IndexOf(tab);
 	bool focused = _IsFocusedStack();
 	bool active = _IsActive(tab);
 	rgb_color background = active ? fSurfaceColor
 		: (focused ? fStripColor : fInactiveStripColor);
+	if (!active && _IsHovered(index))
+		background = blend(background, fTextColor, 16);
 
+	if (!tab->closeAlwaysShown) {
+		// shown on hover only: cover the end of the title
+		BRect cover(rect.left - kTitleCloseGap, tab->tabRect.top + 2,
+			tab->tabRect.right - 2, tab->tabRect.bottom - 2);
+		fDrawingEngine->FillRect(cover, background);
+	}
+
+	bool hovered = fHoverRegion == REGION_CLOSE_BUTTON && fHoverInTabClose
+		&& fHoverTab == index;
 	if (tab->closePressed && fCloseHitInTab) {
-		fDrawingEngine->SetHighColor(blend(background, fTextColor, 60));
+		fDrawingEngine->SetHighColor(blend(background, fTextColor, 70));
+		fDrawingEngine->DrawRoundRect(rect, 4, 4, true);
+	} else if (hovered) {
+		fDrawingEngine->SetHighColor(blend(background, fTextColor, 40));
 		fDrawingEngine->DrawRoundRect(rect, 4, 4, true);
 	}
 
@@ -967,7 +1209,7 @@ ModernTabDecorator::_DrawTabCloseButton(StripTab* tab)
 
 void
 ModernTabDecorator::_DrawControl(Decorator::Tab* tab, BRect rect,
-	rgb_color color, int32 glyph, bool pressed, bool enabled)
+	rgb_color color, int32 glyph, bool pressed, bool enabled, bool hovered)
 {
 	if (!rect.IsValid())
 		return;
@@ -978,15 +1220,21 @@ ModernTabDecorator::_DrawControl(Decorator::Tab* tab, BRect rect,
 	// background behind the round control
 	fDrawingEngine->FillRect(rect, strip);
 
-	if (!enabled || !focused) {
-		// neutral, so only the focused stack's controls draw attention
+	// Controls of a stack without focus are neutral, so only the focused
+	// stack's controls draw attention, until the pointer is over one.
+	bool colored = enabled && (focused || hovered);
+	if (!colored) {
 		rgb_color neutral = blend(strip, fTextColor, enabled ? 60 : 30);
 		fDrawingEngine->SetHighColor(neutral);
 		fDrawingEngine->DrawEllipse(rect, true);
 		if (!enabled)
 			return;
 	} else {
-		rgb_color fill = pressed ? tint_color(color, B_DARKEN_2_TINT) : color;
+		rgb_color fill = color;
+		if (pressed)
+			fill = tint_color(color, B_DARKEN_2_TINT);
+		else if (hovered)
+			fill = tint_color(color, B_LIGHTEN_1_TINT);
 		fDrawingEngine->SetHighColor(fill);
 		fDrawingEngine->DrawEllipse(rect, true);
 		fDrawingEngine->SetHighColor(tint_color(fill, B_DARKEN_1_TINT));
@@ -994,7 +1242,7 @@ ModernTabDecorator::_DrawControl(Decorator::Tab* tab, BRect rect,
 	}
 
 	// a small glyph says what the control does
-	rgb_color ink = focused ? tint_color(color, B_DARKEN_4_TINT)
+	rgb_color ink = colored ? tint_color(color, B_DARKEN_4_TINT)
 		: blend(strip, fTextColor, 120);
 	float cx = floorf((rect.left + rect.right) / 2) + 0.5f;
 	float cy = floorf((rect.top + rect.bottom) / 2) + 0.5f;
@@ -1023,7 +1271,10 @@ ModernTabDecorator::_DrawControl(Decorator::Tab* tab, BRect rect,
 void
 ModernTabDecorator::_DrawSeparatorAfter(int32 index)
 {
-	// a short divider between two inactive, fully shown tabs
+	// a short divider between two inactive, fully shown tabs; none while
+	// dragging, when the tabs are on the move
+	if (fDragTab >= 0)
+		return;
 	StripTab* tab = _StripTabAt(index);
 	StripTab* next = _StripTabAt(index + 1);
 	if (tab == NULL || next == NULL)

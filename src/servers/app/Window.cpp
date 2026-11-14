@@ -1071,6 +1071,14 @@ Window::ModifiersChanged(int32 modifiers)
 }
 
 
+void
+Window::DecoratorHoverLost()
+{
+	if (fWindowBehaviour.IsSet())
+		fWindowBehaviour->DecoratorHoverLost();
+}
+
+
 // #pragma mark -
 
 

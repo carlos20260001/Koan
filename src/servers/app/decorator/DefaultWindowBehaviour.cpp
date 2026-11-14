@@ -402,13 +402,18 @@ struct DefaultWindowBehaviour::SlideTabState : MouseTrackingState {
 
 /*!	Dragging a tab of a tab-strip decorator (see Decorator::HasTabStrip()).
 
-	While the window shares its stack with others, moving the pointer along
-	the strip reorders its tab; the windows themselves stay where they are.
-	Moving the pointer out of the strip by more than kTabDetachThreshold
-	detaches the window from the stack, and it then follows the pointer. A
-	window that is alone, from the start or after detaching, moves like with
-	DragState; releasing it while the pointer is over another stack's tab
-	strip joins that stack.
+	While the window shares its stack with others, its tab follows the
+	pointer along the strip and the other tabs move aside to show where it
+	will land (drawn by the decorator, see Decorator::SetDraggedTab()); on
+	release the window takes that position in the stack. No window moves
+	or is recreated for this. Moving the pointer out of the strip by more
+	than kTabDetachThreshold detaches the window from the stack, and it then
+	follows the pointer. A window that is alone, from the start or after
+	detaching, moves like with DragState; releasing it while the pointer is
+	over another stack's tab strip joins that stack.
+
+	The window receives all mouse events until the button is released (the
+	pointer leaves its tab while dragging).
 */
 struct DefaultWindowBehaviour::TabDragState : MouseTrackingState {
 	TabDragState(DefaultWindowBehaviour& behavior, BPoint where,
@@ -418,6 +423,8 @@ struct DefaultWindowBehaviour::TabDragState : MouseTrackingState {
 			minimizeCheckOnMouseUp),
 		fDragging(false),
 		fStackKeyHeld(false),
+		fTabDragActive(false),
+		fDropIndex(-1),
 		fGrabOffset(B_ORIGIN)
 	{
 		::Decorator* decorator = fWindow->Decorator();
@@ -436,6 +443,11 @@ struct DefaultWindowBehaviour::TabDragState : MouseTrackingState {
 	virtual void EnterState(State* previousState)
 	{
 		MouseTrackingState::EnterState(previousState);
+
+		// Keep the events while the pointer is over other windows' tabs or
+		// outside the window; the mouse filter releases this on mouse up.
+		fDesktop->SetMouseEventWindow(fWindow);
+
 		if (!_IsStacked())
 			_BeginMoving();
 	}
@@ -443,6 +455,7 @@ struct DefaultWindowBehaviour::TabDragState : MouseTrackingState {
 	virtual void ExitState(State* nextState)
 	{
 		MouseTrackingState::ExitState(nextState);
+		_EndTabDrag();
 		fBehavior.ClearStackCandidates();
 		if (fDragging) {
 			fDragging = false;
@@ -469,9 +482,18 @@ struct DefaultWindowBehaviour::TabDragState : MouseTrackingState {
 	virtual void MouseUp(BMessage* message, BPoint where)
 	{
 		int32 buttons = message->FindInt32("buttons");
-		if ((buttons & fMouseButton) == 0 && fDragging && !fStackKeyHeld
-			&& fBehavior.JoinStackCandidates()) {
-			fDesktop->ActivateWindow(fWindow);
+		if ((buttons & fMouseButton) == 0) {
+			if (fTabDragActive) {
+				// the window takes the slot the tab was dropped on
+				int32 target = fDropIndex;
+				int32 index = fWindow->PositionInStack();
+				_EndTabDrag();
+				if (target >= 0 && target != index)
+					fDesktop->MoveWindowInStack(fWindow, target, false);
+			} else if (fDragging && !fStackKeyHeld
+				&& fBehavior.JoinStackCandidates()) {
+				fDesktop->ActivateWindow(fWindow);
+			}
 		}
 
 		MouseTrackingState::MouseUp(message, where);
@@ -514,6 +536,7 @@ private:
 	{
 		if (fDragging)
 			return;
+		_EndTabDrag();
 		fDesktop->BeginWindowDrag();
 		fDragging = true;
 	}
@@ -527,19 +550,49 @@ private:
 		BRect strip = decorator->TitleBarRect();
 		if (TabStripLayout::ShouldDetach(strip.top, strip.bottom, where.y,
 				kTabDetachThreshold)) {
-			if ((fWindow->Flags() & B_NOT_MOVABLE) != 0
-				|| !fBehavior.DetachFromStack()) {
+			if ((fWindow->Flags() & B_NOT_MOVABLE) != 0)
 				return;
-			}
+			// the tab goes back into its slot before the window leaves
+			_EndTabDrag();
+			if (!fBehavior.DetachFromStack())
+				return;
 			_BeginMoving();
 			_FollowPointer(where);
 			return;
 		}
 
 		int32 index = fWindow->PositionInStack();
-		int32 target = decorator->TabStripDropIndex(index, where);
-		if (target >= 0 && target != index)
-			fDesktop->MoveWindowInStack(fWindow, target, true);
+		if (index < 0)
+			return;
+
+		BRegion dirty;
+		fDropIndex = decorator->SetDraggedTab(index, fGrabOffset.x, where.x,
+			&dirty);
+		fTabDragActive = true;
+		_ProcessDirty(dirty);
+	}
+
+	//! Puts the dragged tab back into the strip's layout.
+	void _EndTabDrag()
+	{
+		if (!fTabDragActive)
+			return;
+		fTabDragActive = false;
+		fDropIndex = -1;
+
+		::Decorator* decorator = fWindow->Decorator();
+		if (decorator == NULL)
+			return;
+
+		BRegion dirty;
+		decorator->SetDraggedTab(-1, 0, 0, &dirty);
+		_ProcessDirty(dirty);
+	}
+
+	void _ProcessDirty(const BRegion& dirty)
+	{
+		if (dirty.CountRects() > 0)
+			fWindow->TopLayerStackWindow()->ProcessDirtyRegion(dirty);
 	}
 
 	//! Moves the just detached window so the pointer holds its tab at the
@@ -587,6 +640,8 @@ private:
 private:
 	bool	fDragging;
 	bool	fStackKeyHeld;
+	bool	fTabDragActive;
+	int32	fDropIndex;
 	BPoint	fGrabOffset;
 };
 
@@ -988,6 +1043,9 @@ DefaultWindowBehaviour::MouseDown(BMessage* message, BPoint where,
 		}
 	}
 
+	// a press ends the hover; the pressed state is drawn instead
+	_SetDecoratorHover(Decorator::REGION_NONE, -1);
+
 	// if a state is active, let it do the job
 	if (fState.IsSet()) {
 		bool unhandled = false;
@@ -1231,8 +1289,11 @@ DefaultWindowBehaviour::MouseMoved(BMessage* message, BPoint where, bool isFake)
 		fState->MouseMoved(message, where, isFake);
 	} else {
 		// If the window modifiers are hold, enter the window management state.
-		if (_IsWindowModifier(message->FindInt32("modifiers")))
+		if (_IsWindowModifier(message->FindInt32("modifiers"))) {
+			_SetDecoratorHover(Decorator::REGION_NONE, -1);
 			_NextState(new(std::nothrow) ManageWindowState(*this, where));
+		} else
+			_UpdateDecoratorHover(message, where);
 	}
 
 	// change focus in FFM mode
@@ -1269,6 +1330,58 @@ DefaultWindowBehaviour::AlterDeltaForSnap(Window* window, BPoint& delta,
 	bigtime_t now)
 {
 	return fMagneticBorder.AlterDeltaForSnap(window, delta, now);
+}
+
+
+void
+DefaultWindowBehaviour::DecoratorHoverLost()
+{
+	_SetDecoratorHover(Decorator::REGION_NONE, -1);
+}
+
+
+/*!	Shows which decorator region the pointer is over, for decorators with a
+	tab strip (classic decorators do not show hover states). The hover state
+	lives in the decorator, which a whole window stack shares; the desktop
+	remembers the window so it can drop the state when the pointer leaves.
+*/
+void
+DefaultWindowBehaviour::_UpdateDecoratorHover(const BMessage* message,
+	BPoint where)
+{
+	Decorator* decorator = fWindow->Decorator();
+	if (decorator == NULL || !decorator->HasTabStrip())
+		return;
+
+	Decorator::Region region = Decorator::REGION_NONE;
+	int32 tab = -1;
+	if (message->FindInt32("buttons") == 0
+		&& decorator->GetFootprint().Contains(where)) {
+		region = _RegionFor(message, tab);
+	}
+
+	_SetDecoratorHover(region, tab);
+}
+
+
+void
+DefaultWindowBehaviour::_SetDecoratorHover(Decorator::Region region,
+	int32 tab)
+{
+	Decorator* decorator = fWindow->Decorator();
+	if (decorator == NULL || !decorator->HasTabStrip())
+		return;
+
+	BRegion dirty;
+	decorator->SetRegionHighlight(region, Decorator::HIGHLIGHT_HOVER, &dirty,
+		tab);
+	if (dirty.CountRects() > 0)
+		fWindow->TopLayerStackWindow()->ProcessDirtyRegion(dirty);
+
+	if (region != Decorator::REGION_NONE)
+		fDesktop->SetDecoratorHoverWindow(fWindow);
+	else if (fDesktop->DecoratorHoverWindow() == fWindow)
+		fDesktop->SetDecoratorHoverWindow(NULL);
 }
 
 

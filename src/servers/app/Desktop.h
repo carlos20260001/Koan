@@ -290,6 +290,13 @@ public:
 									{ return fMouseEventWindow; }
 			void				SetMouseEventWindow(Window* window);
 
+			// The window whose decorator shows a hover state, so the
+			// state can be dropped when the pointer leaves it.
+			Window*				DecoratorHoverWindow() const
+									{ return fDecoratorHoverWindow; }
+			void				SetDecoratorHoverWindow(Window* window)
+									{ fDecoratorHoverWindow = window; }
+
 			void				SetViewUnderMouse(const Window* window,
 									int32 viewToken);
 			int32				ViewUnderMouse(const Window* window);
@@ -495,6 +502,7 @@ private:
 			BRegion				fScreenRegion;
 
 			Window*				fMouseEventWindow;
+			Window*				fDecoratorHoverWindow;
 			const Window*		fWindowUnderMouse;
 			const Window*		fLockedFocusWindow;
 			int32				fViewUnderMouse;

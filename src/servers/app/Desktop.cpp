@@ -343,6 +343,15 @@ MouseFilter::Filter(BMessage* message, EventTarget** _target, int32* _viewToken,
 		return B_SKIP_MESSAGE;
 	}
 
+	if (message->what == B_MOUSE_MOVED) {
+		// The pointer left the window whose decorator shows a hover state.
+		Window* hoverWindow = fDesktop->DecoratorHoverWindow();
+		if (hoverWindow != NULL && hoverWindow != window) {
+			fDesktop->SetDecoratorHoverWindow(NULL);
+			hoverWindow->DecoratorHoverLost();
+		}
+	}
+
 	if (window != NULL) {
 		// dispatch event to the window
 		switch (message->what) {
@@ -505,6 +514,7 @@ Desktop::Desktop(uid_t userID, const char* targetScreen)
 	fWindowLock("window lock"),
 
 	fMouseEventWindow(NULL),
+	fDecoratorHoverWindow(NULL),
 	fWindowUnderMouse(NULL),
 	fLockedFocusWindow(NULL),
 	fViewUnderMouse(B_NULL_TOKEN),
@@ -2030,6 +2040,12 @@ Desktop::HideWindow(Window* window, bool fromMinimize)
 		window->MouseUp(&message, fLastMousePosition, &viewToken);
 
 		fMouseEventWindow = NULL;
+	}
+
+	if (fDecoratorHoverWindow == window) {
+		// also before the window is deleted: hiding comes first
+		fDecoratorHoverWindow = NULL;
+		window->DecoratorHoverLost();
 	}
 
 	if (fLockedFocusWindow == window) {

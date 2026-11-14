@@ -41,6 +41,7 @@ public:
 									bool isFake);
 
 	virtual	void				ModifiersChanged(int32 modifiers);
+	virtual	void				DecoratorHoverLost();
 
 protected:
 	virtual bool				AlterDeltaForSnap(Window* window, BPoint& delta,
@@ -110,6 +111,11 @@ private:
 			bool				_IsWindowModifier(int32 modifiers) const;
 			Decorator::Region	_RegionFor(const BMessage* message,
 									int32& tab) const;
+
+			void				_UpdateDecoratorHover(const BMessage* message,
+									BPoint where);
+			void				_SetDecoratorHover(Decorator::Region region,
+									int32 tab);
 
 			void				_SetBorderHighlights(int8 horizontal,
 									int8 vertical, bool active);

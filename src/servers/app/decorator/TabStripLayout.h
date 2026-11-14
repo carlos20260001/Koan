@@ -81,6 +81,27 @@ public:
 									int32_t count, int32_t movingIndex,
 									float x);
 
+	/*!	Geometry while the tab at \a movingIndex is dragged along the strip.
+
+		The dragged tab follows the pointer: its left edge is \a pointerX
+		minus \a grabOffset (where the tab was grabbed), clamped so the tab
+		stays within the shown (non-stub) tabs. The dragged tab passes a
+		neighbour once its leading edge crosses the middle of that
+		neighbour; that gives the drop slot, and every tab between the
+		dragged tab's own slot and the drop slot moves aside by one slot to
+		show where it will land.
+
+		\param draggedLeft receives the dragged tab's left edge.
+		\param offsets if not \c NULL, receives \a count horizontal shifts to
+			add to the slots; the dragged tab's own entry is 0.
+		\return the drop slot, i.e. the stack position the tab takes on
+			release; \a movingIndex when it cannot be dragged.
+	*/
+	static	int32_t				DragLayout(const TabStripSlot* slots,
+									int32_t count, int32_t movingIndex,
+									float grabOffset, float pointerX,
+									float* draggedLeft, float* offsets);
+
 	/*!	Returns whether a tab dragged vertically to \a y has left the strip
 		spanning [\a top, \a bottom] by more than \a threshold, i.e. whether
 		the drag should detach the window from its stack.

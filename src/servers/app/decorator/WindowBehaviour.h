@@ -33,6 +33,10 @@ public:
 
 	virtual	void				ModifiersChanged(int32 modifiers);
 
+	/*! The pointer left the window (to another window, or the window is
+	hidden): drop any hover state shown by the decorator. */
+	virtual	void				DecoratorHoverLost() {}
+
 			bool				IsDragging() const { return fIsDragging; }
 			bool				IsResizing() const { return fIsResizing; }
 
