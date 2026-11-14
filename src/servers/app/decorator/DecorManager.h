@@ -82,6 +82,7 @@ public:
 private:
 			DecorAddOn*			_LoadDecor(BString path, status_t &error);
 			bool				_LoadSettingsFromDisk();
+			void				_LoadSystemDefaultDecor();
 			bool				_SaveSettingsToDisk();
 
 private:

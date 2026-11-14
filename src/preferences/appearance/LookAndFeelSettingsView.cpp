@@ -24,6 +24,8 @@
 #include <Catalog.h>
 #include <CheckBox.h>
 #include <File.h>
+#include <FindDirectory.h>
+#include <Entry.h>
 #include <InterfaceDefs.h>
 #include <InterfacePrivate.h>
 #include <LayoutBuilder.h>
@@ -439,11 +441,34 @@ LookAndFeelSettingsView::_SetDoubleScrollBarArrows(bool doubleArrows)
 }
 
 
+/*!	The system's default look: the KoiPop decorator and control look when
+	they are installed (app_server picks the same ones without a saved
+	choice), otherwise the built-in ones. */
+BPrivate::DecorInfo*
+LookAndFeelSettingsView::_DefaultDecor()
+{
+	BPrivate::DecorInfo* decor = fDecorUtility.FindDecorator("KoiPopDecorator");
+	return decor != NULL ? decor : fDecorUtility.DefaultDecorator();
+}
+
+
+BString
+LookAndFeelSettingsView::_DefaultControlLook()
+{
+	BPath path;
+	if (find_directory(B_SYSTEM_ADDONS_DIRECTORY, &path) == B_OK
+		&& path.Append("control_look/KoiPopControlLook") == B_OK
+		&& BEntry(path.Path()).Exists())
+		return BString(path.Path());
+	return BString("");
+}
+
+
 bool
 LookAndFeelSettingsView::IsDefaultable()
 {
-	return fCurrentDecor != fDecorUtility.DefaultDecorator()->ShortcutName()
-		|| fCurrentControlLook.Length() != 0
+	return fCurrentDecor != _DefaultDecor()->ShortcutName()
+		|| fCurrentControlLook != _DefaultControlLook()
 		|| _DoubleScrollBarArrows() != false;
 }
 
@@ -451,8 +476,8 @@ LookAndFeelSettingsView::IsDefaultable()
 void
 LookAndFeelSettingsView::SetDefaults()
 {
-	_SetDecor(fDecorUtility.DefaultDecorator());
-	_SetControlLook(BString(""));
+	_SetDecor(_DefaultDecor());
+	_SetControlLook(_DefaultControlLook());
 	_SetDoubleScrollBarArrows(false);
 }
 

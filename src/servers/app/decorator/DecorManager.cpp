@@ -19,6 +19,7 @@
 #include <Path.h>
 #include <Rect.h>
 
+#include <string.h>
 #include <syslog.h>
 
 #include "AppServer.h"
@@ -115,7 +116,8 @@ DecorManager::DecorManager()
 	fPreviewWindow(NULL),
 	fCurrentDecorPath("Default")
 {
-	_LoadSettingsFromDisk();
+	if (!_LoadSettingsFromDisk())
+		_LoadSystemDefaultDecor();
 }
 
 
@@ -270,6 +272,30 @@ DecorManager::SetDecorator(BString path, Desktop* desktop)
 	fCurrentDecor = oldDecor;
 	fCurrentDecorPath = oldPath;
 	return B_ERROR;
+}
+
+
+/*!	Without a saved choice the system's default decorator is KoiPop, the
+	KoiPopDecorator add-on. If it is missing or does not load, the built-in
+	decorator stays current. A saved choice, the built-in one included, is
+	always kept. */
+void
+DecorManager::_LoadSystemDefaultDecor()
+{
+	BPath path;
+	if (find_directory(B_SYSTEM_ADDONS_DIRECTORY, &path) != B_OK
+		|| path.Append("decorators/KoiPopDecorator") != B_OK)
+		return;
+
+	status_t error = B_OK;
+	DecorAddOn* decor = _LoadDecor(path.Path(), error);
+	if (decor == NULL) {
+		syslog(LOG_WARNING, "app_server: default decorator %s not loaded "
+			"(%s), using the built-in one", path.Path(), strerror(error));
+		return;
+	}
+	fCurrentDecor = decor;
+	fCurrentDecorPath = path.Path();
 }
 
 

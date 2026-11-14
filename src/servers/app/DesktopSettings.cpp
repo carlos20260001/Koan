@@ -14,6 +14,7 @@
 #include "DesktopSettingsPrivate.h"
 
 #include <Directory.h>
+#include <Entry.h>
 #include <File.h>
 #include <FindDirectory.h>
 #include <Path.h>
@@ -80,6 +81,17 @@ DesktopSettingsPrivate::_SetDefaults()
 
 	fWorkspacesColumns = 2;
 	fWorkspacesRows = 2;
+
+	// The system's default control look is KoiPop, when its add-on is
+	// installed. An empty path is the built-in control look, which
+	// applications also fall back to if the add-on does not load. A saved
+	// choice, the built-in one included, replaces this in _Load().
+	fControlLook = "";
+	BPath controlLookPath;
+	if (find_directory(B_SYSTEM_ADDONS_DIRECTORY, &controlLookPath) == B_OK
+		&& controlLookPath.Append("control_look/KoiPopControlLook") == B_OK
+		&& BEntry(controlLookPath.Path()).Exists())
+		fControlLook = controlLookPath.Path();
 
 	memcpy((void*)&fShared.colormap, SystemColorMap(),
 		sizeof(color_map));

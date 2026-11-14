@@ -40,6 +40,8 @@ public:
 private:
 			void				_SetDecor(const BString& name);
 			void				_SetDecor(BPrivate::DecorInfo* decorInfo);
+			BPrivate::DecorInfo*	_DefaultDecor();
+			BString				_DefaultControlLook();
 			void				_BuildDecorMenu();
 			BString				_DecorLabel(const BString& name);
 
