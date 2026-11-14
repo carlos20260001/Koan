@@ -3313,6 +3313,13 @@ Desktop::ReloadDecor(DecorAddOn* oldDecor)
 			UnregisterListener(oldListeners->ItemAt(i));
 	}
 
+	// A window stack shares one decorator, which only the stack's first
+	// window reloads. Its other windows may come earlier in this list and
+	// would then be redrawn with the old decorator's borders, and the
+	// clipping of a window behind its stack's top window keeps that top
+	// window from redrawing. So first reload every window, then rebuild the
+	// clipping once and redraw all old and new borders.
+	BRegion dirty;
 	for (Window* window = fAllWindows.FirstWindow(); window != NULL;
 			window = window->NextWindow(kAllWindowList)) {
 		BRegion oldBorder;
@@ -3323,12 +3330,28 @@ Desktop::ReloadDecor(DecorAddOn* oldDecor)
 			returnValue = false;
 		}
 
+		if (!window->IsHidden() && window->InWorkspace(fCurrentWorkspace))
+			dirty.Include(&oldBorder);
+	}
+
+	for (Window* window = fAllWindows.FirstWindow(); window != NULL;
+			window = window->NextWindow(kAllWindowList)) {
+		if (window->IsHidden() || !window->InWorkspace(fCurrentWorkspace))
+			continue;
 		BRegion border;
 		window->GetBorderRegion(&border);
-
-		border.Include(&oldBorder);
-		RebuildAndRedrawAfterWindowChange(window, border);
+		dirty.Include(&border);
 	}
+
+	BRegion background;
+	_RebuildClippingForAllWindows(background);
+	_SetBackground(background);
+	for (Window* window = fAllWindows.FirstWindow(); window != NULL;
+			window = window->NextWindow(kAllWindowList)) {
+		if (!window->IsHidden())
+			_WindowChanged(window);
+	}
+	_TriggerWindowRedrawing(dirty, dirty);
 
 	// register new listeners
 	const DesktopListenerList& newListeners

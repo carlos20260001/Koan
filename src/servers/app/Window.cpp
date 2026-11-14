@@ -749,6 +749,16 @@ Window::ReloadDecor()
 	if (Window* top = stack->TopLayerWindow())
 		decorator->SetDrawingEngine(top->GetDrawingEngine());
 
+	// Every window of the stack has a new border now: their contents are
+	// the frame minus the new footprint (and corners).
+	for (int32 i = 0; i < stack->CountWindows(); i++) {
+		Window* window = stack->WindowAt(i);
+		window->fContentRegionValid = false;
+		window->fEffectiveDrawingRegionValid = false;
+		if (window->fTopView.IsSet())
+			window->fTopView->InvalidateScreenClipping();
+	}
+
 	return true;
 }
 
