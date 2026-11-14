@@ -45,6 +45,11 @@ protected:
 
 	Dragging, reordering, detaching and joining are driven by the window
 	behaviour, see HasTabStrip(). All geometry is in logical coordinates.
+
+	Themes can subclass it and replace the palette (_UpdatePalette()) and
+	the painting of the strip, the tab surfaces, the stubs, the tab close
+	buttons and the window controls, keeping the layout, hit testing, hover
+	and drag behaviour.
 */
 class ModernTabDecorator : public SATDecorator {
 public:
@@ -124,28 +129,38 @@ protected:
 	virtual	void				_UpdateFont(DesktopSettings& settings);
 	virtual	void				_TopTabChanged();
 
-private:
+	// painting hooks for themes
+	enum {
+		GLYPH_CLOSE,
+		GLYPH_MINIMIZE,
+		GLYPH_ZOOM
+	};
+
+	virtual	void				_UpdatePalette(DesktopSettings& settings);
+	virtual	void				_DrawStripBackground(BRect invalid);
+	virtual	void				_DrawTabSurface(StripTab* tab, BRect rect,
+									bool active, bool focused,
+									bool hovered);
+	virtual	void				_DrawStub(StripTab* tab);
+	virtual	void				_DrawTabCloseButton(StripTab* tab);
+	virtual	void				_DrawControl(Decorator::Tab* tab, BRect rect,
+									rgb_color color, int32 glyph,
+									bool pressed, bool enabled,
+									bool hovered);
+	virtual	void				_DrawSeparatorAfter(int32 index);
+
 			StripTab*			_StripTabAt(int32 index) const;
+			bool				_IsHovered(int32 index) const;
+			bool				_IsCloseShown(const StripTab* tab) const;
+			bool				_IsActive(const Decorator::Tab* tab) const
+									{ return tab == fTopTab; }
+			bool				_IsFocusedStack() const;
+
+private:
 			bool				_EnsureSlots(int32 count);
 			void				_PlaceTabs();
 			void				_IncludeHoverRects(BRegion* dirty,
 									Region region, int32 tab) const;
-			bool				_IsHovered(int32 index) const;
-			bool				_IsCloseShown(const StripTab* tab) const;
-			void				_UpdatePalette(DesktopSettings& settings);
-
-			void				_DrawStripBackground(BRect invalid);
-			void				_DrawStub(StripTab* tab);
-			void				_DrawTabCloseButton(StripTab* tab);
-			void				_DrawControl(Decorator::Tab* tab, BRect rect,
-									rgb_color color, int32 glyph,
-									bool pressed, bool enabled,
-									bool hovered);
-			void				_DrawSeparatorAfter(int32 index);
-
-			bool				_IsActive(const Decorator::Tab* tab) const
-									{ return tab == fTopTab; }
-			bool				_IsFocusedStack() const;
 
 private:
 			TabStripMetrics		fMetrics;
@@ -171,6 +186,7 @@ private:
 			int32				fDropIndex;
 			float*				fDragOffsets;
 
+protected:
 			// palette, derived from the system colors in UpdateColors()
 			rgb_color			fStripColor;
 			rgb_color			fInactiveStripColor;

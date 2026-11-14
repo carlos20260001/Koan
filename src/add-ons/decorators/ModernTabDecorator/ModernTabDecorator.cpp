@@ -72,13 +72,6 @@ static const rgb_color kCloseColor = { 232, 87, 76, 255 };
 static const rgb_color kMinimizeColor = { 232, 170, 58, 255 };
 static const rgb_color kZoomColor = { 82, 180, 90, 255 };
 
-enum {
-	GLYPH_CLOSE,
-	GLYPH_MINIMIZE,
-	GLYPH_ZOOM
-};
-
-
 static inline rgb_color
 blend(rgb_color from, rgb_color to, uint8 amount)
 {
@@ -608,52 +601,20 @@ ModernTabDecorator::_DrawTab(Decorator::Tab* _tab, BRect invalid)
 		return;
 
 	bool focused = _IsFocusedStack();
-	rgb_color strip = focused ? fStripColor : fInactiveStripColor;
 	BRect rect = tab->tabRect;
 	int32 index = fTabList.IndexOf(tab);
 
 	// start from the strip, this may be a lone redraw of one tab (but not
 	// while dragging: tabs overlap then, and the strip was just drawn)
 	if (fDragTab < 0) {
-		fDrawingEngine->FillRect(BRect(rect.left, fTitleBarRect.top,
-			rect.right, fTitleBarRect.bottom), strip);
+		_DrawStripBackground(BRect(rect.left, fTitleBarRect.top, rect.right,
+			fTitleBarRect.bottom));
 	}
 
-	if (tab->isStub) {
+	if (tab->isStub)
 		_DrawStub(tab);
-	} else if (_IsActive(tab)) {
-		// a raised surface with rounded top corners that continues into
-		// the window contents
-		fDrawingEngine->SetHighColor(fSurfaceColor);
-		fDrawingEngine->DrawRoundRect(rect, kTabRadius, kTabRadius, true);
-		fDrawingEngine->FillRect(BRect(rect.left, rect.top + kTabRadius,
-			rect.right, rect.bottom), fSurfaceColor);
-		if (fBorderWidth > 0) {
-			fDrawingEngine->FillRect(BRect(rect.left, fTopBorder.top,
-				rect.right, fTopBorder.bottom), fSurfaceColor);
-		}
-
-		if (focused) {
-			// a short accent line in the system tab color marks the active
-			// window of the focused stack
-			BRect accent(rect.left + kTabRadius + 2, rect.top + 1,
-				rect.right - kTabRadius - 2, rect.top + kAccentHeight);
-			if (accent.IsValid())
-				fDrawingEngine->FillRect(accent, fAccentColor);
-		}
-	} else {
-		// inactive tabs sit flat on the strip, above its bottom line; the
-		// one under the pointer gets a faint surface
-		if (_IsHovered(index)) {
-			fDrawingEngine->SetHighColor(blend(strip, fTextColor, 16));
-			fDrawingEngine->DrawRoundRect(BRect(rect.left, rect.top,
-				rect.right, rect.bottom - 1), kTabRadius, kTabRadius, true);
-			fDrawingEngine->FillRect(BRect(rect.left, rect.top + kTabRadius,
-				rect.right, rect.bottom - 1), blend(strip, fTextColor, 16));
-		}
-		fDrawingEngine->StrokeLine(BPoint(rect.left, fTitleBarRect.bottom),
-			BPoint(rect.right, fTitleBarRect.bottom), fSeparatorColor);
-	}
+	else
+		_DrawTabSurface(tab, rect, _IsActive(tab), focused, _IsHovered(index));
 
 	if (tab->isHighlighted) {
 		// candidate for Stack & Tile: outline the tab
@@ -943,7 +904,7 @@ ModernTabDecorator::_TopTabChanged()
 }
 
 
-// #pragma mark - private
+// #pragma mark - protected helpers
 
 
 ModernTabDecorator::StripTab*
@@ -951,6 +912,9 @@ ModernTabDecorator::_StripTabAt(int32 index) const
 {
 	return static_cast<StripTab*>(fTabList.ItemAt(index));
 }
+
+
+// #pragma mark - private
 
 
 bool
@@ -1131,6 +1095,49 @@ ModernTabDecorator::_DrawStripBackground(BRect invalid)
 	fDrawingEngine->StrokeLine(
 		BPoint(fTitleBarRect.left, fTitleBarRect.bottom),
 		BPoint(fTitleBarRect.right, fTitleBarRect.bottom), fSeparatorColor);
+}
+
+
+/*!	The surface of a shown tab: the active one is raised, with rounded top
+	corners, and continues into the window contents; the others sit flat on
+	the strip, the one under the pointer with a faint surface.
+*/
+void
+ModernTabDecorator::_DrawTabSurface(StripTab* tab, BRect rect, bool active,
+	bool focused, bool hovered)
+{
+	rgb_color strip = focused ? fStripColor : fInactiveStripColor;
+
+	if (active) {
+		fDrawingEngine->SetHighColor(fSurfaceColor);
+		fDrawingEngine->DrawRoundRect(rect, kTabRadius, kTabRadius, true);
+		fDrawingEngine->FillRect(BRect(rect.left, rect.top + kTabRadius,
+			rect.right, rect.bottom), fSurfaceColor);
+		if (fBorderWidth > 0) {
+			fDrawingEngine->FillRect(BRect(rect.left, fTopBorder.top,
+				rect.right, fTopBorder.bottom), fSurfaceColor);
+		}
+
+		if (focused) {
+			// a short accent line in the system tab color marks the active
+			// window of the focused stack
+			BRect accent(rect.left + kTabRadius + 2, rect.top + 1,
+				rect.right - kTabRadius - 2, rect.top + kAccentHeight);
+			if (accent.IsValid())
+				fDrawingEngine->FillRect(accent, fAccentColor);
+		}
+		return;
+	}
+
+	if (hovered) {
+		fDrawingEngine->SetHighColor(blend(strip, fTextColor, 16));
+		fDrawingEngine->DrawRoundRect(BRect(rect.left, rect.top,
+			rect.right, rect.bottom - 1), kTabRadius, kTabRadius, true);
+		fDrawingEngine->FillRect(BRect(rect.left, rect.top + kTabRadius,
+			rect.right, rect.bottom - 1), blend(strip, fTextColor, 16));
+	}
+	fDrawingEngine->StrokeLine(BPoint(rect.left, fTitleBarRect.bottom),
+		BPoint(rect.right, fTitleBarRect.bottom), fSeparatorColor);
 }
 
 
