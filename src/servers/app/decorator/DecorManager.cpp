@@ -22,6 +22,8 @@
 #include <string.h>
 #include <syslog.h>
 
+#include <KoiPopColorScheme.h>
+
 #include "AppServer.h"
 #include "Desktop.h"
 #include "DesktopSettings.h"
@@ -282,20 +284,20 @@ DecorManager::SetDecorator(BString path, Desktop* desktop)
 void
 DecorManager::_LoadSystemDefaultDecor()
 {
-	BPath path;
-	if (find_directory(B_SYSTEM_ADDONS_DIRECTORY, &path) != B_OK
-		|| path.Append("decorators/KoiPopDecorator") != B_OK)
+	BString path;
+	if (!BPrivate::koipop_installed_add_on("decorators/KoiPopDecorator",
+			&path))
 		return;
 
 	status_t error = B_OK;
-	DecorAddOn* decor = _LoadDecor(path.Path(), error);
+	DecorAddOn* decor = _LoadDecor(path, error);
 	if (decor == NULL) {
 		syslog(LOG_WARNING, "app_server: default decorator %s not loaded "
-			"(%s), using the built-in one", path.Path(), strerror(error));
+			"(%s), using the built-in one", path.String(), strerror(error));
 		return;
 	}
 	fCurrentDecor = decor;
-	fCurrentDecorPath = path.Path();
+	fCurrentDecorPath = path;
 }
 
 

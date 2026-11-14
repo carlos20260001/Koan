@@ -21,6 +21,7 @@
 #include <Message.h>
 #include <ServerReadOnlyMemory.h>
 #include <String.h>
+#include <KoiPopColorScheme.h>
 #include "Colors.h"
 
 
@@ -103,10 +104,19 @@ get_default_colors(BMessage* message)
 	if (message == NULL)
 		return;
 
+	// With KoiPop installed the system's default colors are its light
+	// scheme over the built-in ones, as in app_server. The colors are added
+	// in index order either way: ColorsView compares these defaults with
+	// the current colors field by field (BMessage::HasSameData()).
+	BMessage scheme;
+	if (BPrivate::koipop_installed_add_on("control_look/KoiPopControlLook"))
+		BPrivate::koipop_get_color_scheme(KoiPop::kLightAppearance, scheme);
+
 	for (int32 index = 0; index < kColorWhichCount; ++index) {
 		color_which which = index_to_color_which(index);
-		message->AddColor(ui_color_name(which),
-			BPrivate::kDefaultColors[index]);
+		const char* name = ui_color_name(which);
+		message->AddColor(name,
+			scheme.GetColor(name, BPrivate::kDefaultColors[index]));
 	}
 }
 

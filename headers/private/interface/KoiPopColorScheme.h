@@ -15,14 +15,38 @@
 */
 
 
+#include <Entry.h>
+#include <FindDirectory.h>
 #include <GraphicsDefs.h>
 #include <InterfaceDefs.h>
 #include <Message.h>
+#include <Path.h>
+#include <String.h>
 
 #include <KoiPopTheme.h>
 
 
 namespace BPrivate {
+
+
+/*!	Whether the KoiPop add-on at \a subpath of the system add-ons directory
+	(e.g. "control_look/KoiPopControlLook") is installed; its full path goes
+	to \a path. With KoiPop installed the system's defaults are KoiPop: the
+	decorator, the control look and the light color scheme, each used only
+	when the user has not saved a choice of their own.
+*/
+inline bool
+koipop_installed_add_on(const char* subpath, BString* path = NULL)
+{
+	BPath addOn;
+	if (find_directory(B_SYSTEM_ADDONS_DIRECTORY, &addOn) != B_OK
+		|| addOn.Append(subpath) != B_OK
+		|| !BEntry(addOn.Path()).Exists())
+		return false;
+	if (path != NULL)
+		*path = addOn.Path();
+	return true;
+}
 
 
 inline rgb_color

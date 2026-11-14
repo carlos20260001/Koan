@@ -24,10 +24,9 @@
 #include <Catalog.h>
 #include <CheckBox.h>
 #include <File.h>
-#include <FindDirectory.h>
-#include <Entry.h>
 #include <InterfaceDefs.h>
 #include <InterfacePrivate.h>
+#include <KoiPopColorScheme.h>
 #include <LayoutBuilder.h>
 #include <Locale.h>
 #include <MenuField.h>
@@ -455,11 +454,10 @@ LookAndFeelSettingsView::_DefaultDecor()
 BString
 LookAndFeelSettingsView::_DefaultControlLook()
 {
-	BPath path;
-	if (find_directory(B_SYSTEM_ADDONS_DIRECTORY, &path) == B_OK
-		&& path.Append("control_look/KoiPopControlLook") == B_OK
-		&& BEntry(path.Path()).Exists())
-		return BString(path.Path());
+	BString path;
+	if (BPrivate::koipop_installed_add_on("control_look/KoiPopControlLook",
+			&path))
+		return path;
 	return BString("");
 }
 

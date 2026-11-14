@@ -21,6 +21,7 @@
 
 #include <DefaultColors.h>
 #include <InterfaceDefs.h>
+#include <KoiPopColorScheme.h>
 #include <ServerReadOnlyMemory.h>
 
 #include "Desktop.h"
@@ -87,16 +88,38 @@ DesktopSettingsPrivate::_SetDefaults()
 	// applications also fall back to if the add-on does not load. A saved
 	// choice, the built-in one included, replaces this in _Load().
 	fControlLook = "";
-	BPath controlLookPath;
-	if (find_directory(B_SYSTEM_ADDONS_DIRECTORY, &controlLookPath) == B_OK
-		&& controlLookPath.Append("control_look/KoiPopControlLook") == B_OK
-		&& BEntry(controlLookPath.Path()).Exists())
-		fControlLook = controlLookPath.Path();
+	BString controlLookPath;
+	const bool koiPop = BPrivate::koipop_installed_add_on(
+		"control_look/KoiPopControlLook", &controlLookPath);
+	if (koiPop)
+		fControlLook = controlLookPath;
 
 	memcpy((void*)&fShared.colormap, SystemColorMap(),
 		sizeof(color_map));
 	memcpy((void*)fShared.colors, BPrivate::kDefaultColors,
 		sizeof(rgb_color) * kColorWhichCount);
+
+	// With KoiPop installed its light scheme is the default over the
+	// built-in colors (the colors it does not define, such as the desktop
+	// color, stay). Saved colors replace these in _Load().
+	if (koiPop) {
+		BMessage scheme;
+		BPrivate::koipop_get_color_scheme(KoiPop::kLightAppearance, scheme);
+		char* name = NULL;
+		type_code type;
+		for (int32 i = 0; scheme.GetInfo(B_RGB_32_BIT_TYPE, i, &name, &type)
+				== B_OK; i++) {
+			rgb_color color;
+			color_which which = which_ui_color(name);
+			int32 index = color_which_to_index(which);
+			if (index < 0 || index >= kColorWhichCount
+				|| scheme.FindColor(name, &color) != B_OK)
+				continue;
+			fShared.colors[index] = color;
+			if (which == B_MENU_BACKGROUND_COLOR)
+				fMenuInfo.background_color = color;
+		}
+	}
 
 	gSubpixelAntialiasing = true;
 	gDefaultHintingMode = HINTING_MODE_ON;
