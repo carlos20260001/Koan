@@ -41,7 +41,9 @@ protected:
 	- hover states (HIGHLIGHT_HOVER) for tabs, tab close buttons, window
 	  controls and overflow stubs;
 	- the dragged tab following the pointer while the others make room
-	  (SetDraggedTab()).
+	  (SetDraggedTab());
+	- rounded window corners (GetCornerCutouts()), square while the window
+	  spans a display or is tiled (SetSquareCorners()).
 
 	Dragging, reordering, detaching and joining are driven by the window
 	behaviour, see HasTabStrip(). All geometry is in logical coordinates.
@@ -68,6 +70,9 @@ public:
 
 	virtual	bool				MoveTab(int32 from, int32 to, bool isMoving,
 									BRegion* updateRegion = NULL);
+
+	virtual	void				GetCornerCutouts(BRegion& region) const;
+	virtual	bool				SetSquareCorners(bool square);
 
 	virtual	void				UpdateColors(DesktopSettings& settings);
 
@@ -133,6 +138,11 @@ private:
 			bool				_IsHovered(int32 index) const;
 			bool				_IsCloseShown(const StripTab* tab) const;
 			void				_UpdatePalette(DesktopSettings& settings);
+			void				_UpdateCorners();
+			BRect				_OuterBounds() const;
+			void				_DrawCorner(BRect bounds, bool right,
+									bool bottom, rgb_color fill,
+									rgb_color border);
 
 			void				_DrawStripBackground(BRect invalid);
 			void				_DrawStub(StripTab* tab);
@@ -162,6 +172,14 @@ private:
 			Region				fHoverRegion;
 			int32				fHoverTab;
 			bool				fHoverInTabClose;
+
+			// rounded corners
+			bool				fSquareCorners;
+			float				fCornerScale;
+				// the render scale fCornerCutouts was made for
+			int32				fCornerRadius;
+				// 0 for square corners
+			BRegion				fCornerCutouts;
 
 			// tab drag state, see SetDraggedTab()
 			int32				fDragTab;

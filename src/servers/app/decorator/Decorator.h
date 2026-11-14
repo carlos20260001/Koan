@@ -194,6 +194,19 @@ public:
 									float pointerX, BRegion* dirty)
 									{ return tab; }
 
+		/*! Rounded windows: the parts of the decorator's outer bounds that
+			the window does not cover (its cut-away corners). The window
+			leaves them out of its shape and contents, so what is behind
+			shows there and gets the clicks. Empty (the default) for square
+			windows. */
+	virtual	void				GetCornerCutouts(BRegion& region) const
+									{ region.MakeEmpty(); }
+		/*! Asks a decorator with rounded corners for square ones, e.g.
+			for a window spanning a display or tiled against others.
+			\return whether the window's shape changed. */
+	virtual	bool				SetSquareCorners(bool square)
+									{ return false; }
+
 			const BRegion&		GetFootprint();
 			::Desktop*			GetDesktop();
 
@@ -309,6 +322,12 @@ protected:
 		//! Hook called with the lock held after SetTopTab() changed the top
 		//! tab, i.e. another window of the stack came to the top layer.
 	virtual	void				_TopTabChanged() {}
+
+		//! For decorators with rounded corners: sets \a region to the
+		//! cut-away corners of \a bounds (see CornerShape), at the drawing
+		//! engine's render scale.
+			void				_BuildCornerCutouts(BRect bounds,
+									float radius, BRegion& region) const;
 
 protected:
 	mutable		BRWLocker	fLocker;

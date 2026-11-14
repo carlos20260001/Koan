@@ -963,6 +963,28 @@ SATGroup::SetActiveWindow(SATWindow* window)
 }
 
 
+bool
+SATGroup::IsTiled()
+{
+	int32 areas = 0;
+	for (int32 i = 0; i < fWindowAreaList.CountItems(); i++) {
+		// an area that is going away has no windows anymore
+		if (fWindowAreaList.ItemAt(i)->WindowList().CountItems() > 0)
+			areas++;
+	}
+	return areas > 1;
+}
+
+
+void
+SATGroup::UpdateTiledState()
+{
+	bool tiled = IsTiled();
+	for (int32 i = 0; i < fSATWindowList.CountItems(); i++)
+		fSATWindowList.ItemAt(i)->GetWindow()->SetTiled(tiled);
+}
+
+
 const TabList*
 SATGroup::HorizontalTabs()
 {

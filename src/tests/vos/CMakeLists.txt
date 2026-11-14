@@ -29,6 +29,15 @@ add_executable(test_tab_strip_layout
 target_include_directories(test_tab_strip_layout PRIVATE
 	${CMAKE_SOURCE_DIR}/src/servers/app/decorator)
 
+# Rounded window corner rectangles of decorators (pure helpers, the same
+# sources app_server links; also runnable on a plain host).
+add_executable(test_corner_shape
+	test_corner_shape.cpp
+	${CMAKE_SOURCE_DIR}/src/servers/app/decorator/CornerShape.cpp
+)
+target_include_directories(test_corner_shape PRIVATE
+	${CMAKE_SOURCE_DIR}/src/servers/app/decorator)
+
 # BBitmap density and screen-scale icon bitmaps (BIconUtils).
 Application(test_icon_density SOURCES test_icon_density.cpp)
 
