@@ -22,10 +22,12 @@
 #include <Entry.h>
 #include <File.h>
 #include <HSL.h>
+#include <KoiPopColorScheme.h>
 #include <LayoutBuilder.h>
 #include <Locale.h>
 #include <Messenger.h>
 #include <Path.h>
+#include <PopUpMenu.h>
 #include <SpaceLayoutItem.h>
 
 #include "AppearanceWindow.h"
@@ -41,6 +43,7 @@
 #define AUTO_ADJUST_CHANGED 'madj'
 #define UPDATE_COLOR 'upcl'
 #define ATTRIBUTE_CHOSEN 'atch'
+#define SCHEME_CHOSEN 'schm'
 
 using BPrivate::BColorItem;
 using BPrivate::BColorListView;
@@ -49,7 +52,8 @@ using BPrivate::BColorPreview;
 
 ColorsView::ColorsView(const char* name)
 	:
-	BView(name, B_WILL_DRAW)
+	BView(name, B_WILL_DRAW),
+	fWhich(B_NO_COLOR)
 {
 	SetViewUIColor(B_PANEL_BACKGROUND_COLOR);
 
@@ -58,6 +62,23 @@ ColorsView::ColorsView(const char* name)
 	fAutoSelectCheckBox = new BCheckBox(B_TRANSLATE("Automatically pick secondary colors"),
 		new BMessage(AUTO_ADJUST_CHANGED));
 	fAutoSelectCheckBox->SetValue(true);
+
+	// Named color schemes: choosing one sets all the colors it defines at
+	// once; the list below still edits single colors afterwards.
+	BPopUpMenu* schemeMenu = new BPopUpMenu(B_TRANSLATE("Choose a scheme"
+		B_UTF8_ELLIPSIS));
+	BMessage* lightScheme = new BMessage(SCHEME_CHOSEN);
+	lightScheme->AddInt32("appearance", KoiPop::kLightAppearance);
+	schemeMenu->AddItem(new BMenuItem(B_TRANSLATE("KoiPop light"),
+		lightScheme));
+	BMessage* darkScheme = new BMessage(SCHEME_CHOSEN);
+	darkScheme->AddInt32("appearance", KoiPop::kDarkAppearance);
+	schemeMenu->AddItem(new BMenuItem(B_TRANSLATE("KoiPop dark"),
+		darkScheme));
+	schemeMenu->SetRadioMode(false);
+	schemeMenu->SetLabelFromMarked(false);
+	fSchemeMenuField = new BMenuField("scheme", B_TRANSLATE("Color scheme:"),
+		schemeMenu);
 
 	// Set up list of color attributes
 	fAttrList = new BColorListView("AttributeList");
@@ -73,6 +94,10 @@ ColorsView::ColorsView(const char* name)
 		"picker", new BMessage(UPDATE_COLOR));
 
 	BLayoutBuilder::Group<>(this, B_VERTICAL)
+		.AddGroup(B_HORIZONTAL, B_USE_DEFAULT_SPACING)
+			.Add(fSchemeMenuField)
+			.AddGlue()
+			.End()
 		.Add(fAutoSelectCheckBox)
 		.Add(fScrollView, 10.0)
 		.AddGroup(B_HORIZONTAL, B_USE_DEFAULT_SPACING)
@@ -96,6 +121,7 @@ void
 ColorsView::AttachedToWindow()
 {
 	fAutoSelectCheckBox->SetTarget(this);
+	fSchemeMenuField->Menu()->SetTargetForItems(this);
 	fPicker->SetTarget(this);
 	fAttrList->SetTarget(this);
 	fColorPreview->SetTarget(this);
@@ -166,6 +192,14 @@ ColorsView::MessageReceived(BMessage* message)
 		case AUTO_ADJUST_CHANGED:
 		{
 			_CreateItems();
+			break;
+		}
+
+		case SCHEME_CHOSEN:
+		{
+			int32 appearance;
+			if (message->FindInt32("appearance", &appearance) == B_OK)
+				_ApplyScheme(appearance);
 			break;
 		}
 
@@ -283,6 +317,33 @@ ColorsView::_SetUIColors(const BMessage& colors)
 {
 	set_ui_colors(&colors);
 	fCurrentColors = colors;
+}
+
+
+void
+ColorsView::_ApplyScheme(int32 appearance)
+{
+	if (appearance != KoiPop::kLightAppearance
+		&& appearance != KoiPop::kDarkAppearance) {
+		return;
+	}
+
+	// start from the current colors: the scheme leaves the others alone
+	BMessage colors(fCurrentColors);
+	BPrivate::koipop_get_color_scheme((KoiPop::Appearance)appearance, colors);
+
+	_SetUIColors(colors);
+	_UpdatePreviews(colors);
+
+	if (fWhich != B_NO_COLOR) {
+		rgb_color color = colors.GetColor(ui_color_name(fWhich),
+			ui_color(fWhich));
+		fPicker->SetValue(color);
+		fColorPreview->SetColor(color);
+		fColorPreview->Invalidate();
+	}
+
+	Window()->PostMessage(kMsgUpdate);
 }
 
 

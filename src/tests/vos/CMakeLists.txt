@@ -29,6 +29,13 @@ add_executable(test_tab_strip_layout
 target_include_directories(test_tab_strip_layout PRIVATE
 	${CMAKE_SOURCE_DIR}/src/servers/app/decorator)
 
+# KoiPop theme tokens: WCAG contrast of the palettes, control states and
+# capsule geometry (header only, no window server).
+add_executable(test_koipop_theme test_koipop_theme.cpp)
+target_include_directories(test_koipop_theme PRIVATE
+	${CMAKE_SOURCE_DIR}/headers/private/interface)
+target_link_libraries(test_koipop_theme PRIVATE m)
+
 # Rounded window corner rectangles of decorators (pure helpers, the same
 # sources app_server links; also runnable on a plain host).
 add_executable(test_corner_shape

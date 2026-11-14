@@ -130,6 +130,7 @@ ImageInclude("/system/add-ons/media" ${MEDIA_ADDONS})
 set(DECORATORS
 	BeDecorator
 	FlatDecorator
+	KoiPopDecorator
 	MacDecorator
 	ModernDecorator
 	ModernTabDecorator
@@ -140,6 +141,7 @@ ImageInclude("/system/add-ons/decorators" ${DECORATORS})
 set(CONTROL_LOOKS
 	BeControlLook
 	FlatControlLook
+	KoiPopControlLook
 )
 ImageInclude("/system/add-ons/control_look" ${CONTROL_LOOKS})
 

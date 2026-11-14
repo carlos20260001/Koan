@@ -1,0 +1,14 @@
+/*
+ * Copyright 2026, Koan contributors. All rights reserved.
+ * Distributed under the terms of the MIT License.
+ */
+
+resource app_version {
+	major = 1,
+	middle = 0,
+	minor = 0,
+	variety = B_APPV_ALPHA,
+	internal = 0,
+	short_info = "KoiPop control look",
+	long_info  = "KoiPop glossy control look, Koan contributors, MIT License"
+};
