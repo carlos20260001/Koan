@@ -938,8 +938,10 @@ void
 ModernTabDecorator::_TopTabChanged()
 {
 	// The active tab must be visible when the strip overflows, and it
-	// carries the window controls.
+	// carries the window controls. The look of the new top window decides
+	// whether there is a strip at all, so the footprint may change too.
 	_DoLayout();
+	_InvalidateFootprint();
 }
 
 

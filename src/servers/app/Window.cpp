@@ -723,6 +723,12 @@ Window::ReloadDecor()
 			decorator->SetTopTab(i);
 	}
 
+	// The decorator was made for the stack's first window, but the stack's
+	// top window draws it (as after Window::MoveToTopStackLayer()); drawing
+	// with another window's engine races with that window's own drawing.
+	if (Window* top = stack->TopLayerWindow())
+		decorator->SetDrawingEngine(top->GetDrawingEngine());
+
 	return true;
 }
 
