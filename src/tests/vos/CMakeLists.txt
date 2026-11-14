@@ -20,6 +20,15 @@ add_executable(test_display_change_tracker
 target_include_directories(test_display_change_tracker PRIVATE
 	${CMAKE_SOURCE_DIR}/src/servers/app)
 
+# Tab strip geometry of tab-strip window decorators (pure helpers, the
+# same sources app_server links; also runnable on a plain host).
+add_executable(test_tab_strip_layout
+	test_tab_strip_layout.cpp
+	${CMAKE_SOURCE_DIR}/src/servers/app/decorator/TabStripLayout.cpp
+)
+target_include_directories(test_tab_strip_layout PRIVATE
+	${CMAKE_SOURCE_DIR}/src/servers/app/decorator)
+
 # BBitmap density and screen-scale icon bitmaps (BIconUtils).
 Application(test_icon_density SOURCES test_icon_density.cpp)
 

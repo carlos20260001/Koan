@@ -213,7 +213,10 @@ void
 Decorator::SetTopTab(int32 tab)
 {
 	AutoWriteLocker _(fLocker);
+	Decorator::Tab* oldTop = fTopTab;
 	fTopTab = fTabList.ItemAt(tab);
+	if (fTopTab != oldTop)
+		_TopTabChanged();
 }
 
 

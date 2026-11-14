@@ -27,6 +27,7 @@
 #include "Desktop.h"
 #include "DefaultDecorator.h"
 #include "DrawingEngine.h"
+#include "TabStripLayout.h"
 #include "Window.h"
 
 
@@ -40,6 +41,10 @@
 
 // The span between mouse down
 static const bigtime_t kWindowActivationTimeout = 500000LL;
+
+// How far (in logical units) the pointer must leave a tab strip before a
+// dragged tab detaches its window from the stack.
+static const float kTabDetachThreshold = 24.0f;
 
 
 // #pragma mark - State
@@ -387,8 +392,202 @@ struct DefaultWindowBehaviour::SlideTabState : MouseTrackingState {
 			}
 		}
 
-		fWindow->MoveToStackPosition(neighbourIndex, isShifting);
+		fDesktop->MoveWindowInStack(fWindow, neighbourIndex, isShifting);
 	}
+};
+
+
+// #pragma mark - TabDragState
+
+
+/*!	Dragging a tab of a tab-strip decorator (see Decorator::HasTabStrip()).
+
+	While the window shares its stack with others, moving the pointer along
+	the strip reorders its tab; the windows themselves stay where they are.
+	Moving the pointer out of the strip by more than kTabDetachThreshold
+	detaches the window from the stack, and it then follows the pointer. A
+	window that is alone, from the start or after detaching, moves like with
+	DragState; releasing it while the pointer is over another stack's tab
+	strip joins that stack.
+*/
+struct DefaultWindowBehaviour::TabDragState : MouseTrackingState {
+	TabDragState(DefaultWindowBehaviour& behavior, BPoint where,
+		bool activateOnMouseUp, bool minimizeCheckOnMouseUp)
+		:
+		MouseTrackingState(behavior, where, activateOnMouseUp,
+			minimizeCheckOnMouseUp),
+		fDragging(false),
+		fStackKeyHeld(false),
+		fGrabOffset(B_ORIGIN)
+	{
+		::Decorator* decorator = fWindow->Decorator();
+		int32 index = fWindow->PositionInStack();
+		if (decorator != NULL && index >= 0)
+			fGrabOffset = where - decorator->TabRect(index).LeftTop();
+	}
+
+	virtual ~TabDragState()
+	{
+		// the window went away during the drag
+		if (fDragging)
+			fDesktop->EndWindowDrag(false);
+	}
+
+	virtual void EnterState(State* previousState)
+	{
+		MouseTrackingState::EnterState(previousState);
+		if (!_IsStacked())
+			_BeginMoving();
+	}
+
+	virtual void ExitState(State* nextState)
+	{
+		MouseTrackingState::ExitState(nextState);
+		fBehavior.ClearStackCandidates();
+		if (fDragging) {
+			fDragging = false;
+			fDesktop->EndWindowDrag();
+		}
+	}
+
+	virtual bool MouseDown(BMessage* message, BPoint where, bool& _unhandled)
+	{
+		// right-click while dragging shall bring the window to front, as
+		// with DragState
+		int32 buttons = message->FindInt32("buttons");
+		if (fDragging && (buttons & B_SECONDARY_MOUSE_BUTTON) != 0) {
+			if (fWindow == fDesktop->BackWindow())
+				fDesktop->ActivateWindow(fWindow);
+			else
+				fDesktop->SendWindowBehind(fWindow);
+			return true;
+		}
+
+		return MouseTrackingState::MouseDown(message, where, _unhandled);
+	}
+
+	virtual void MouseUp(BMessage* message, BPoint where)
+	{
+		int32 buttons = message->FindInt32("buttons");
+		if ((buttons & fMouseButton) == 0 && fDragging && !fStackKeyHeld
+			&& fBehavior.JoinStackCandidates()) {
+			fDesktop->ActivateWindow(fWindow);
+		}
+
+		MouseTrackingState::MouseUp(message, where);
+	}
+
+	virtual void MouseMoved(BMessage* message, BPoint where, bool isFake)
+	{
+		// With the Stack & Tile key held, Stack & Tile itself manages the
+		// window; do not compete with it for candidates.
+		fStackKeyHeld = (message->FindInt32("modifiers") & B_OPTION_KEY) != 0;
+
+		MouseTrackingState::MouseMoved(message, where, isFake);
+	}
+
+	virtual void MouseMovedAction(BPoint& delta, bigtime_t now)
+	{
+		BPoint where = fLastMousePosition + delta;
+
+		if (!fDragging) {
+			if (_IsStacked()) {
+				_ReorderOrDetach(where);
+				// keep tracking the pointer itself
+				return;
+			}
+			// The other windows of the stack went away meanwhile.
+			_BeginMoving();
+		}
+
+		_Move(delta, now);
+	}
+
+private:
+	bool _IsStacked()
+	{
+		WindowStack* stack = fWindow->GetWindowStack();
+		return stack != NULL && stack->CountWindows() > 1;
+	}
+
+	void _BeginMoving()
+	{
+		if (fDragging)
+			return;
+		fDesktop->BeginWindowDrag();
+		fDragging = true;
+	}
+
+	void _ReorderOrDetach(BPoint where)
+	{
+		::Decorator* decorator = fWindow->Decorator();
+		if (decorator == NULL)
+			return;
+
+		BRect strip = decorator->TitleBarRect();
+		if (TabStripLayout::ShouldDetach(strip.top, strip.bottom, where.y,
+				kTabDetachThreshold)) {
+			if ((fWindow->Flags() & B_NOT_MOVABLE) != 0
+				|| !fBehavior.DetachFromStack()) {
+				return;
+			}
+			_BeginMoving();
+			_FollowPointer(where);
+			return;
+		}
+
+		int32 index = fWindow->PositionInStack();
+		int32 target = decorator->TabStripDropIndex(index, where);
+		if (target >= 0 && target != index)
+			fDesktop->MoveWindowInStack(fWindow, target, true);
+	}
+
+	//! Moves the just detached window so the pointer holds its tab at the
+	//! point where the tab was grabbed.
+	void _FollowPointer(BPoint where)
+	{
+		::Decorator* decorator = fWindow->Decorator();
+		int32 index = fWindow->PositionInStack();
+		if (decorator == NULL || index < 0)
+			return;
+
+		BRect tab = decorator->TabRect(index);
+		if (!tab.IsValid())
+			return;
+
+		BPoint offset = fGrabOffset;
+		if (offset.x < 0 || offset.x > tab.Width())
+			offset.x = tab.Width() / 2;
+		if (offset.y < 0 || offset.y > tab.Height())
+			offset.y = tab.Height() / 2;
+
+		BPoint move = where - offset - tab.LeftTop();
+		fDesktop->MoveWindowBy(fWindow, roundf(move.x), roundf(move.y));
+	}
+
+	void _Move(BPoint& delta, bigtime_t now)
+	{
+		if ((fWindow->Flags() & B_NOT_MOVABLE) == 0) {
+			BPoint oldLeftTop = fWindow->Frame().LeftTop();
+
+			fBehavior.AlterDeltaForSnap(fWindow, delta, now);
+			fDesktop->MoveWindowBy(fWindow, delta.x, delta.y);
+
+			// constrain delta to true change in position
+			delta = fWindow->Frame().LeftTop() - oldLeftTop;
+		} else
+			delta = BPoint(0, 0);
+
+		if (fStackKeyHeld)
+			fBehavior.ClearStackCandidates();
+		else
+			fBehavior.FindStackCandidates();
+	}
+
+private:
+	bool	fDragging;
+	bool	fStackKeyHeld;
+	BPoint	fGrabOffset;
 };
 
 
@@ -554,9 +753,10 @@ struct DefaultWindowBehaviour::DecoratorButtonState : State {
 
 		// redraw the decorator
 		if (Decorator* decorator = fWindow->Decorator()) {
-			BRegion* visibleBorder = fWindow->RegionPool()->GetRegion();
-			fWindow->GetBorderRegion(visibleBorder);
-			visibleBorder->IntersectWith(&fWindow->VisibleRegion());
+			Window* topWindow = fWindow->TopLayerStackWindow();
+			BRegion* visibleBorder = topWindow->RegionPool()->GetRegion();
+			topWindow->GetBorderRegion(visibleBorder);
+			visibleBorder->IntersectWith(&topWindow->VisibleRegion());
 
 			DrawingEngine* engine = decorator->GetDrawingEngine();
 			engine->LockParallelAccess();
@@ -588,7 +788,7 @@ struct DefaultWindowBehaviour::DecoratorButtonState : State {
 
 			engine->UnlockParallelAccess();
 
-			fWindow->RegionPool()->Recycle(visibleBorder);
+			topWindow->RegionPool()->Recycle(visibleBorder);
 		}
 
 		fBehavior._NextState(NULL);
@@ -603,9 +803,10 @@ private:
 	void _RedrawDecorator(const BMessage* message)
 	{
 		if (Decorator* decorator = fWindow->Decorator()) {
-			BRegion* visibleBorder = fWindow->RegionPool()->GetRegion();
-			fWindow->GetBorderRegion(visibleBorder);
-			visibleBorder->IntersectWith(&fWindow->VisibleRegion());
+			Window* topWindow = fWindow->TopLayerStackWindow();
+			BRegion* visibleBorder = topWindow->RegionPool()->GetRegion();
+			topWindow->GetBorderRegion(visibleBorder);
+			visibleBorder->IntersectWith(&topWindow->VisibleRegion());
 
 			DrawingEngine* engine = decorator->GetDrawingEngine();
 			engine->LockParallelAccess();
@@ -633,7 +834,7 @@ private:
 			}
 
 			engine->UnlockParallelAccess();
-			fWindow->RegionPool()->Recycle(visibleBorder);
+			topWindow->RegionPool()->Recycle(visibleBorder);
 		}
 	}
 
@@ -831,6 +1032,14 @@ DefaultWindowBehaviour::MouseDown(BMessage* message, BPoint where,
 			// left mouse button
 			switch (hitRegion) {
 				case Decorator::REGION_TAB: {
+					// Tab-strip decorators reorder, detach and join by
+					// dragging the tab; with the Stack & Tile key held, Stack
+					// & Tile handles the drag as before.
+					if (decorator != NULL && decorator->HasTabStrip()
+						&& (fLastModifiers & B_OPTION_KEY) == 0) {
+						action = ACTION_DRAG_TAB;
+						break;
+					}
 					// tab sliding in any case if either shift key is held down
 					// except sliding up-down by moving mouse left-right would
 					// look strange
@@ -901,6 +1110,13 @@ DefaultWindowBehaviour::MouseDown(BMessage* message, BPoint where,
 				default:
 					break;
 			}
+		} else if ((buttons & B_TERTIARY_MOUSE_BUTTON) != 0) {
+			// middle mouse button: closes the window of a strip tab
+			if (hitRegion == Decorator::REGION_TAB && decorator != NULL
+				&& decorator->HasTabStrip()
+				&& (flags & B_NOT_CLOSABLE) == 0) {
+				action = ACTION_CLOSE_TAB;
+			}
 		}
 	}
 
@@ -916,18 +1132,34 @@ DefaultWindowBehaviour::MouseDown(BMessage* message, BPoint where,
 	if (hitRegion != lastHitRegion)
 		clickCount = 1;
 
+	if (action == ACTION_CLOSE_TAB) {
+		// Close only this window, without activating it first.
+		fWindow->ServerWindow()->NotifyQuitRequested();
+		return true;
+	}
+
+	// A background tab of a stack belongs to a window that is hidden behind
+	// the stack's top window; the decorator is shared by the whole stack,
+	// so the stack is focused when its top window is.
+	Window* topWindow = fWindow->TopLayerStackWindow();
+	bool backgroundTab = topWindow != fWindow;
+
 	DesktopSettings desktopSettings(fDesktop);
 	if (!desktopSettings.AcceptFirstClick()) {
 		// Ignore clicks on decorator buttons if the
 		// non-floating window doesn't have focus
-		if (!fWindow->IsFocus() && !fWindow->IsFloating()
+		if (!topWindow->IsFocus() && !fWindow->IsFloating()
 			&& action != ACTION_RESIZE_BORDER
-			&& action != ACTION_RESIZE && action != ACTION_SLIDE_TAB)
+			&& action != ACTION_RESIZE && action != ACTION_SLIDE_TAB
+			&& action != ACTION_DRAG_TAB)
 			action = ACTION_DRAG;
 	}
 
 	bool activateOnMouseUp = false;
-	if (action != ACTION_RESIZE_BORDER) {
+	if (action == ACTION_CLOSE && backgroundTab) {
+		// The close button of a background tab closes that window only; do
+		// not bring it to the front just to close it.
+	} else if (action != ACTION_RESIZE_BORDER) {
 		// activate window if in click to activate mode, else only focus it
 		if (desktopSettings.MouseMode() == B_NORMAL_MOUSE) {
 			fDesktop->ActivateWindow(fWindow);
@@ -962,6 +1194,12 @@ DefaultWindowBehaviour::MouseDown(BMessage* message, BPoint where,
 		case ACTION_SLIDE_TAB:
 			_NextState(new (std::nothrow) SlideTabState(*this, where));
 			STRACE_CLICK(("===> ACTION_SLIDE_TAB\n"));
+			break;
+
+		case ACTION_DRAG_TAB:
+			_NextState(new (std::nothrow) TabDragState(*this, where,
+				activateOnMouseUp, clickCount == 2));
+			STRACE_CLICK(("===> ACTION_DRAG_TAB\n"));
 			break;
 
 		case ACTION_RESIZE_BORDER:
@@ -1031,6 +1269,45 @@ DefaultWindowBehaviour::AlterDeltaForSnap(Window* window, BPoint& delta,
 	bigtime_t now)
 {
 	return fMagneticBorder.AlterDeltaForSnap(window, delta, now);
+}
+
+
+bool
+DefaultWindowBehaviour::DetachFromStack()
+{
+	WindowStack* stack = fWindow->GetWindowStack();
+	if (stack == NULL || stack->CountWindows() <= 1)
+		return false;
+
+	BRegion dirty;
+	fWindow->GetBorderRegion(&dirty);
+	if (!fWindow->DetachFromWindowStack(true))
+		return false;
+
+	BRegion border;
+	fWindow->GetBorderRegion(&border);
+	dirty.Include(&border);
+	fDesktop->RebuildAndRedrawAfterWindowChange(fWindow, dirty);
+	return true;
+}
+
+
+void
+DefaultWindowBehaviour::FindStackCandidates()
+{
+}
+
+
+bool
+DefaultWindowBehaviour::JoinStackCandidates()
+{
+	return false;
+}
+
+
+void
+DefaultWindowBehaviour::ClearStackCandidates()
+{
 }
 
 

@@ -2394,6 +2394,28 @@ Desktop::SetWindowTabLocation(Window* window, float location, bool isShifting)
 }
 
 
+/*!	Moves \a window to \a position within its native window stack, i.e.
+	reorders its tab, and tells the listeners so the stack's group model
+	(Stack & Tile) keeps the same order. The windows themselves are not
+	touched: each keeps its identity, contents and client connection.
+*/
+bool
+Desktop::MoveWindowInStack(Window* window, int32 position, bool isMoving)
+{
+	AutoWriteLocker _(fWindowLock);
+
+	int32 from = window->PositionInStack();
+	if (from < 0 || from == position)
+		return false;
+
+	if (!window->MoveToStackPosition(position, isMoving))
+		return false;
+
+	NotifyWindowStackPositionChanged(window, from, position);
+	return true;
+}
+
+
 bool
 Desktop::SetWindowDecoratorSettings(Window* window, const BMessage& settings)
 {

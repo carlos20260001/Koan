@@ -77,6 +77,13 @@ StackAndTile::ListenerRegistered(Desktop* desktop)
 void
 StackAndTile::ListenerUnregistered()
 {
+	// drop stacking candidates first, they point to other windows
+	for (SATWindowMap::iterator it = fSATWindowMap.begin();
+		it != fSATWindowMap.end(); it++) {
+		it->second->ClearCandidates();
+	}
+	fCurrentSATWindow = NULL;
+
 	for (SATWindowMap::iterator it = fSATWindowMap.begin();
 		it != fSATWindowMap.end(); it++) {
 		SATWindow* satWindow = it->second;
@@ -123,6 +130,17 @@ StackAndTile::WindowRemoved(Window* window)
 		return;
 
 	SATWindow* satWindow = it->second;
+
+	// Nothing may keep a pointer to the window past this point: neither the
+	// ongoing Stack & Tile drag nor another window's stacking candidate.
+	if (fCurrentSATWindow == satWindow)
+		fCurrentSATWindow = NULL;
+	for (SATWindowMap::iterator other = fSATWindowMap.begin();
+			other != fSATWindowMap.end(); other++) {
+		if (other->second != satWindow)
+			other->second->ForgetWindow(satWindow);
+	}
+
 	// delete SATWindow
 	delete satWindow;
 	fSATWindowMap.erase(it);
@@ -450,6 +468,24 @@ StackAndTile::WindowTabLocationChanged(Window* window, float location,
 	bool isShifting)
 {
 
+}
+
+
+void
+StackAndTile::WindowStackPositionChanged(Window* window, int32 from,
+	int32 to)
+{
+	// Keep the area's window list in the order of the native window stack,
+	// which is what the BWindowStack queries report.
+	SATWindow* satWindow = GetSATWindow(window);
+	if (satWindow == NULL)
+		return;
+
+	WindowArea* area = satWindow->GetWindowArea();
+	if (area == NULL)
+		return;
+
+	area->MoveWindowToPosition(satWindow, to);
 }
 
 

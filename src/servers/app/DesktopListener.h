@@ -74,6 +74,12 @@ public:
 									const BMessage& settings) = 0;
 	virtual void				GetDecoratorSettings(Window* window,
 									BMessage& settings) = 0;
+
+	/*! A window moved from stack position \a from to \a to within its
+	native window stack (its tab was reordered). Not pure, so listeners
+	that do not track stacks need not implement it. */
+	virtual void				WindowStackPositionChanged(Window* window,
+									int32 from, int32 to) {}
 };
 
 
@@ -127,6 +133,9 @@ public:
 									window_look look);
 			void				NotifyWindowFeelChanged(Window* window,
 									window_feel feel);
+
+			void				NotifyWindowStackPositionChanged(
+									Window* window, int32 from, int32 to);
 
 			bool				SetDecoratorSettings(Window* window,
 									const BMessage& settings);

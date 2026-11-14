@@ -254,6 +254,8 @@ public:
 									BPoint delta);
 			bool				SetWindowTabLocation(Window* window,
 									float location, bool isShifting);
+			bool				MoveWindowInStack(Window* window,
+									int32 position, bool isMoving);
 			bool				SetWindowDecoratorSettings(Window* window,
 									const BMessage& settings);
 

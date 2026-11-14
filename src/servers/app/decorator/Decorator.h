@@ -170,6 +170,18 @@ public:
 
 	virtual	Region				RegionAt(BPoint where, int32& tab) const;
 
+		/*! Whether the decorator draws the windows of a stack as a tab strip:
+			then dragging a tab reorders it within the stack, dragging it
+			out of the strip detaches its window, and dropping a dragged
+			window on another stack's tab strip joins that stack. Classic
+			decorators return false and keep the classic tab behaviour. */
+	virtual	bool				HasTabStrip() const { return false; }
+		/*! For a tab strip: the stack position the dragged \a tab should
+			take with the pointer at \a where. */
+	virtual	int32				TabStripDropIndex(int32 tab,
+									const BPoint& where) const
+									{ return tab; }
+
 			const BRegion&		GetFootprint();
 			::Desktop*			GetDesktop();
 
@@ -281,6 +293,10 @@ protected:
 			void				_InvalidateFootprint();
 
 			void 				_InvalidateBitmaps();
+
+		//! Hook called with the lock held after SetTopTab() changed the top
+		//! tab, i.e. another window of the stack came to the top layer.
+	virtual	void				_TopTabChanged() {}
 
 protected:
 	mutable		BRWLocker	fLocker;

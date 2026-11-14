@@ -230,6 +230,44 @@ SATWindow::JoinCandidates()
 
 
 void
+SATWindow::FindStackingCandidates()
+{
+	fOngoingSnapping = NULL;
+
+	if (fWindow->Feel() != B_NORMAL_WINDOW_FEEL)
+		return;
+
+	SATGroup* ownGroup = fWindowArea != NULL ? fWindowArea->Group() : NULL;
+
+	GroupIterator groupIterator(fStackAndTile, GetWindow()->Desktop());
+	for (SATGroup* group = groupIterator.NextGroup(); group;
+		group = groupIterator.NextGroup()) {
+		if (group == ownGroup)
+			continue;
+		if (fSATStacking.FindSnappingCandidates(group)) {
+			fOngoingSnapping = &fSATStacking;
+			return;
+		}
+	}
+}
+
+
+void
+SATWindow::ClearCandidates()
+{
+	fSATStacking.ClearCandidates();
+	fOngoingSnapping = NULL;
+}
+
+
+void
+SATWindow::ForgetWindow(SATWindow* window)
+{
+	fSATStacking.ForgetWindow(window);
+}
+
+
+void
 SATWindow::DoGroupLayout()
 {
 	if (!PositionManagedBySAT())
