@@ -298,6 +298,31 @@ TestPillStates(Appearance appearance)
 }
 
 
+// #pragma mark - menus
+
+
+static void
+TestMenus(Appearance appearance)
+{
+	const Palette& p = GetPalette(appearance);
+
+	// the selected item's label over its whole glossy highlight
+	PillStyle highlight = MenuHighlightStyle(p, p.menuSelectedBackground,
+		p.menuSelectedText);
+	check_value(appearance, "selected menu item label / highlight",
+		PillLabelContrast(highlight), kMinTextContrast);
+
+	// menu bar titles over the satin gradient
+	Color top;
+	Color bottom;
+	MenuBarColors(p, p.menuBackground, top, bottom);
+	for (int i = 0; i <= 4; i++) {
+		check_contrast(appearance, "menu text / menu bar", p.menuText,
+			Mix(top, bottom, i / 4.0f), kMinTextContrast);
+	}
+}
+
+
 // #pragma mark - geometry
 
 
@@ -307,7 +332,7 @@ TestShapes()
 	// push buttons are capsules, square buttons and parts are rounded
 	CHECK(ShapeFor(MakeRect(0, 0, 79, 23), true, false) == kCapsuleShape);
 	CHECK(ShapeFor(MakeRect(0, 0, 23, 23), true, false) == kRoundedShape);
-	CHECK(ShapeFor(MakeRect(0, 0, 79, 23), false, false) == kRoundedShape);
+	CHECK(ShapeFor(MakeRect(0, 0, 79, 23), false, false) == kSquareShape);
 	CHECK(ShapeFor(MakeRect(0, 0, 79, 23), true, true) == kFlatShape);
 	CHECK(ShapeFor(MakeRect(0, 0, 10, -5), true, false) == kRoundedShape);
 }
@@ -320,6 +345,7 @@ TestCornerRadius()
 	CHECK(CornerRadius(kCapsuleShape, wide) == 12);
 	CHECK(CornerRadius(kRoundedShape, wide) == kRoundedRadius);
 	CHECK(CornerRadius(kFlatShape, wide) == 0);
+	CHECK(CornerRadius(kSquareShape, wide) == 0);
 
 	// never more than half of the shorter side
 	Rect tiny = MakeRect(0, 0, 5, 5);
@@ -424,6 +450,7 @@ main(int argc, char** argv)
 		TestPaletteText(appearance);
 		TestPaletteGraphics(appearance);
 		TestPillStates(appearance);
+		TestMenus(appearance);
 	}
 	TestShapes();
 	TestCornerRadius();

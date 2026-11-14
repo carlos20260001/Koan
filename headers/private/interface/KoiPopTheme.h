@@ -633,6 +633,40 @@ PillBoundaryContrast(const PillStyle& style, Color background)
 }
 
 
+/*!	The highlight of a selected menu item, on the selected-item background
+	\a base with \a text: a glossy rounded bar, gentler than a button.
+*/
+inline PillStyle
+MenuHighlightStyle(const Palette& palette, Color base, Color text)
+{
+	PillStyle style = PillStyleFor(palette, kNeutralPill, 0, base, text,
+		palette.menuBackground);
+	style.top = Mix(base, MakeColor(255, 255, 255), 0.06f);
+	style.bottom = Mix(base, MakeColor(0, 0, 0), 0.10f);
+	style.border = Mix(base, MakeColor(0, 0, 0), 0.25f);
+	style.glossTop = WithAlpha(MakeColor(255, 255, 255), 0.14f);
+	style.glossBottom = WithAlpha(MakeColor(255, 255, 255), 0.0f);
+	style.shadowOffset = 0;
+	return style;
+}
+
+
+/*!	The satin gradient of a menu bar on the menu background \a base: lighter
+	at the top, a step toward satin (or darker) at the bottom.
+*/
+inline void
+MenuBarColors(const Palette& palette, Color base, Color& top, Color& bottom)
+{
+	if (IsDarkColor(base)) {
+		top = Mix(base, MakeColor(255, 255, 255), 0.07f);
+		bottom = Mix(base, MakeColor(0, 0, 0), 0.18f);
+	} else {
+		top = Mix(base, MakeColor(255, 255, 255), 0.60f);
+		bottom = Mix(base, palette.satin, 0.45f);
+	}
+}
+
+
 // #pragma mark - window controls
 
 
@@ -709,7 +743,9 @@ enum Shape {
 	kCapsuleShape = 0,
 		// fully rounded ends: push buttons
 	kRoundedShape,
-		// small radius: square tool buttons, segments, menu fields
+		// small radius: square tool buttons, menu fields, check boxes
+	kSquareShape,
+		// straight edges: parts of a larger control (segments, arrows)
 	kFlatShape
 		// no surface: flat tool bar buttons at rest
 };
@@ -731,7 +767,7 @@ ShapeFor(Rect frame, bool allBorders, bool flatAtRest)
 	if (flatAtRest)
 		return kFlatShape;
 	if (!allBorders)
-		return kRoundedShape;
+		return kSquareShape;
 	float width = frame.Width() + 1;
 	float height = frame.Height() + 1;
 	if (height <= 0 || width < height * kCapsuleMinAspect)
@@ -770,6 +806,25 @@ struct PillGeometry {
 };
 
 
+/*!	The gloss highlight of a convex surface \a body with corner \a radius:
+	inside the border, away from the rounded ends, over the upper part, so
+	it reads as a reflection. \a gloss is invalid when the body is too
+	small for one.
+*/
+inline void
+GlossFor(Rect body, float radius, Rect& gloss, float& glossRadius)
+{
+	float height = body.Height() + 1;
+	float sideInset = 1.0f + radius * 0.45f;
+	gloss = MakeRect(body.left + sideInset, body.top + 1.0f,
+		body.right - sideInset, body.top + floorf(height * kGlossExtent));
+	float glossHalf = (gloss.Height() + 1) / 2;
+	glossRadius = radius < glossHalf ? radius : glossHalf;
+	if (glossRadius < 0)
+		glossRadius = 0;
+}
+
+
 /*!	Lays out a pill in \a frame, which has \a margin units on each side for
 	the focus ring and the shadow (the control look's frame inset).
 */
@@ -781,19 +836,8 @@ PillGeometryFor(Rect frame, float margin, Shape shape)
 	if (!geometry.body.IsValid())
 		geometry.body = frame;
 	geometry.radius = CornerRadius(shape, geometry.body);
-
-	// the gloss sits inside the border, away from the rounded ends, so it
-	// reads as a reflection on a convex surface
-	float height = geometry.body.Height() + 1;
-	float sideInset = 1.0f + geometry.radius * 0.45f;
-	geometry.gloss = MakeRect(geometry.body.left + sideInset,
-		geometry.body.top + 1.0f, geometry.body.right - sideInset,
-		geometry.body.top + floorf(height * kGlossExtent));
-	float glossHalf = (geometry.gloss.Height() + 1) / 2;
-	geometry.glossRadius = geometry.radius < glossHalf
-		? geometry.radius : glossHalf;
-	if (geometry.glossRadius < 0)
-		geometry.glossRadius = 0;
+	GlossFor(geometry.body, geometry.radius, geometry.gloss,
+		geometry.glossRadius);
 
 	// the focus ring hugs the body, in the margin
 	float ringInset = margin > 1.0f ? margin - 1.0f : 0.0f;

@@ -140,6 +140,7 @@ ImageInclude("/system/add-ons/decorators" ${DECORATORS})
 set(CONTROL_LOOKS
 	BeControlLook
 	FlatControlLook
+	KoiPopControlLook
 )
 ImageInclude("/system/add-ons/control_look" ${CONTROL_LOOKS})
 
