@@ -56,11 +56,13 @@ private:
 			void				_SetColor(color_which which, rgb_color color);
 			void				_SetCurrentColor(rgb_color color);
 			void				_SetUIColors(const BMessage& colors);
+			void				_ApplyScheme(int32 appearance);
 
 private:
 			BColorControl*		fPicker;
 
 			BCheckBox*			fAutoSelectCheckBox;
+			BMenuField*			fSchemeMenuField;
 			BListView*			fAttrList;
 
 			color_which			fWhich;

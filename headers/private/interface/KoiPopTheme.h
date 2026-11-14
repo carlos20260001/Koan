@@ -204,6 +204,7 @@ struct Palette {
 	Color		documentBackground;
 	Color		documentText;
 	Color		linkText;
+	Color		linkVisitedText;
 
 	// controls
 	Color		controlBackground;	// base of a neutral pill
@@ -287,6 +288,7 @@ GetPalette(Appearance appearance)
 		MakeColor(255, 255, 255),	// documentBackground
 		MakeColor(30, 42, 56),		// documentText
 		MakeColor(22, 90, 184),		// linkText
+		MakeColor(104, 70, 176),	// linkVisitedText (deep lavender)
 
 		// controls
 		MakeColor(242, 245, 249),	// controlBackground
@@ -364,6 +366,7 @@ GetPalette(Appearance appearance)
 		MakeColor(18, 23, 31),		// documentBackground
 		MakeColor(230, 236, 243),	// documentText
 		MakeColor(122, 178, 255),	// linkText
+		MakeColor(190, 176, 244),	// linkVisitedText (lavender)
 
 		// controls
 		MakeColor(57, 66, 79),		// controlBackground

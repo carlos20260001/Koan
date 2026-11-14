@@ -111,6 +111,10 @@ TestPaletteText(Appearance appearance)
 		p.documentBackground, text);
 	check_contrast(appearance, "link / window", p.linkText,
 		p.windowBackground, text);
+	check_contrast(appearance, "visited link / document", p.linkVisitedText,
+		p.documentBackground, text);
+	check_contrast(appearance, "visited link / window", p.linkVisitedText,
+		p.windowBackground, text);
 	check_contrast(appearance, "control text / control", p.controlText,
 		p.controlBackground, text);
 	check_contrast(appearance, "menu text / menu", p.menuText,
