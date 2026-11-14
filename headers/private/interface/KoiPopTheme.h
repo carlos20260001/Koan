@@ -848,24 +848,6 @@ PillGeometryFor(Rect frame, float margin, Shape shape)
 }
 
 
-/*!	How many whole units to cut from the edge, on row \a row (0 is the
-	outermost) of a rounded corner of \a radius, so that the rest of the row
-	lies inside the quarter circle. Used for the decorator's rounded title
-	bar corners, which are made by leaving those units out of the
-	decorator's footprint: the windows below then draw there, so no stale
-	pixels stay behind.
-*/
-inline int32_t
-CornerCut(float radius, int32_t row)
-{
-	if (radius <= 0 || row < 0 || row >= (int32_t)radius)
-		return 0;
-	float dy = radius - (row + 0.5f);
-	float dx = sqrtf(radius * radius - dy * dy);
-	int32_t cut = (int32_t)floorf(radius - dx + 0.5f);
-	return cut < 0 ? 0 : cut;
-}
-
 
 }	// namespace KoiPop
 

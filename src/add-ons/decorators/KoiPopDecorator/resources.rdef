@@ -1,0 +1,19 @@
+/*
+ * Copyright 2026, Koan contributors. All rights reserved.
+ * Distributed under the terms of the MIT License.
+ */
+
+resource("be:decor:info") message('deco') {
+	"name"				= "KoiPop",
+	"authors"			= "Koan contributors",
+	"short_descr"		= "Glossy satin windows with a tab strip",
+	"long_descr"		= "The KoiPop desktop theme's windows: a satin metal "
+				"title area with fine pinstripes, glossy red, amber and green "
+				"window controls, rounded corners and a tab strip for native "
+				"window stacks. Use it with the KoiPop control look and color "
+				"schemes.",
+	"lic_url"			= "",
+	"lic_name"			= "MIT",
+	"support_url"		= "",
+	float "version"		= 1.0
+};

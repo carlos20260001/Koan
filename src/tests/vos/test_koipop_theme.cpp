@@ -129,6 +129,9 @@ TestPaletteText(Appearance appearance)
 		p.toolTipBackground, text);
 	check_contrast(appearance, "window text / active tab", p.windowText,
 		p.tabSurface, text);
+	// the decorator: the active tab of a stack without focus
+	check_contrast(appearance, "inactive title text / active tab",
+		p.inactiveTitleText, p.tabSurface, text);
 
 	// semantic fills
 	check_contrast(appearance, "on info / info", p.onInfo, p.info, text);
@@ -417,28 +420,6 @@ TestPillGeometry()
 }
 
 
-static void
-TestCornerCut()
-{
-	const float radii[] = { 3, 5, 6, 8 };
-	for (size_t i = 0; i < 4; i++) {
-		float radius = radii[i];
-		int32_t previous = CornerCut(radius, 0);
-		CHECK(previous >= 1);
-		CHECK(previous < radius);
-		for (int32_t row = 1; row < (int32_t)radius + 3; row++) {
-			int32_t cut = CornerCut(radius, row);
-			CHECK(cut <= previous);
-			CHECK(cut >= 0);
-			previous = cut;
-		}
-		CHECK(CornerCut(radius, (int32_t)radius) == 0);
-	}
-	CHECK(CornerCut(0, 0) == 0);
-	CHECK(CornerCut(5, -1) == 0);
-}
-
-
 int
 main(int argc, char** argv)
 {
@@ -455,7 +436,6 @@ main(int argc, char** argv)
 	TestShapes();
 	TestCornerRadius();
 	TestPillGeometry();
-	TestCornerCut();
 
 	if (sFailures != 0) {
 		printf("%d check(s) failed\n", sFailures);

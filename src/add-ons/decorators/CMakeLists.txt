@@ -13,6 +13,7 @@ endmacro()
 
 add_subdirectory(BeDecorator)
 add_subdirectory(FlatDecorator)
+add_subdirectory(KoiPopDecorator)
 add_subdirectory(MacDecorator)
 add_subdirectory(ModernDecorator)
 add_subdirectory(ModernTabDecorator)

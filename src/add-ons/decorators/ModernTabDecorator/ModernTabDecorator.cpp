@@ -1433,8 +1433,14 @@ ModernTabDecorator::_IsFocusedStack() const
 // #pragma mark - DecorAddOn
 
 
+// Theme decorators that subclass this one build this file into their own
+// add-on, which has its own entry point.
+#ifndef MODERN_TAB_DECORATOR_NO_ADDON_ENTRY
+
 extern "C" DecorAddOn*
 instantiate_decor_addon(image_id id, const char* name)
 {
 	return new (std::nothrow) ModernTabDecorAddOn(id, name);
 }
+
+#endif

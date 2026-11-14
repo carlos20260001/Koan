@@ -130,6 +130,7 @@ ImageInclude("/system/add-ons/media" ${MEDIA_ADDONS})
 set(DECORATORS
 	BeDecorator
 	FlatDecorator
+	KoiPopDecorator
 	MacDecorator
 	ModernDecorator
 	ModernTabDecorator
