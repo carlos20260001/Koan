@@ -264,6 +264,12 @@ public:
 			SATWindow*			ActiveWindow() const;
 			void				SetActiveWindow(SATWindow* window);
 
+			/*! Whether the group tiles windows side by side (more than one
+			area holds windows), as opposed to one stack or one window. */
+			bool				IsTiled();
+			//! Tells the group's windows whether they are tiled.
+			void				UpdateTiledState();
+
 			const WindowAreaList&	GetAreaList() { return fWindowAreaList; }
 
 			/*! \return a sorted tab list. */

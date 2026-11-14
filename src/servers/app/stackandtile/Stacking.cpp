@@ -240,6 +240,12 @@ SATStacking::FindSnappingCandidates(SATGroup* group)
 	if (!window->Decorator()->TitleBarRect().Contains(mousePosition))
 		return false;
 
+	// A tab strip takes a window dropped with the pointer anywhere over the
+	// strip: its tabs do not reach the strip's top edge, and the window being
+	// dragged is held by a tab somewhere below its own top edge.
+	BPoint pointer = mousePosition;
+	SATWindow* stripParent = NULL;
+
 	// use the upper edge of the candidate window to find the parent window
 	mousePosition.y = window->Decorator()->TitleBarRect().top;
 
@@ -252,16 +258,37 @@ SATStacking::FindSnappingCandidates(SATGroup* group)
 		if (_IsStackableWindow(parentWindow) == false
 			|| _IsStackableWindow(window) == false)
 			continue;
-		Decorator::Tab* tab = parentWindow->Decorator()->TabAt(
+		::Decorator* parentDecorator = parentWindow->Decorator();
+		Decorator::Tab* tab = parentDecorator->TabAt(
 			parentWindow->PositionInStack());
 		if (tab == NULL)
 			continue;
+
+		if (parentDecorator->HasTabStrip()) {
+			if (!parentDecorator->TitleBarRect().Contains(pointer))
+				continue;
+			// the member under the pointer, else the stack's top one
+			if (tab->tabRect.Contains(pointer)) {
+				stripParent = satWindow;
+				break;
+			}
+			if (parentWindow->TopLayerStackWindow() == parentWindow)
+				stripParent = satWindow;
+			continue;
+		}
+
 		if (tab->tabRect.Contains(mousePosition)) {
 			// remember window as the parent for stacking
 			fStackingParent = satWindow;
 			_HighlightWindows(true);
 			return true;
 		}
+	}
+
+	if (stripParent != NULL) {
+		fStackingParent = stripParent;
+		_HighlightWindows(true);
+		return true;
 	}
 
 	return false;

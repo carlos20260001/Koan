@@ -88,6 +88,7 @@ Window::Window(const BRect& frame, const char *name,
 
 	fVisibleContentRegionValid(false),
 	fContentRegionValid(false),
+	fTiled(false),
 	fEffectiveDrawingRegionValid(false),
 
 	fRegionPool(),
@@ -197,6 +198,14 @@ Window::SetClipping(BRegion* stillAvailableOnScreen)
 {
 	// this function is only called from the Desktop thread
 
+	// rounded or square corners, depending on where the window is now
+	bool shapeChanged = _UpdateCornerShape();
+	if (shapeChanged) {
+		fContentRegionValid = false;
+		if (fTopView.IsSet())
+			fTopView->InvalidateScreenClipping();
+	}
+
 	// start from full region (as if the window was fully visible)
 	GetFullRegion(&fVisibleRegion);
 	// clip to region still available on screen
@@ -204,6 +213,15 @@ Window::SetClipping(BRegion* stillAvailableOnScreen)
 
 	fVisibleContentRegionValid = false;
 	fEffectiveDrawingRegionValid = false;
+
+	if (shapeChanged) {
+		// the border is drawn differently now
+		BRegion border;
+		GetBorderRegion(&border);
+		border.IntersectWith(&fVisibleRegion);
+		if (border.CountRects() > 0)
+			ProcessDirtyRegion(border);
+	}
 }
 
 
@@ -216,6 +234,8 @@ Window::GetFullRegion(BRegion* region)
 	// start from the decorator border, extend to use the frame
 	GetBorderRegion(region);
 	region->Include(fFrame);
+	// without the cut-away corners of a rounded window
+	_ExcludeCornerCutouts(region);
 }
 
 
@@ -722,6 +742,12 @@ Window::ReloadDecor()
 		if (window == stack->TopLayerWindow())
 			decorator->SetTopTab(i);
 	}
+
+	// The decorator was made for the stack's first window, but the stack's
+	// top window draws it (as after Window::MoveToTopStackLayer()); drawing
+	// with another window's engine races with that window's own drawing.
+	if (Window* top = stack->TopLayerWindow())
+		decorator->SetDrawingEngine(top->GetDrawingEngine());
 
 	return true;
 }
@@ -2079,7 +2105,52 @@ Window::_UpdateContentRegion()
 	if (decorator)
 		fContentRegion.Exclude(&decorator->GetFootprint());
 
+	// A rounded window's corners may reach into the frame; the contents
+	// must not draw there.
+	_ExcludeCornerCutouts(&fContentRegion);
+
 	fContentRegionValid = true;
+}
+
+
+/*!	Lets the decorator know whether this window should have square corners:
+	when it spans a display from edge to edge in either direction (as a
+	zoomed window does) or is tiled against other windows.
+	eturn whether the window's shape changed.
+*/
+bool
+Window::_UpdateCornerShape()
+{
+	::Decorator* decorator = Decorator();
+	if (decorator == NULL)
+		return false;
+
+	bool square = fTiled;
+	if (!square) {
+		BRect bounds = decorator->BorderRect();
+		BRect titleBar = decorator->TitleBarRect();
+		if (titleBar.IsValid())
+			bounds = bounds | titleBar;
+		BRect display = fDesktop->DisplayFrameFor(bounds, false);
+		square = (bounds.left <= display.left && bounds.right >= display.right)
+			|| (bounds.top <= display.top && bounds.bottom >= display.bottom);
+	}
+
+	return decorator->SetSquareCorners(square);
+}
+
+
+void
+Window::_ExcludeCornerCutouts(BRegion* region)
+{
+	::Decorator* decorator = Decorator();
+	if (decorator == NULL)
+		return;
+
+	BRegion cutouts;
+	decorator->GetCornerCutouts(cutouts);
+	if (cutouts.CountRects() > 0)
+		region->Exclude(&cutouts);
 }
 
 

@@ -19,12 +19,14 @@
 
 #include "Decorator.h"
 
+#include <math.h>
 #include <stdio.h>
 
 #include <Region.h>
 
 #include "Desktop.h"
 #include "DesktopSettings.h"
+#include "CornerShape.h"
 #include "DrawingEngine.h"
 
 
@@ -1232,5 +1234,32 @@ Decorator::_InvalidateBitmaps()
 			tab->minimizeBitmaps[index] = NULL;
 			tab->zoomBitmaps[index] = NULL;
 		}
+	}
+}
+
+
+void
+Decorator::_BuildCornerCutouts(BRect bounds, float radius,
+	BRegion& region) const
+{
+	region.MakeEmpty();
+	if (!bounds.IsValid() || radius <= 0)
+		return;
+
+	// The cut is chosen at device resolution, see CornerShape.
+	float scale = fDrawingEngine != NULL ? fDrawingEngine->RenderScale() : 1;
+
+	const int32 kMaxRects = 4 * 64;
+	CornerRect rects[kMaxRects];
+	int32 count = CornerShape::CutRects((int32)floorf(bounds.left),
+		(int32)floorf(bounds.top), (int32)floorf(bounds.right),
+		(int32)floorf(bounds.bottom), radius, scale, rects, kMaxRects);
+	for (int32 i = 0; i < count; i++) {
+		clipping_rect rect;
+		rect.left = rects[i].left;
+		rect.top = rects[i].top;
+		rect.right = rects[i].right;
+		rect.bottom = rects[i].bottom;
+		region.Include(rect);
 	}
 }

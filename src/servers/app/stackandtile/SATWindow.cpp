@@ -142,6 +142,10 @@ SATWindow::RemovedFromGroup(SATGroup* group, bool stayBelowMouse)
 	if (group->CountItems() == 1)
 		group->WindowAt(0)->_RestoreOriginalSize(false);
 
+	// square corners only while tiled
+	fWindow->SetTiled(false);
+	group->UpdateTiledState();
+
 	return true;
 }
 
@@ -270,8 +274,12 @@ SATWindow::ForgetWindow(SATWindow* window)
 void
 SATWindow::DoGroupLayout()
 {
-	if (!PositionManagedBySAT())
+	if (!PositionManagedBySAT()) {
+		fWindow->SetTiled(false);
 		return;
+	}
+
+	fWindowArea->Group()->UpdateTiledState();
 
 	if (fWindowArea != NULL)
 		fWindowArea->DoGroupLayout();

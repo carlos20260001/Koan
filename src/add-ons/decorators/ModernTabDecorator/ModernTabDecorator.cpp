@@ -22,6 +22,7 @@
 
 #include <WindowPrivate.h>
 
+#include "CornerShape.h"
 #include "DesktopSettings.h"
 #include "DrawingEngine.h"
 
@@ -38,6 +39,7 @@
 
 // window frame
 static const int32 kBorderWidth = 2;
+static const float kCornerRadius = 8.0f;
 static const float kResizeKnobSize = 14.0f;
 static const float kBorderResizeLength = 20.0f;
 
@@ -138,6 +140,9 @@ ModernTabDecorator::ModernTabDecorator(DesktopSettings& settings, BRect frame,
 	fHoverRegion(REGION_NONE),
 	fHoverTab(-1),
 	fHoverInTabClose(false),
+	fSquareCorners(false),
+	fCornerScale(1.0f),
+	fCornerRadius(0),
 	fDragTab(-1),
 	fDragGrabOffset(0),
 	fDragPointerX(0),
@@ -360,6 +365,32 @@ ModernTabDecorator::MoveTab(int32 from, int32 to, bool isMoving,
 
 
 void
+ModernTabDecorator::GetCornerCutouts(BRegion& region) const
+{
+	AutoReadLocker _(fLocker);
+	region = fCornerCutouts;
+}
+
+
+bool
+ModernTabDecorator::SetSquareCorners(bool square)
+{
+	AutoWriteLocker _(fLocker);
+
+	// called whenever the window's clipping is rebuilt, which also notices
+	// a changed render scale (the cut is chosen at device resolution)
+	float scale = fDrawingEngine != NULL ? fDrawingEngine->RenderScale() : 1;
+	if (square == fSquareCorners && scale == fCornerScale)
+		return false;
+
+	fSquareCorners = square;
+	_UpdateCorners();
+	_InvalidateFootprint();
+	return true;
+}
+
+
+void
 ModernTabDecorator::UpdateColors(DesktopSettings& settings)
 {
 	SATDecorator::UpdateColors(settings);
@@ -452,6 +483,7 @@ ModernTabDecorator::_DoLayout()
 
 	if (!hasStrip || count == 0) {
 		fTitleBarRect = invalid_rect();
+		_UpdateCorners();
 		return;
 	}
 
@@ -527,6 +559,7 @@ ModernTabDecorator::_DoLayout()
 	}
 
 	_PlaceTabs();
+	_UpdateCorners();
 }
 
 
@@ -553,11 +586,17 @@ ModernTabDecorator::_DrawFrame(BRect invalid)
 		fDrawingEngine->FillRect(below & invalid, fSurfaceColor);
 	}
 
-	// one outline around title bar and frame
-	BRect outline = fBorderRect;
-	if (fTitleBarRect.IsValid())
-		outline.top = fTitleBarRect.top;
-	fDrawingEngine->StrokeRect(outline, border);
+	// one outline around title bar and frame, rounded unless the window
+	// spans a display or is tiled
+	BRect outline = _OuterBounds();
+	if (fCornerRadius > 0) {
+		_DrawCorner(outline, false, true, fill, border);
+		_DrawCorner(outline, true, true, fill, border);
+		fDrawingEngine->SetHighColor(border);
+		fDrawingEngine->DrawRoundRect(outline, fCornerRadius, fCornerRadius,
+			false);
+	} else
+		fDrawingEngine->StrokeRect(outline, border);
 }
 
 
@@ -769,6 +808,7 @@ ModernTabDecorator::_MoveBy(BPoint offset)
 	}
 	fDraggedLeft += offset.x;
 	fDragPointerX += offset.x;
+	fCornerCutouts.OffsetBy((int32)offset.x, (int32)offset.y);
 
 	fFrame.OffsetBy(offset);
 	fTitleBarRect.OffsetBy(offset);
@@ -875,6 +915,9 @@ ModernTabDecorator::_GetFootprint(BRegion* region)
 
 	if (fTitleBarRect.IsValid())
 		region->Include(fTitleBarRect);
+
+	// rounded corners: what is behind the window shows there
+	region->Exclude(&fCornerCutouts);
 }
 
 
@@ -899,8 +942,10 @@ void
 ModernTabDecorator::_TopTabChanged()
 {
 	// The active tab must be visible when the strip overflows, and it
-	// carries the window controls.
+	// carries the window controls. The look of the new top window decides
+	// whether there is a strip at all, so the footprint may change too.
 	_DoLayout();
+	_InvalidateFootprint();
 }
 
 
@@ -1095,6 +1140,77 @@ ModernTabDecorator::_DrawStripBackground(BRect invalid)
 	fDrawingEngine->StrokeLine(
 		BPoint(fTitleBarRect.left, fTitleBarRect.bottom),
 		BPoint(fTitleBarRect.right, fTitleBarRect.bottom), fSeparatorColor);
+
+	// the rounded top corners, under the tabs and controls
+	if (fCornerRadius > 0) {
+		BRect bounds = _OuterBounds();
+		rgb_color fill = focused ? fStripColor : fInactiveStripColor;
+		rgb_color border = focused ? fBorderColor : fInactiveBorderColor;
+		_DrawCorner(bounds, false, false, fill, border);
+		_DrawCorner(bounds, true, false, fill, border);
+	}
+}
+
+
+/*!	The window's outer bounds: frame, border and strip. */
+BRect
+ModernTabDecorator::_OuterBounds() const
+{
+	BRect bounds = fBorderRect;
+	if (fTitleBarRect.IsValid())
+		bounds.top = fTitleBarRect.top;
+	return bounds;
+}
+
+
+/*!	Recomputes the cut-away corners. The window only has rounded corners
+	with a strip (titled, document and floating looks), and not while it
+	asks for square ones.
+*/
+void
+ModernTabDecorator::_UpdateCorners()
+{
+	fCornerScale = fDrawingEngine != NULL ? fDrawingEngine->RenderScale() : 1;
+	fCornerRadius = 0;
+	fCornerCutouts.MakeEmpty();
+
+	if (fSquareCorners || !fTitleBarRect.IsValid() || fBorderWidth <= 0)
+		return;
+
+	BRect bounds = _OuterBounds();
+	fCornerRadius = CornerShape::ClampRadius(kCornerRadius,
+		bounds.IntegerWidth() + 1, bounds.IntegerHeight() + 1);
+	_BuildCornerCutouts(bounds, fCornerRadius, fCornerCutouts);
+}
+
+
+/*!	Paints one rounded corner of \a bounds: the corner's box in the border
+	color, then the inside of the arc in \a fill. The window's region has
+	already cut away the cells entirely outside the arc; what remains of
+	them outside the arc takes the border color, so it reads as part of the
+	outline drawn along the arc afterwards.
+*/
+void
+ModernTabDecorator::_DrawCorner(BRect bounds, bool right, bool bottom,
+	rgb_color fill, rgb_color border)
+{
+	const float r = fCornerRadius;
+	BRect box(bounds.left, bounds.top, bounds.left + r - 1,
+		bounds.top + r - 1);
+	BRect circle(bounds.left, bounds.top, bounds.left + 2 * r - 1,
+		bounds.top + 2 * r - 1);
+	if (right) {
+		box.OffsetBy(bounds.right - box.right, 0);
+		circle.OffsetBy(bounds.right - circle.right, 0);
+	}
+	if (bottom) {
+		box.OffsetBy(0, bounds.bottom - box.bottom);
+		circle.OffsetBy(0, bounds.bottom - circle.bottom);
+	}
+
+	fDrawingEngine->FillRect(box, border);
+	fDrawingEngine->SetHighColor(fill);
+	fDrawingEngine->DrawEllipse(circle, true);
 }
 
 

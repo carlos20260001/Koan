@@ -200,6 +200,11 @@ public:
 			void				ModifiersChanged(int32 modifiers);
 			void				DecoratorHoverLost();
 
+			// Stack & Tile tells a window whether it is tiled against other
+			// windows; tiled windows keep square corners.
+			void				SetTiled(bool tiled) { fTiled = tiled; }
+			bool				IsTiled() const { return fTiled; }
+
 			// some hooks to inform the client window
 			// TODO: move this to ServerWindow maybe?
 			void				WorkspaceActivated(int32 index, bool active);
@@ -349,6 +354,8 @@ protected:
 			void				_SendUpdateMessage();
 
 			void				_UpdateContentRegion();
+			bool				_UpdateCornerShape();
+			void				_ExcludeCornerCutouts(BRegion* region);
 
 			void				_ObeySizeLimits();
 			void				_PropagatePosition();
@@ -386,6 +393,7 @@ protected:
 
 			bool				fVisibleContentRegionValid : 1;
 			bool				fContentRegionValid : 1;
+			bool				fTiled : 1;
 			bool				fEffectiveDrawingRegionValid : 1;
 
 			::RegionPool		fRegionPool;
