@@ -54,6 +54,14 @@ public:
 
 			void				FindSnappingCandidates();
 			bool				JoinCandidates();
+
+			/*! Like FindSnappingCandidates() but only looks for a window
+			stack to join (no tiling); used when a window is dragged by its
+			tab with a tab-strip decorator. */
+			void				FindStackingCandidates();
+			void				ClearCandidates();
+			//! \a window is about to be deleted: drop references to it.
+			void				ForgetWindow(SATWindow* window);
 			void				DoGroupLayout();
 
 			void				AdjustSizeLimits(BRect targetFrame);

@@ -149,3 +149,64 @@ SATWindowBehaviour::AlterDeltaForSnap(Window* window, BPoint& delta,
 	return fMagneticBorder.AlterDeltaForSnap(window->Screen(),
 		groupFrame, delta, now);
 }
+
+
+bool
+SATWindowBehaviour::DetachFromStack()
+{
+	SATWindow* satWindow = fStackAndTile->GetSATWindow(fWindow);
+	if (satWindow == NULL)
+		return DefaultWindowBehaviour::DetachFromStack();
+
+	WindowArea* area = satWindow->GetWindowArea();
+	if (area == NULL || area->WindowList().CountItems() <= 1)
+		return false;
+
+	SATGroup* group = area->Group();
+	if (group == NULL)
+		return false;
+
+	// Leaving the group also detaches the window from its native stack
+	// (SATWindow::RemovedFromArea()); the caller positions it.
+	return group->RemoveWindow(satWindow, false);
+}
+
+
+void
+SATWindowBehaviour::FindStackCandidates()
+{
+	SATWindow* satWindow = fStackAndTile->GetSATWindow(fWindow);
+	if (satWindow == NULL)
+		return;
+
+	// Only a window on its own joins a stack this way; a tiled window drags
+	// its whole group along.
+	WindowArea* area = satWindow->GetWindowArea();
+	if (area != NULL && area->Group() != NULL
+		&& area->Group()->CountItems() > 1) {
+		satWindow->ClearCandidates();
+		return;
+	}
+
+	satWindow->FindStackingCandidates();
+}
+
+
+bool
+SATWindowBehaviour::JoinStackCandidates()
+{
+	SATWindow* satWindow = fStackAndTile->GetSATWindow(fWindow);
+	if (satWindow == NULL)
+		return false;
+
+	return satWindow->JoinCandidates();
+}
+
+
+void
+SATWindowBehaviour::ClearStackCandidates()
+{
+	SATWindow* satWindow = fStackAndTile->GetSATWindow(fWindow);
+	if (satWindow != NULL)
+		satWindow->ClearCandidates();
+}

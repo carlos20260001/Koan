@@ -1,0 +1,19 @@
+/*
+ * Copyright 2026, Koan contributors. All rights reserved.
+ * Distributed under the terms of the MIT License.
+ */
+
+resource("be:decor:info") message('deco') {
+	"name"				= "Modern Tabs",
+	"authors"			= "Koan contributors",
+	"short_descr"		= "Window tab strip for stacked windows",
+	"long_descr"		= "Shows the windows of a native window stack as a tab "
+				"strip in the title bar, with window controls at the left. "
+				"Drag a tab to reorder it, drag it out of the strip to detach "
+				"its window, drop a window's tab on another strip to join "
+				"that stack.",
+	"lic_url"			= "",
+	"lic_name"			= "MIT",
+	"support_url"		= "",
+	float "version"		= 1.0
+};

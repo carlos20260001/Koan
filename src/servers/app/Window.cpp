@@ -1071,6 +1071,14 @@ Window::ModifiersChanged(int32 modifiers)
 }
 
 
+void
+Window::DecoratorHoverLost()
+{
+	if (fWindowBehaviour.IsSet())
+		fWindowBehaviour->DecoratorHoverLost();
+}
+
+
 // #pragma mark -
 
 
@@ -2324,8 +2332,11 @@ Window::MoveToStackPosition(int32 to, bool isMoving)
 
 	BRegion dirty;
 	::Decorator* decorator = Decorator();
-	if (decorator && decorator->MoveTab(index, to, isMoving, &dirty) == false)
+	if (decorator && decorator->MoveTab(index, to, isMoving, &dirty) == false) {
+		// keep the stack order and the decorator's tab order in sync
+		fCurrentStack->Move(to, index);
 		return false;
+	}
 
 	fDesktop->RebuildAndRedrawAfterWindowChange(this, dirty);
 	return true;

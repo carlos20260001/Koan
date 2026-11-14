@@ -133,6 +133,7 @@ Server(
 		decorator/DefaultWindowBehaviour.cpp
 		decorator/MagneticBorder.cpp
 		decorator/TabDecorator.cpp
+		decorator/TabStripLayout.cpp
 		decorator/WindowBehaviour.cpp
 
 		font/AppFontManager.cpp

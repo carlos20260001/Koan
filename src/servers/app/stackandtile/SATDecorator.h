@@ -51,6 +51,11 @@ protected:
 	virtual bool				AlterDeltaForSnap(Window* window, BPoint& delta,
 									bigtime_t now);
 
+	virtual	bool				DetachFromStack();
+	virtual	void				FindStackCandidates();
+	virtual	bool				JoinStackCandidates();
+	virtual	void				ClearStackCandidates();
+
 private:
 			StackAndTile*		fStackAndTile;
 };

@@ -217,7 +217,11 @@ SATStacking::SATStacking(SATWindow* window)
 
 SATStacking::~SATStacking()
 {
-
+	// The window is being deleted while it was dragged over a stack: leave
+	// that stack's tab unhighlighted. (A parent that is deleted first is
+	// forgotten through ForgetWindow().)
+	if (fStackingParent != NULL)
+		fStackingParent->HighlightTab(false);
 }
 
 
@@ -270,10 +274,19 @@ SATStacking::JoinCandidates()
 	if (!fStackingParent)
 		return false;
 
-	bool result = fStackingParent->StackWindow(fSATWindow);
-
+	SATWindow* parent = fStackingParent;
 	_ClearSearchResult();
-	return result;
+
+	// A window that is alone in its group leaves that group first, so it is
+	// never listed by two groups at once. (Leaving may resize the window,
+	// which can search for candidates again; hence the local parent.)
+	WindowArea* area = fSATWindow->GetWindowArea();
+	if (area != NULL && area->Group() != NULL
+		&& area->Group()->CountItems() == 1) {
+		area->Group()->RemoveWindow(fSATWindow, false);
+	}
+
+	return parent->StackWindow(fSATWindow);
 }
 
 
@@ -298,6 +311,25 @@ SATStacking::WindowLookChanged(window_look look)
 		return;
 	if (stack->CountWindows() > 1 && _IsStackableWindow(window) == false)
 		group->RemoveWindow(fSATWindow);
+}
+
+
+void
+SATStacking::ClearCandidates()
+{
+	_ClearSearchResult();
+}
+
+
+void
+SATStacking::ForgetWindow(SATWindow* window)
+{
+	if (fStackingParent != window)
+		return;
+
+	// The parent goes away: do not touch it, but remove our own highlight.
+	fStackingParent = NULL;
+	fSATWindow->HighlightTab(false);
 }
 
 

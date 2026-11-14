@@ -35,6 +35,12 @@ public:
 
 		void				RemovedFromArea(WindowArea* area);
 		void				WindowLookChanged(window_look look);
+
+		//! Drops a found stacking parent and its highlight.
+		void				ClearCandidates();
+		//! Forgets \a window if it is the found stacking parent; called
+		//! before \a window is deleted.
+		void				ForgetWindow(SATWindow* window);
 private:
 		bool				_IsStackableWindow(Window* window);
 		void				_ClearSearchResult();

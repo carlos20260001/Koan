@@ -270,6 +270,20 @@ DesktopObservable::NotifyWindowTabLocationChanged(Window* window,
 
 
 void
+DesktopObservable::NotifyWindowStackPositionChanged(Window* window,
+	int32 from, int32 to)
+{
+	if (fWeAreInvoking)
+		return;
+	InvokeGuard invokeGuard(fWeAreInvoking);
+
+	for (DesktopListener* listener = fDesktopListenerList.First();
+		listener != NULL; listener = fDesktopListenerList.GetNext(listener))
+		listener->WindowStackPositionChanged(window, from, to);
+}
+
+
+void
 DesktopObservable::NotifySizeLimitsChanged(Window* window, int32 minWidth,
 	int32 maxWidth, int32 minHeight, int32 maxHeight)
 {

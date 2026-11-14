@@ -78,6 +78,8 @@ public:
 
 	virtual void				WindowTabLocationChanged(Window* window,
 									float location, bool isShifting);
+	virtual void				WindowStackPositionChanged(Window* window,
+									int32 from, int32 to);
 	virtual void				SizeLimitsChanged(Window* window,
 									int32 minWidth, int32 maxWidth,
 									int32 minHeight, int32 maxHeight);

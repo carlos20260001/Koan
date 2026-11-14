@@ -99,7 +99,13 @@ public:
 		HIGHLIGHT_NONE,
 		HIGHLIGHT_RESIZE_BORDER,
 
-		HIGHLIGHT_USER_DEFINED
+		HIGHLIGHT_USER_DEFINED,
+
+		// The pointer is over the region. Only sent to decorators with a
+		// tab strip (HasTabStrip()); they keep one hovered region:
+		// SetRegionHighlight(region, HIGHLIGHT_HOVER, dirty, tab) moves it
+		// there, REGION_NONE clears it.
+		HIGHLIGHT_HOVER = 0x80
 	};
 
 								Decorator(DesktopSettings& settings,
@@ -169,6 +175,24 @@ public:
 					bounds or unsupported */
 
 	virtual	Region				RegionAt(BPoint where, int32& tab) const;
+
+		/*! Whether the decorator draws the windows of a stack as a tab strip:
+			then dragging a tab reorders it within the stack, dragging it
+			out of the strip detaches its window, and dropping a dragged
+			window on another stack's tab strip joins that stack. Classic
+			decorators return false and keep the classic tab behaviour. */
+	virtual	bool				HasTabStrip() const { return false; }
+		/*! For a tab strip: \a tab is being dragged along the strip, grabbed
+			\a grabOffset units right of its left edge, with the pointer at
+			\a pointerX. The decorator draws the tab under the pointer and
+			opens a gap at the drop slot; the stack itself is not changed.
+			A negative \a tab ends the drag. \a dirty receives what needs a
+			redraw.
+			\return the drop slot, i.e. the stack position the tab takes
+				when released there. */
+	virtual	int32				SetDraggedTab(int32 tab, float grabOffset,
+									float pointerX, BRegion* dirty)
+									{ return tab; }
 
 			const BRegion&		GetFootprint();
 			::Desktop*			GetDesktop();
@@ -281,6 +305,10 @@ protected:
 			void				_InvalidateFootprint();
 
 			void 				_InvalidateBitmaps();
+
+		//! Hook called with the lock held after SetTopTab() changed the top
+		//! tab, i.e. another window of the stack came to the top layer.
+	virtual	void				_TopTabChanged() {}
 
 protected:
 	mutable		BRWLocker	fLocker;

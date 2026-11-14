@@ -343,6 +343,15 @@ MouseFilter::Filter(BMessage* message, EventTarget** _target, int32* _viewToken,
 		return B_SKIP_MESSAGE;
 	}
 
+	if (message->what == B_MOUSE_MOVED) {
+		// The pointer left the window whose decorator shows a hover state.
+		Window* hoverWindow = fDesktop->DecoratorHoverWindow();
+		if (hoverWindow != NULL && hoverWindow != window) {
+			fDesktop->SetDecoratorHoverWindow(NULL);
+			hoverWindow->DecoratorHoverLost();
+		}
+	}
+
 	if (window != NULL) {
 		// dispatch event to the window
 		switch (message->what) {
@@ -505,6 +514,7 @@ Desktop::Desktop(uid_t userID, const char* targetScreen)
 	fWindowLock("window lock"),
 
 	fMouseEventWindow(NULL),
+	fDecoratorHoverWindow(NULL),
 	fWindowUnderMouse(NULL),
 	fLockedFocusWindow(NULL),
 	fViewUnderMouse(B_NULL_TOKEN),
@@ -2032,6 +2042,12 @@ Desktop::HideWindow(Window* window, bool fromMinimize)
 		fMouseEventWindow = NULL;
 	}
 
+	if (fDecoratorHoverWindow == window) {
+		// also before the window is deleted: hiding comes first
+		fDecoratorHoverWindow = NULL;
+		window->DecoratorHoverLost();
+	}
+
 	if (fLockedFocusWindow == window) {
 		// Remove the focus lock so the focus can be changed below
 		fLockedFocusWindow = NULL;
@@ -2391,6 +2407,28 @@ Desktop::SetWindowTabLocation(Window* window, float location, bool isShifting)
 	NotifyWindowTabLocationChanged(window, location, isShifting);
 
 	return changed;
+}
+
+
+/*!	Moves \a window to \a position within its native window stack, i.e.
+	reorders its tab, and tells the listeners so the stack's group model
+	(Stack & Tile) keeps the same order. The windows themselves are not
+	touched: each keeps its identity, contents and client connection.
+*/
+bool
+Desktop::MoveWindowInStack(Window* window, int32 position, bool isMoving)
+{
+	AutoWriteLocker _(fWindowLock);
+
+	int32 from = window->PositionInStack();
+	if (from < 0 || from == position)
+		return false;
+
+	if (!window->MoveToStackPosition(position, isMoving))
+		return false;
+
+	NotifyWindowStackPositionChanged(window, from, position);
+	return true;
 }
 
 

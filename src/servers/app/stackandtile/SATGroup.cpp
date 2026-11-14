@@ -178,7 +178,10 @@ bool
 WindowArea::MoveWindowToPosition(SATWindow* window, int32 index)
 {
 	int32 oldIndex = fWindowList.IndexOf(window);
-	ASSERT(oldIndex != index);
+	if (oldIndex < 0 || index < 0 || index >= fWindowList.CountItems())
+		return false;
+	if (oldIndex == index)
+		return true;
 	return fWindowList.MoveItem(oldIndex, index);
 }
 
@@ -911,6 +914,11 @@ SATGroup::RemoveWindow(SATWindow* window, bool stayBelowMouse)
 {
 	if (!fSATWindowList.RemoveItem(window))
 		return false;
+
+	// The window may be deleted right after it left the group (it is removed
+	// when it closes), so the group must not remember it as its active one.
+	if (fActiveWindow == window)
+		fActiveWindow = NULL;
 
 	// We need the area a little bit longer because the area could hold the
 	// last reference to the group.

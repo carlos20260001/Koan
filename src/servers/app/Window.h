@@ -198,6 +198,7 @@ public:
 									bool isFake);
 
 			void				ModifiersChanged(int32 modifiers);
+			void				DecoratorHoverLost();
 
 			// some hooks to inform the client window
 			// TODO: move this to ServerWindow maybe?

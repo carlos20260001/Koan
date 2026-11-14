@@ -41,10 +41,25 @@ public:
 									bool isFake);
 
 	virtual	void				ModifiersChanged(int32 modifiers);
+	virtual	void				DecoratorHoverLost();
 
 protected:
 	virtual bool				AlterDeltaForSnap(Window* window, BPoint& delta,
 									bigtime_t now);
+
+	// Window stack hooks for tab-strip decorators (Decorator::HasTabStrip()).
+	// The default implementation only knows the native window stack; the
+	// Stack & Tile behaviour routes them through its group model.
+
+		//! Takes fWindow out of its stack, keeping it where it is.
+	virtual	bool				DetachFromStack();
+		//! fWindow is being dragged alone: look for a stack to join under
+		//! the pointer and highlight it.
+	virtual	void				FindStackCandidates();
+		//! Joins the stack found by FindStackCandidates(), if any.
+	virtual	bool				JoinStackCandidates();
+	virtual	void				ClearStackCandidates();
+
 private:
 			enum Action {
 				ACTION_NONE,
@@ -54,6 +69,8 @@ private:
 				ACTION_TAB,
 				ACTION_DRAG,
 				ACTION_SLIDE_TAB,
+				ACTION_DRAG_TAB,
+				ACTION_CLOSE_TAB,
 				ACTION_RESIZE,
 				ACTION_RESIZE_BORDER
 			};
@@ -74,6 +91,7 @@ private:
 			struct DragState;
 			struct ResizeState;
 			struct SlideTabState;
+			struct TabDragState;
 			struct ResizeBorderState;
 			struct DecoratorButtonState;
 			struct ManageWindowState;
@@ -84,6 +102,7 @@ private:
 			friend struct DragState;
 			friend struct ResizeState;
 			friend struct SlideTabState;
+			friend struct TabDragState;
 			friend struct ResizeBorderState;
 			friend struct DecoratorButtonState;
 			friend struct ManageWindowState;
@@ -92,6 +111,11 @@ private:
 			bool				_IsWindowModifier(int32 modifiers) const;
 			Decorator::Region	_RegionFor(const BMessage* message,
 									int32& tab) const;
+
+			void				_UpdateDecoratorHover(const BMessage* message,
+									BPoint where);
+			void				_SetDecoratorHover(Decorator::Region region,
+									int32 tab);
 
 			void				_SetBorderHighlights(int8 horizontal,
 									int8 vertical, bool active);
