@@ -7,6 +7,9 @@
 
 
 #include <config/HaikuConfig.h>
+#ifdef __VOS__
+#include <config/HaikuVersion.h>
+#endif /* __VOS__ */
 
 
 #define _UNUSED(argument) argument
@@ -29,9 +32,14 @@
 #define __has_builtin(x) 0
 #endif
 
+#ifndef __VOS__
 
+#endif /* ! __VOS__ */
 #define B_DEFINE_SYMBOL_VERSION(function, versionedSymbol)	\
 	__asm__(".symver " function "," versionedSymbol)
+#ifdef __VOS__
+
+#endif /* __VOS__ */
 
 #ifdef __cplusplus
 #	define B_DEFINE_WEAK_ALIAS(name, alias_name)	\

@@ -100,6 +100,29 @@ set(
 	"headers/private/libroot/"
 )
 
+# ported subset: headers/posix here is Haiku's libc (stdio.h, fcntl.h, ...),
+# which must not shadow glibc in the Linux-hosted build. VitruvianOS keeps
+# only the headers glibc lacks or that it overrides; expose exactly those
+# through an overlay in the build tree instead of the whole directory.
+# PUBLIC_HEADERS itself stays as upstream has it (packages.cmake reads it).
+set(VOS_POSIX_OVERLAY
+	"compat/sys/stat.h"
+	"net/if.h"
+	"net/if_dl.h"
+	"net/if_media.h"
+	"net/if_types.h"
+	"net/route.h"
+	"sys/sockio.h"
+)
+set(VOS_POSIX_OVERLAY_DIR "${CMAKE_BINARY_DIR}/vos-posix-overlay")
+foreach(_hdr IN LISTS VOS_POSIX_OVERLAY)
+	configure_file("${CMAKE_SOURCE_DIR}/headers/posix/${_hdr}"
+		"${VOS_POSIX_OVERLAY_DIR}/${_hdr}" COPYONLY)
+endforeach()
+set(_VOS_INCLUDE_PUBLIC_HEADERS ${PUBLIC_HEADERS})
+list(TRANSFORM _VOS_INCLUDE_PUBLIC_HEADERS REPLACE "^headers/posix/?$"
+	"${VOS_POSIX_OVERLAY_DIR}")
+
 if(NOT BUILDTOOLS_MODE STREQUAL "1")
 # Standard include directories
 include_directories(
@@ -107,7 +130,7 @@ include_directories(
 	"headers"
 	${BUILD_HEADERS}
 	${PRIVATE_HEADERS}
-	${PUBLIC_HEADERS}
+	${_VOS_INCLUDE_PUBLIC_HEADERS}
 )
 else()
 include_directories(

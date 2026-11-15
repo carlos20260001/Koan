@@ -1,4 +1,5 @@
 /*
+ * Copyright 2026, Dario Casalinuovo. All rights reserved.
  * Copyright 2005-2009, Ingo Weinhold, ingo_weinhold@gmx.de.
  * Distributed under the terms of the MIT License.
  */
@@ -21,8 +22,23 @@ class BMessage;
 namespace BPrivate {
 
 class KMessageField;
+#ifdef __VOS__
+class KMessage;
+#endif /* __VOS__ */
 class MessageAdapter;
 
+#ifdef __VOS__
+}	// namespace BPrivate
+
+namespace BPrivate { typedef uint64 vref_ticket; }
+
+void _HandleVRefs(BPrivate::KMessage*, bool);
+void _RegisterAdoptedTickets(BPrivate::KMessage*, const port_cap_out*,
+	size_t, const BPrivate::vref_ticket*);
+
+namespace BPrivate {
+
+#endif /* __VOS__ */
 
 class KMessage {
 public:
@@ -31,6 +47,9 @@ public:
 				KMESSAGE_INIT_FROM_BUFFER	= 0x02,
 				KMESSAGE_CLONE_BUFFER		= 0x04,
 				KMESSAGE_READ_ONLY			= 0x08,
+#ifdef __VOS__
+				KMESSAGE_OWNS_VREFS			= 0x10,
+#endif /* __VOS__ */
 
 				KMESSAGE_FLAG_MASK			= 0x07,
 			};
@@ -77,9 +96,19 @@ public:
 	inline	status_t			AddInt16(const char* name, int16 value);
 	inline	status_t			AddInt32(const char* name, int32 value);
 	inline	status_t			AddInt64(const char* name, int64 value);
+#ifdef __VOS__
+	inline	status_t			AddUInt64(const char* name, uint64 value);
+#endif /* __VOS__ */
 	inline	status_t			AddPointer(const char* name, const void* value);
 	inline	status_t			AddString(const char* name, const char* value);
 
+#ifdef __VOS__
+			status_t			AddRef(const char* name, dev_t dev,
+									ino_t ino, const char* refName);
+			status_t			AddNodeRef(const char* name, dev_t dev,
+									ino_t ino);
+
+#endif /* __VOS__ */
 			status_t			FindData(const char* name, type_code type,
 									const void** data, int32* numBytes) const;
 			status_t			FindData(const char* name, type_code type,
@@ -100,6 +129,11 @@ public:
 	inline	status_t			FindInt64(const char* name, int64* value) const;
 	inline	status_t			FindInt64(const char* name, int32 index,
 									int64* value) const;
+#ifdef __VOS__
+	inline	status_t			FindUInt64(const char* name, uint64* value) const;
+	inline	status_t			FindUInt64(const char* name, int32 index,
+								uint64* value) const;
+#endif /* __VOS__ */
 	inline	status_t			FindPointer(const char* name,
 									void** value) const;
 	inline	status_t			FindPointer(const char* name, int32 index,
@@ -109,6 +143,25 @@ public:
 	inline	status_t			FindString(const char* name, int32 index,
 									const char** value) const;
 
+#ifdef __VOS__
+	// NOTE: Vitruvian diverge a little bit from the API style (but hey this
+	// is private right?), the problem is that entry_ref/node_ref are libbe
+	// symbols, we can't link libroot back to libbe because of circular
+	// dependencies.
+	// TODO: inline the following functions
+			status_t			FindRef(const char* name, dev_t* device,
+									ino_t* directory, char* nameBuffer,
+									size_t bufferSize) const;
+			status_t			FindRef(const char* name, int32 index,
+									dev_t* device, ino_t* directory,
+									char* nameBuffer, size_t bufferSize) const;
+
+			status_t			FindNodeRef(const char* name,
+									dev_t* device, ino_t* node) const;
+			status_t			FindNodeRef(const char* name, int32 index,
+									dev_t* device, ino_t* node) const;
+
+#endif /* __VOS__ */
 	inline	bool				GetBool(const char* name,
 									bool defaultValue) const;
 	inline	bool				GetBool(const char* name, int32 index,
@@ -185,9 +238,18 @@ public:
 			void				Dump(void (*printFunc)(const char*, ...)) const;
 
 private:
+#ifndef __VOS__
 			friend class KMessageField;
 			friend class MessageAdapter;
 			friend class ::BMessage;	// not so nice, but makes things easier
+#else /* __VOS__ */
+		friend class KMessageField;
+		friend class MessageAdapter;
+		friend class ::BMessage;	// not so nice, but makes things easier
+		friend void ::_HandleVRefs(KMessage*, bool);
+		friend void ::_RegisterAdoptedTickets(KMessage*, const port_cap_out*,
+			size_t, const BPrivate::vref_ticket*);
+#endif /* __VOS__ */
 
 			struct Header {
 				uint32		magic;
@@ -239,6 +301,9 @@ private:
 			int32				fBufferCapacity;
 			uint32				fFlags;
 			int32				fLastFieldOffset;
+#ifdef __VOS__
+			void*				fVrefTickets;	// std::map<vref_id, uint64>*
+#endif /* __VOS__ */
 
 	static	const uint32		kMessageHeaderMagic;
 };
@@ -324,6 +389,15 @@ KMessage::AddInt64(const char* name, int64 value)
 
 
 status_t
+#ifdef __VOS__
+KMessage::AddUInt64(const char* name, uint64 value)
+{
+	return AddData(name, B_UINT64_TYPE, &value, sizeof(uint64), true);
+}
+
+
+status_t
+#endif /* __VOS__ */
 KMessage::AddPointer(const char* name, const void* value)
 {
 	return AddData(name, B_POINTER_TYPE, &value, sizeof(value), true);
@@ -340,6 +414,9 @@ KMessage::AddString(const char* name, const char* value)
 }
 
 
+#ifdef __VOS__
+
+#endif /* __VOS__ */
 // #pragma mark -
 
 
@@ -431,6 +508,22 @@ status_t
 KMessage::FindInt64(const char* name, int32 index, int64* value) const
 {
 	return _FindType(name, B_INT64_TYPE, index, value);
+#ifdef __VOS__
+}
+
+
+status_t
+KMessage::FindUInt64(const char* name, uint64* value) const
+{
+	return FindUInt64(name, 0, value);
+}
+
+
+status_t
+KMessage::FindUInt64(const char* name, int32 index, uint64* value) const
+{
+	return _FindType(name, B_UINT64_TYPE, index, value);
+#endif /* __VOS__ */
 }
 
 

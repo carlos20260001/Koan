@@ -1,0 +1,698 @@
+/*
+ * Copyright 2026, Dario Casalinuovo. All rights reserved.
+ * Distributed under the terms of the LGPL License.
+ */
+
+#ifndef _VOS_FS_UTILS_H
+#define _VOS_FS_UTILS_H
+
+#include <OS.h>
+#include <fs_volume.h>
+
+#include <blkid/blkid.h>
+#include <libudev.h>
+#include <mntent.h>
+#include <pthread.h>
+#include <stdlib.h>
+#include <time.h>
+#include <sys/mount.h>
+#include <sys/statvfs.h>
+
+#include "Team.h"
+#include "../../kernel/nexus/nexus/fs_caps.h"
+
+
+namespace BKernelPrivate {
+
+
+#define SYS_BLOCK_PATH      "/sys/block"
+#define PROC_MOUNTS         "/proc/mounts"
+#define ETC_MTAB            "/etc/mtab"
+#define ETC_FSTAB           "/etc/fstab"
+#define DEV_LOOP_CONTROL    "/dev/loop-control"
+#define DEFAULT_MOUNT_BASE  "/media"
+
+
+static const char* const kLinuxFilesystems[] = {
+	"ext2", "ext3", "ext4",
+	"xfs", "btrfs", "f2fs",
+	"vfat", "exfat", "msdos",
+	"ntfs", "ntfs3", "fuseblk",
+	"iso9660", "udf",
+	"squashfs", "erofs",
+	"hfsplus", "hfs",
+	"jfs", "reiserfs",
+	"tmpfs", "ramfs", "devtmpfs",
+	"proc", "sysfs", "devpts", "cgroup", "cgroup2",
+	"nfs", "nfs4", "cifs", "smbfs", "fuse",
+	"overlay", "aufs",
+	"bfs",
+	NULL
+};
+
+
+typedef struct {
+	const char* legacy;
+	const char* linux_fs;
+} FsNameMapping;
+
+
+static const FsNameMapping kLegacyToLinuxFs[] = {
+	{ "Be File System", "bfs" },
+	{ "EXT2 File System", "ext2" },
+	{ "EXT3 File System", "ext3" },
+	{ "EXT4 File System", "ext4" },
+	{ "NTFS File System", "ntfs3" },
+	{ "FAT File System", "vfat" },
+	{ "FAT32 File System", "vfat" },
+	{ "FAT16 File System", "vfat" },
+	{ "exFAT File System", "exfat" },
+	{ "ISO9660 File System", "iso9660" },
+	{ "UDF File System", "udf" },
+	{ "HFS+ File System", "hfsplus" },
+	{ "XFS File System", "xfs" },
+	{ "Btrfs File System", "btrfs" },
+	{ "SquashFS File System", "squashfs" },
+	{ "F2FS File System", "f2fs" },
+	{ "EROFS File System", "erofs" },
+	{ "RAM File System", "tmpfs" },
+	{ "fat", "vfat" },
+	{ "ntfs", "ntfs3" },
+	{ "hfs", "hfsplus" },
+	{ "smbfs", "cifs" },
+	{ NULL, NULL }
+};
+
+
+static const FsNameMapping kLinuxToHaikuFs[] = {
+	{ "ext2", "EXT2 File System" },
+	{ "ext3", "EXT3 File System" },
+	{ "ext4", "EXT4 File System" },
+	{ "xfs", "XFS File System" },
+	{ "btrfs", "Btrfs File System" },
+	{ "vfat", "FAT32 File System" },
+	{ "fat", "FAT File System" },
+	{ "msdos", "FAT File System" },
+	{ "ntfs", "NTFS File System" },
+	{ "ntfs3", "NTFS File System" },
+	{ "ntfs-3g", "NTFS File System" },
+	{ "fuseblk", "NTFS File System" },
+	{ "iso9660", "ISO9660 File System" },
+	{ "udf", "UDF File System" },
+	{ "hfsplus", "HFS+ File System" },
+	{ "exfat", "exFAT File System" },
+	{ "bfs", "Be File System" },
+	{ "squashfs", "SquashFS File System" },
+	{ "f2fs", "F2FS File System" },
+	{ "erofs", "EROFS File System" },
+	{ "tmpfs", "RAM File System" },
+	{ NULL, NULL }
+};
+
+
+static inline bool
+file_exists(const char* path)
+{
+	struct stat st;
+	return stat(path, &st) == 0;
+}
+
+
+static inline bool
+is_regular_file(const char* path)
+{
+	struct stat st;
+	return stat(path, &st) == 0 && S_ISREG(st.st_mode);
+}
+
+
+static inline bool
+is_block_device(const char* path)
+{
+	struct stat st;
+	return stat(path, &st) == 0 && S_ISBLK(st.st_mode);
+}
+
+
+static inline bool
+is_linux_filesystem(const char* name)
+{
+	if (name == NULL)
+		return false;
+
+	for (int i = 0; kLinuxFilesystems[i] != NULL; i++) {
+		if (strcmp(name, kLinuxFilesystems[i]) == 0)
+			return true;
+	}
+	return false;
+}
+
+
+static inline bool
+is_readonly_filesystem(const char* fsType)
+{
+	return ::BPrivate::FsCaps::is_readonly(fsType);
+}
+
+
+// vfat/exfat/ntfs are NOT idmap-capable; they use uid=/gid= instead (see
+// build_mount_options).
+static inline bool
+is_idmap_capable_filesystem(const char* fsType)
+{
+	return ::BPrivate::FsCaps::is_idmap_capable(fsType);
+}
+
+
+static inline const char*
+translate_fs_to_linux(const char* fsName)
+{
+	if (fsName == NULL || fsName[0] == '\0')
+		return NULL;
+
+	if (is_linux_filesystem(fsName))
+		return fsName;
+
+	for (int i = 0; kLegacyToLinuxFs[i].legacy != NULL; i++) {
+		if (strcasecmp(fsName, kLegacyToLinuxFs[i].legacy) == 0)
+			return kLegacyToLinuxFs[i].linux_fs;
+	}
+
+	return fsName;
+}
+
+
+static inline const char*
+translate_fs_to_haiku(const char* linuxFs)
+{
+	if (linuxFs == NULL || linuxFs[0] == '\0')
+		return "";
+
+	for (int i = 0; kLinuxToHaikuFs[i].linux_fs != NULL; i++) {
+		if (strcasecmp(linuxFs, kLinuxToHaikuFs[i].linux_fs) == 0)
+			return kLinuxToHaikuFs[i].legacy;
+	}
+
+	return linuxFs;
+}
+
+
+static inline bool
+get_mount_info_by_device(const char* devPath, 
+	char* mountPoint, size_t mpSize,
+	char* fsType, size_t fsSize)
+{
+	FILE* mounts = setmntent(PROC_MOUNTS, "r");
+	if (!mounts)
+		mounts = setmntent(ETC_MTAB, "r");
+	if (!mounts)
+		return false;
+
+	char realDev[PATH_MAX];
+	if (!realpath(devPath, realDev))
+		strlcpy(realDev, devPath, sizeof(realDev));
+
+	struct mntent* entry;
+	bool found = false;
+
+	while ((entry = getmntent(mounts)) != NULL) {
+		bool match = strcmp(devPath, entry->mnt_fsname) == 0
+			|| strcmp(realDev, entry->mnt_fsname) == 0;
+		if (!match) {
+			char realMntDev[PATH_MAX];
+			if (realpath(entry->mnt_fsname, realMntDev))
+				match = strcmp(realDev, realMntDev) == 0;
+		}
+
+		if (match) {
+			if (mountPoint && mpSize > 0)
+				strlcpy(mountPoint, entry->mnt_dir, mpSize);
+			if (fsType && fsSize > 0)
+				strlcpy(fsType, entry->mnt_type, fsSize);
+			found = true;
+			break;
+		}
+	}
+
+	endmntent(mounts);
+	return found;
+}
+
+
+static inline bool
+is_mount_point(const char* path)
+{
+	FILE* mounts = setmntent(PROC_MOUNTS, "r");
+	if (!mounts)
+		return false;
+
+	struct mntent* entry;
+	while ((entry = getmntent(mounts)) != NULL) {
+		if (strcmp(entry->mnt_dir, path) == 0) {
+			endmntent(mounts);
+			return true;
+		}
+	}
+	endmntent(mounts);
+	return false;
+}
+
+
+static inline bool
+detect_filesystem(const char* devPath, char* fsType, size_t fsSize,
+	bool skipMountCheck = false)
+{
+	if (!skipMountCheck
+		&& get_mount_info_by_device(devPath, NULL, 0, fsType, fsSize))
+		return true;
+
+	int fd = open(devPath, O_RDONLY | O_CLOEXEC);
+	if (fd < 0)
+		return false;
+
+	blkid_probe pr = blkid_new_probe();
+	if (!pr) {
+		close(fd);
+		return false;
+	}
+
+	if (blkid_probe_set_device(pr, fd, 0, 0) < 0) {
+		blkid_free_probe(pr);
+		close(fd);
+		return false;
+	}
+
+	blkid_probe_enable_superblocks(pr, 1);
+	blkid_probe_set_superblocks_flags(pr, BLKID_SUBLKS_TYPE);
+
+	bool found = false;
+	if (blkid_do_safeprobe(pr) == 0) {
+		const char* type = NULL;
+		if (blkid_probe_lookup_value(pr, "TYPE", &type, NULL) == 0 && type) {
+			strlcpy(fsType, type, fsSize);
+			found = true;
+		}
+	}
+
+	blkid_free_probe(pr);
+	close(fd);
+	return found;
+}
+
+
+static inline bool
+get_volume_label(const char* devPath, char* label, size_t labelSize)
+{
+	int fd = open(devPath, O_RDONLY | O_CLOEXEC);
+	if (fd < 0)
+		return false;
+
+	blkid_probe pr = blkid_new_probe();
+	if (!pr) {
+		close(fd);
+		return false;
+	}
+
+	if (blkid_probe_set_device(pr, fd, 0, 0) < 0) {
+		blkid_free_probe(pr);
+		close(fd);
+		return false;
+	}
+
+	blkid_probe_enable_superblocks(pr, 1);
+	blkid_probe_set_superblocks_flags(pr, BLKID_SUBLKS_LABEL);
+
+	bool found = false;
+	if (blkid_do_safeprobe(pr) == 0) {
+		const char* value = NULL;
+		if (blkid_probe_lookup_value(pr, "LABEL", &value, NULL) == 0 && value) {
+			strlcpy(label, value, labelSize);
+			found = true;
+		}
+	}
+
+	blkid_free_probe(pr);
+	close(fd);
+	return found;
+}
+
+
+static inline bool get_udev_property(const char* devName,
+	const char* propertyName, char* out, size_t outSize);
+
+
+static inline bool
+get_partition_table_type(const char* devPath, char* ptType, size_t ptSize)
+{
+	// udev first: raw probes need the disk group; this works unprivileged.
+	const char* devName = strrchr(devPath, '/');
+	devName = devName ? devName + 1 : devPath;
+	if (get_udev_property(devName, "ID_PART_TABLE_TYPE", ptType, ptSize)
+			&& ptType[0]) {
+		return true;
+	}
+
+	// Fall back: udev misses loop/file-backed devices; root can raw-probe.
+	int fd = open(devPath, O_RDONLY | O_CLOEXEC);
+	if (fd < 0)
+		return false;
+
+	blkid_probe pr = blkid_new_probe();
+	if (!pr) {
+		close(fd);
+		return false;
+	}
+
+	if (blkid_probe_set_device(pr, fd, 0, 0) < 0) {
+		blkid_free_probe(pr);
+		close(fd);
+		return false;
+	}
+
+	blkid_probe_enable_partitions(pr, 1);
+	blkid_probe_set_partitions_flags(pr, BLKID_PARTS_ENTRY_DETAILS);
+
+	bool found = false;
+	if (blkid_do_fullprobe(pr) == 0) {
+		const char* value = NULL;
+		if (blkid_probe_lookup_value(pr, "PTTYPE", &value, NULL) == 0 && value) {
+			strlcpy(ptType, value, ptSize);
+			found = true;
+		}
+	}
+
+	blkid_free_probe(pr);
+	close(fd);
+	return found;
+}
+
+
+struct udev_device_flags_cache {
+	pthread_mutex_t lock;
+	char name[64];
+	bool removable;
+	bool readonly;
+	struct timespec stamp;
+	bool valid;
+};
+
+static const long kUdevCacheNs = 5L * 1000L * 1000L * 1000L;
+
+static inline bool
+_udev_lookup(const char* devName, bool* removableOut, bool* readonlyOut)
+{
+	static udev_device_flags_cache sCache = {
+		PTHREAD_MUTEX_INITIALIZER, {0}, false, false, {0,0}, false
+	};
+
+	struct timespec now;
+	clock_gettime(CLOCK_MONOTONIC, &now);
+
+	pthread_mutex_lock(&sCache.lock);
+	if (sCache.valid && strcmp(sCache.name, devName) == 0) {
+		long age = (now.tv_sec - sCache.stamp.tv_sec) * 1000000000L
+			+ (now.tv_nsec - sCache.stamp.tv_nsec);
+		if (age < kUdevCacheNs) {
+			*removableOut = sCache.removable;
+			*readonlyOut = sCache.readonly;
+			pthread_mutex_unlock(&sCache.lock);
+			return true;
+		}
+	}
+	pthread_mutex_unlock(&sCache.lock);
+
+	struct udev* udev = BKernelPrivate::Team::GetUDev();
+	if (!udev)
+		return false;
+
+	struct udev_device* dev = udev_device_new_from_subsystem_sysname(
+		udev, "block", devName);
+	if (!dev)
+		return false;
+
+	bool removable = false;
+	const char* rmv = udev_device_get_sysattr_value(dev, "removable");
+	if (rmv && rmv[0] == '1')
+		removable = true;
+	if (!removable) {
+		struct udev_device* parent = udev_device_get_parent_with_subsystem_devtype(
+			dev, "usb", "usb_device");
+		if (parent)
+			removable = true;
+	}
+
+	bool readonly = false;
+	const char* ro = udev_device_get_sysattr_value(dev, "ro");
+	if (ro && ro[0] == '1')
+		readonly = true;
+
+	udev_device_unref(dev);
+
+	pthread_mutex_lock(&sCache.lock);
+	strlcpy(sCache.name, devName, sizeof(sCache.name));
+	sCache.removable = removable;
+	sCache.readonly = readonly;
+	sCache.stamp = now;
+	sCache.valid = true;
+	pthread_mutex_unlock(&sCache.lock);
+
+	*removableOut = removable;
+	*readonlyOut = readonly;
+	return true;
+}
+
+
+static inline bool
+is_removable_device(const char* devName)
+{
+	bool removable = false, readonly = false;
+	_udev_lookup(devName, &removable, &readonly);
+	return removable;
+}
+
+
+static inline bool
+is_readonly_device(const char* devName)
+{
+	bool removable = false, readonly = false;
+	_udev_lookup(devName, &removable, &readonly);
+	return readonly;
+}
+
+
+// Reads a udev block-device property; needs no open() of the device node,
+// unlike a raw blkid probe.
+static inline bool
+get_udev_property(const char* devName, const char* propertyName,
+	char* out, size_t outSize)
+{
+	struct udev* udev = BKernelPrivate::Team::GetUDev();
+	if (!udev)
+		return false;
+
+	struct udev_device* dev = udev_device_new_from_subsystem_sysname(
+		udev, "block", devName);
+	if (!dev)
+		return false;
+
+	bool found = false;
+	const char* value = udev_device_get_property_value(dev, propertyName);
+	if (value && value[0]) {
+		strlcpy(out, value, outSize);
+		found = true;
+	}
+
+	udev_device_unref(dev);
+	return found;
+}
+
+
+static inline bool
+get_udev_fs_type(const char* devName, char* typeOut, size_t typeSize)
+{
+	return get_udev_property(devName, "ID_FS_TYPE", typeOut, typeSize);
+}
+
+
+// The GPT type GUID or MBR type id; the value BPartition::Type() must expose.
+static inline bool
+get_udev_part_type(const char* devName, char* typeOut, size_t typeSize)
+{
+	return get_udev_property(devName, "ID_PART_ENTRY_TYPE", typeOut, typeSize);
+}
+
+
+static inline bool
+get_udev_fs_label(const char* devName, char* labelOut, size_t labelSize)
+{
+	return get_udev_property(devName, "ID_FS_LABEL", labelOut, labelSize);
+}
+
+
+static inline bool
+is_whole_disk(const char* devName)
+{
+	struct udev* udev = BKernelPrivate::Team::GetUDev();
+	if (!udev)
+		return false;
+
+	struct udev_device* dev = udev_device_new_from_subsystem_sysname(
+		udev, "block", devName);
+	if (!dev)
+		return false;
+
+	const char* partnum = udev_device_get_sysattr_value(dev, "partition");
+	bool isDisk = (partnum == NULL);
+
+	udev_device_unref(dev);
+	return isDisk;
+}
+
+
+static inline off_t
+get_device_size(const char* devName)
+{
+	struct udev* udev = BKernelPrivate::Team::GetUDev();
+	if (!udev)
+		return 0;
+
+	struct udev_device* dev = udev_device_new_from_subsystem_sysname(
+		udev, "block", devName);
+	if (!dev)
+		return 0;
+
+	off_t size = 0;
+	const char* val = udev_device_get_sysattr_value(dev, "size");
+	if (val)
+		size = strtoull(val, NULL, 10) * 512;
+
+	udev_device_unref(dev);
+	return size;
+}
+
+
+static inline int
+count_partitions(const char* devName)
+{
+	struct udev* udev = BKernelPrivate::Team::GetUDev();
+	if (!udev)
+		return 0;
+
+	struct udev_device* parent_dev = udev_device_new_from_subsystem_sysname(
+		udev, "block", devName);
+	if (!parent_dev)
+		return 0;
+
+	struct udev_enumerate* en = udev_enumerate_new(udev);
+	if (!en) {
+		udev_device_unref(parent_dev);
+		return 0;
+	}
+	udev_enumerate_add_match_subsystem(en, "block");
+	udev_enumerate_add_match_parent(en, parent_dev);
+	udev_enumerate_scan_devices(en);
+
+	struct udev_list_entry* devices = udev_enumerate_get_list_entry(en);
+	struct udev_list_entry* entry;
+	int count = 0;
+
+	udev_list_entry_foreach(entry, devices) {
+		const char* path = udev_list_entry_get_name(entry);
+		struct udev_device* dev = udev_device_new_from_syspath(udev, path);
+		if (!dev)
+			continue;
+
+		const char* partnum = udev_device_get_sysattr_value(dev, "partition");
+		if (partnum)
+			count++;
+
+		udev_device_unref(dev);
+	}
+
+	udev_device_unref(parent_dev);
+	udev_enumerate_unref(en);
+	return count;
+}
+
+
+static inline bool
+get_partition_name(const char* devName, int index, char* partName, size_t partNameSize)
+{
+	struct udev* udev = BKernelPrivate::Team::GetUDev();
+	if (!udev)
+		return false;
+
+	struct udev_device* parent = udev_device_new_from_subsystem_sysname(
+		udev, "block", devName);
+	if (!parent)
+		return false;
+
+	struct udev_enumerate* en = udev_enumerate_new(udev);
+	udev_enumerate_add_match_subsystem(en, "block");
+	udev_enumerate_add_match_parent(en, parent);
+	udev_enumerate_scan_devices(en);
+
+	struct udev_list_entry* devices = udev_enumerate_get_list_entry(en);
+	struct udev_list_entry* entry;
+	int current = 0;
+	bool found = false;
+
+	udev_list_entry_foreach(entry, devices) {
+		const char* path = udev_list_entry_get_name(entry);
+		struct udev_device* dev = udev_device_new_from_syspath(udev, path);
+		if (!dev)
+			continue;
+
+		const char* partnum = udev_device_get_sysattr_value(dev, "partition");
+		if (partnum) {
+			if (current == index) {
+				const char* sysname = udev_device_get_sysname(dev);
+				if (sysname) {
+					strlcpy(partName, sysname, partNameSize);
+					found = true;
+				}
+				udev_device_unref(dev);
+				break;
+			}
+			current++;
+		}
+		udev_device_unref(dev);
+	}
+
+	udev_enumerate_unref(en);
+	udev_device_unref(parent);
+	return found;
+}
+
+
+static inline void
+build_mount_options(const char* fsType, const char* userOptions,
+	uid_t owner, gid_t ownerGroup,
+	char* options, size_t optionsSize)
+{
+	options[0] = '\0';
+
+	if (userOptions && userOptions[0] != '\0')
+		strlcpy(options, userOptions, optionsSize);
+
+	if (strcmp(fsType, "ntfs3") == 0 || strcmp(fsType, "ntfs") == 0 ||
+		strcmp(fsType, "vfat") == 0 || strcmp(fsType, "exfat") == 0) {
+		// FAT-family fs carry no on-disk ownership; mount all files as the
+		// requesting user, not the (possibly root) calling process.
+		uid_t u = (owner != (uid_t)-1) ? owner : getuid();
+		gid_t g = (ownerGroup != (gid_t)-1) ? ownerGroup : getgid();
+		if (options[0] != '\0')
+			strlcat(options, ",", optionsSize);
+
+		char uidgid[64];
+		snprintf(uidgid, sizeof(uidgid), "uid=%u,gid=%u,dmask=022,fmask=133",
+			(unsigned)u, (unsigned)g);
+		strlcat(options, uidgid, optionsSize);
+	}
+}
+
+
+} // namespace BKernelPrivate
+
+
+#endif // _VOS_FS_UTILS_H

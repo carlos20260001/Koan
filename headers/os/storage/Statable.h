@@ -14,6 +14,9 @@
 
 struct node_ref;
 struct stat_beos;
+#ifdef __VOS__
+struct statx;
+#endif /* __VOS__ */
 class BVolume;
 
 
@@ -28,13 +31,28 @@ private:
 		// provided for BeOS compatibility
 
 public:
+#ifndef __VOS__
 	virtual status_t GetStat(struct stat* stat) const = 0;
+#else /* __VOS__ */
+	// Deprecated on V\OS: prefer GetStatX (real btime, nsec timestamps).
+	// Retained for POSIX-facing paths that genuinely need `struct stat`.
+	virtual status_t GetStat(struct stat* stat) const
+		__attribute__((deprecated("use GetStatX"))) = 0;
+
+	virtual status_t GetStatX(struct statx* stx) const;
+#endif /* __VOS__ */
 
 	bool IsFile() const;
 	bool IsDirectory() const;
 	bool IsSymLink() const;
 
+#ifndef __VOS__
 	status_t GetNodeRef(node_ref* ref) const;
+#else /* __VOS__ */
+	// This is a V\OS API change.
+	virtual status_t GetNodeRef(node_ref* ref) const = 0;
+	//status_t GetNodeRef(node_ref* ref) const;
+#endif /* __VOS__ */
 
 	status_t GetOwner(uid_t* owner) const;
 	status_t SetOwner(uid_t owner);
@@ -52,6 +70,10 @@ public:
 
 	status_t GetCreationTime(time_t* ctime) const;
 	status_t SetCreationTime(time_t ctime);
+#ifdef __VOS__
+		// Creation time is read-only on Linux (statx btime); always
+		// returns B_NOT_SUPPORTED.
+#endif /* __VOS__ */
 
 	status_t GetAccessTime(time_t* atime) const;
 	status_t SetAccessTime(time_t atime);

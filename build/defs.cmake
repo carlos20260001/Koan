@@ -73,6 +73,12 @@ set(GLOBAL_CFLAGS
 )
 
 if(NOT BUILDTOOLS_MODE STREQUAL "1")
+    # Shared Haiku/air/OS headers carry the VitruvianOS (Linux-hosted)
+    # declarations under __VOS__. LinuxBuildCompatibility.h defines it too,
+    # but only after it has already included SupportDefs.h (and with it
+    # Errors.h), so define it on the command line where every header sees it.
+    add_compile_definitions(__VOS__=1)
+
     # Target architecture
     set(VITRUVIAN_TARGET_ARCH "amd64" CACHE STRING "Target architecture (Debian arch name, e.g. amd64, arm64)")
     set_property(CACHE VITRUVIAN_TARGET_ARCH PROPERTY STRINGS "amd64" "arm64")

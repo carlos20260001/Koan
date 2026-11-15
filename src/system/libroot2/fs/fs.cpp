@@ -1,0 +1,989 @@
+/*
+ *  Copyright 2020-2026, Dario Casalinuovo. All rights reserved.
+ *  Distributed under the terms of the LGPL License.
+ */
+
+#include <syscalls.h>
+#include <VRefCache.h>
+
+#include <NodeMonitor.h>
+
+#include <dirent.h>
+#include <fcntl.h>
+#include <stdio.h>
+#include <string.h>
+#include <sys/stat.h>
+#include <sys/syscall.h>
+#include <sys/sysmacros.h>
+
+#include "LinuxVolume.h"
+#include "KernelDebug.h"
+
+
+// "dir" may itself be "/" here: unlike Haiku, Vitruvian mounts the boot
+// volume on the real root, and "%s/%s" would then yield "//leaf".
+static status_t
+join_path(const char* dir, const char* leaf, char* buffer, size_t bufferSize)
+{
+	size_t dirLength = strlen(dir);
+	bool hasTrailingSlash = dirLength > 0 && dir[dirLength - 1] == '/';
+	const char* format = hasTrailingSlash ? "%s%s" : "%s/%s";
+
+	int written = snprintf(buffer, bufferSize, format, dir, leaf);
+	if (written < 0 || (size_t)written >= bufferSize)
+		return B_BUFFER_OVERFLOW;
+
+	return B_OK;
+}
+
+
+// O_NOTRAVERSE is a V\OS-private bit: open the link itself if the leaf is a
+// symlink (O_PATH, usable for stat/readlink/chown only), else open normally.
+static int
+open_at_mode(int dirFd, const char* path, int openMode, int perms)
+{
+	bool noTraverse = (openMode & O_NOTRAVERSE) != 0;
+	openMode &= ~O_NOTRAVERSE;
+
+	if (!noTraverse)
+		return openat(dirFd, path, openMode, perms);
+
+	int ret = openat(dirFd, path, openMode | O_NOFOLLOW, perms);
+	if (ret < 0 && errno == ELOOP)
+		ret = openat(dirFd, path, O_PATH | O_NOFOLLOW | O_CLOEXEC);
+	return ret;
+}
+
+
+status_t
+_kern_read_statx(int fd, const char* path, bool traverseLink,
+	unsigned int mask, struct statx* stx)
+{
+	CALLED();
+
+	if (stx == NULL || (fd < 0 && path == NULL))
+		return B_BAD_VALUE;
+
+	int flags = traverseLink ? 0 : AT_SYMLINK_NOFOLLOW;
+	if (path == NULL || path[0] == '\0') {
+		flags |= AT_EMPTY_PATH;
+		path = "";
+	}
+
+	if (fd < 0)
+		fd = AT_FDCWD;
+
+	if (::statx(fd, path, flags, mask, stx) == 0)
+		return B_OK;
+
+	// Kernel/filesystem without statx (pre-4.11 or unusual FS): fall back to
+	// fstatat and synthesize a struct statx without STATX_BTIME.
+	if (errno != ENOSYS)
+		return -errno;
+
+	struct stat st;
+	if (fstatat(fd, path, &st, flags) < 0)
+		return -errno;
+
+	memset(stx, 0, sizeof(*stx));
+	stx->stx_mask = STATX_BASIC_STATS;
+	stx->stx_blksize = st.st_blksize;
+	stx->stx_nlink = st.st_nlink;
+	stx->stx_uid = st.st_uid;
+	stx->stx_gid = st.st_gid;
+	stx->stx_mode = st.st_mode;
+	stx->stx_ino = st.st_ino;
+	stx->stx_size = st.st_size;
+	stx->stx_blocks = st.st_blocks;
+	stx->stx_atime.tv_sec = st.st_atim.tv_sec;
+	stx->stx_atime.tv_nsec = st.st_atim.tv_nsec;
+	stx->stx_mtime.tv_sec = st.st_mtim.tv_sec;
+	stx->stx_mtime.tv_nsec = st.st_mtim.tv_nsec;
+	stx->stx_ctime.tv_sec = st.st_ctim.tv_sec;
+	stx->stx_ctime.tv_nsec = st.st_ctim.tv_nsec;
+	stx->stx_dev_major = major(st.st_dev);
+	stx->stx_dev_minor = minor(st.st_dev);
+	stx->stx_rdev_major = major(st.st_rdev);
+	stx->stx_rdev_minor = minor(st.st_rdev);
+	return B_OK;
+}
+
+
+status_t
+_kern_read_stat(int fd, const char* path, bool traverseLink,
+	struct stat* st, size_t _ignored)
+{
+	CALLED();
+
+	if (st == NULL)
+		return B_BAD_VALUE;
+
+	struct statx stx;
+	status_t err = _kern_read_statx(fd, path, traverseLink,
+		STATX_BASIC_STATS, &stx);
+	if (err != B_OK)
+		return err;
+
+	memset(st, 0, sizeof(*st));
+	st->st_dev = makedev(stx.stx_dev_major, stx.stx_dev_minor);
+	st->st_ino = stx.stx_ino;
+	st->st_mode = stx.stx_mode;
+	st->st_nlink = stx.stx_nlink;
+	st->st_uid = stx.stx_uid;
+	st->st_gid = stx.stx_gid;
+	st->st_rdev = makedev(stx.stx_rdev_major, stx.stx_rdev_minor);
+	st->st_size = stx.stx_size;
+	st->st_blksize = stx.stx_blksize;
+	st->st_blocks = stx.stx_blocks;
+	st->st_atim.tv_sec = stx.stx_atime.tv_sec;
+	st->st_atim.tv_nsec = stx.stx_atime.tv_nsec;
+	st->st_mtim.tv_sec = stx.stx_mtime.tv_sec;
+	st->st_mtim.tv_nsec = stx.stx_mtime.tv_nsec;
+	st->st_ctim.tv_sec = stx.stx_ctime.tv_sec;
+	st->st_ctim.tv_nsec = stx.stx_ctime.tv_nsec;
+	return B_OK;
+}
+
+
+int
+_kern_open(int fd, const char* path, int openMode, int perms)
+{
+	CALLED();
+
+	if (fd < 0 && path == NULL)
+		return B_BAD_VALUE;
+
+	char fdPath[64];
+	if (path == NULL || path[0] == '\0') {
+		if (fd < 0)
+			return B_ENTRY_NOT_FOUND;
+
+		snprintf(fdPath, sizeof(fdPath), "/proc/self/fd/%d", fd);
+		path = fdPath;
+		fd = AT_FDCWD;
+	}
+
+	if (fd < 0)
+		fd = AT_FDCWD;
+
+	// Always set O_CLOEXEC so fds don't leak across exec() boundaries,
+	// especially when load_image() uses clone()+exec().
+	openMode |= O_CLOEXEC;
+
+	int ret = open_at_mode(fd, path, openMode,
+		(openMode & O_CREAT) != 0 ? perms : 0);
+
+	if (ret < 0)
+		return -errno;
+
+	return ret;
+}
+
+
+status_t
+_kern_close(int fd)
+{
+	CALLED();
+
+	return (close(fd) < 0) ? -errno : B_OK;
+}
+
+
+int
+_kern_open_dir(int fd, const char* path)
+{
+	CALLED();
+
+	if (fd < 0 && path == NULL)
+		return B_BAD_VALUE;
+
+	if (fd < 0)
+		fd = AT_FDCWD;
+
+	int flags = O_DIRECTORY;
+
+	if (path == NULL || path[0] == '\0') {
+		flags |= AT_EMPTY_PATH;
+		path = "";
+	}
+
+	int ret = openat(fd, path, flags);
+	if (ret < 0) {
+		if (errno == ENOTDIR && path != NULL && path[0] != '\0') {
+			// Distinguish: does the path itself exist as a non-dir
+			// (B_NOT_A_DIRECTORY) or does a path component block traversal
+			// (B_ENTRY_NOT_FOUND)?
+			struct stat st;
+			if (fstatat(fd, path, &st, AT_SYMLINK_NOFOLLOW) == 0)
+				return B_NOT_A_DIRECTORY;
+			return B_ENTRY_NOT_FOUND;
+		}
+		return -errno;
+	}
+
+	return ret;
+}
+
+
+int
+_kern_open_parent_dir(int fd, char* name, size_t length)
+{
+	CALLED();
+
+	if (fd < 0)
+		return B_BAD_VALUE;
+
+	int dirfd = _kern_open_dir(fd, "..");
+	if (dirfd < 0)
+		return -errno;
+
+	if (name != NULL) {
+		if (length <= 0) {
+			close(dirfd);
+			return B_BAD_VALUE;
+		}
+
+		char buf[B_PATH_NAME_LENGTH];
+		status_t ret = _kern_fd_to_path(fd, -1, buf, sizeof(buf));
+		if (ret != B_OK) {
+			close(dirfd);
+			return ret;
+		}
+
+		// Treat empty path and "/" as the root -> leaf name must be "."
+		// (the GNU basename() returns "" instead of "." for these inputs).
+		char* baseName;
+		if (buf[0] == '\0' || strcmp(buf, "/") == 0) {
+			baseName = (char*)".";
+		} else {
+			baseName = basename(buf);
+			if (baseName == NULL) {
+				close(dirfd);
+				return B_ENTRY_NOT_FOUND;
+			}
+			if (baseName[0] == '\0' || strcmp(baseName, "/") == 0)
+				baseName = (char*)".";
+		}
+
+		size_t len = strlen(baseName);
+		if (len+1 > length) {
+			close(dirfd);
+			return B_BUFFER_OVERFLOW;
+		}
+
+		if (strlcpy(name, baseName, length) >= length) {
+			close(dirfd);
+			return B_BUFFER_OVERFLOW;
+		}
+	}
+
+	return dirfd;
+}
+
+
+// A gone node resolves through /proc as "<path> (deleted)".
+static status_t
+_reject_deleted_path(const char* path)
+{
+	static const char kSuffix[] = " (deleted)";
+	size_t len = strlen(path);
+	if (len >= sizeof(kSuffix) - 1
+		&& strcmp(path + len - (sizeof(kSuffix) - 1), kSuffix) == 0)
+		return B_ENTRY_NOT_FOUND;
+	return B_OK;
+}
+
+
+int
+_kern_open_dir_virtual_ref(vref_id id, const char* name)
+{
+	if (id < 0)
+		return B_BAD_VALUE;
+
+	bool hasName = name != NULL && strlen(name) != 0 && strcmp(name, ".") != 0;
+	int fd = hasName ? BPrivate::VRefCache::OpenPath(id)
+		: BPrivate::VRefCache::Open(id);
+	if (fd < 0)
+		return fd;
+
+	if (!hasName) {
+		struct stat st;
+		if (fstat(fd, &st) == 0 && !S_ISDIR(st.st_mode)) {
+			close(fd);
+			return B_NOT_A_DIRECTORY;
+		}
+		return fd;
+	}
+
+	int ret = openat(fd, name, O_DIRECTORY | O_CLOEXEC);
+	close(fd);
+	return (ret < 0) ? -errno : ret;
+}
+
+
+int
+_kern_open_dir_entry_ref(dev_t device, ino_t node, const char* name)
+{
+	CALLED();
+
+	if (device == B_INVALID_DEV || node == B_INVALID_INO)
+		return B_BAD_VALUE;
+
+	if (device == get_vref_dev())
+		return _kern_open_dir_virtual_ref(node, name);
+
+	char path[B_PATH_NAME_LENGTH];
+	status_t ret = _kern_entry_ref_to_path(device, node, name, path,
+		B_PATH_NAME_LENGTH);
+
+	if (ret != B_OK) {
+		// TODO stack trace here
+		UNIMPLEMENTED();
+		return ret;
+	}
+
+	int fd = open(path, O_RDONLY | O_DIRECTORY | O_CLOEXEC);
+	return (fd < 0) ? -errno : fd;
+}
+
+
+int
+_kern_open_virtual_ref(vref_id id, const char* name,
+	int openMode, int perms)
+{
+	if (id < 0)
+		return B_BAD_VALUE;
+
+	bool hasName = name != NULL && strlen(name) != 0 && strcmp(name, ".") != 0;
+	int fd = hasName ? BPrivate::VRefCache::OpenPath(id)
+		: BPrivate::VRefCache::Open(id);
+	if (fd < 0)
+		return fd;
+
+	if (!hasName)
+		return fd;
+
+	int retFd = open_at_mode(fd, name, openMode, perms);
+	if (retFd < 0 && errno == EISDIR)
+		retFd = openat(fd, name, O_RDONLY | O_DIRECTORY | O_CLOEXEC, 0);
+	close(fd);
+	return (retFd < 0) ? -errno : retFd;
+}
+
+
+int
+_kern_open_entry_ref(dev_t device, ino_t node, const char* name,
+	int openMode, int perms)
+{
+	CALLED();
+
+	if (device == B_INVALID_DEV || node == B_INVALID_INO)
+		return B_BAD_VALUE;
+
+	if (device == get_vref_dev())
+		return _kern_open_virtual_ref(node, name, openMode, perms);
+
+	char path[B_PATH_NAME_LENGTH];
+	status_t ret = _kern_entry_ref_to_path(device, node, name, path,
+		B_PATH_NAME_LENGTH);
+
+	if (ret != B_OK)
+		return ret;
+
+	int fd = open_at_mode(AT_FDCWD, path, openMode, perms);
+	if (fd < 0 && errno == EISDIR)
+		fd = open(path, O_RDONLY | O_DIRECTORY | O_CLOEXEC, 0);
+	return (fd < 0) ? -errno : fd;
+}
+
+
+status_t
+_kern_entry_ref_to_path(dev_t device, ino_t node, const char* leaf,
+	char* userPath, size_t pathLength)
+{
+	CALLED();
+
+	if (leaf == NULL && (device == B_INVALID_DEV || node == B_INVALID_INO))
+		return B_BAD_VALUE;
+
+	if ((leaf != NULL && leaf[0] == '\0') || pathLength == 0)
+		return B_BAD_VALUE;
+
+	if (leaf != NULL && leaf[0] == '/') {
+		if (strlcpy(userPath, leaf, pathLength) >= pathLength) {
+			return B_BUFFER_OVERFLOW;
+		}
+		return B_OK;
+	}
+
+	if (device == get_vref_dev()) {
+		vref_id id = (vref_id) node;
+		if (id < 0)
+			return B_ENTRY_NOT_FOUND;
+
+		int fd = BPrivate::VRefCache::OpenPath(id);
+		if (fd < 0)
+			return fd;
+
+		status_t ret = _kern_entry_ref_to_path_by_fd(fd, -1, leaf,
+			userPath, pathLength);
+
+		close(fd);
+		return ret;
+	}
+
+	// Exception to support opening volume roots: if dev_t/ino_t/leaf match
+	// the mount point, hand back the mount-point path.
+	BPrivate::MountEntry mountEntry;
+	if (!BPrivate::MountInfo::FindByDev(device, &mountEntry))
+		return B_ENTRY_NOT_FOUND;
+
+	const char* mntDir = mountEntry.mount_point.String();
+	struct stat st;
+	if (stat(mntDir, &st) < 0)
+		return -errno;
+
+	if (node != st.st_ino)
+		return B_ENTRY_NOT_FOUND;
+
+	if (leaf == NULL || strcmp(leaf, ".") == 0) {
+		if (strlcpy(userPath, mntDir, pathLength) >= pathLength)
+			return B_BUFFER_OVERFLOW;
+	} else {
+		status_t joinStatus = join_path(mntDir, leaf, userPath, pathLength);
+		if (joinStatus != B_OK)
+			return joinStatus;
+	}
+	return B_OK;
+}
+
+
+// TODO remove?
+int
+_kern_open_dir_entry_ref_fd(dev_t device, ino_t node, const char* name)
+{
+	return _kern_open_dir_entry_ref(device, node, name);
+}
+
+
+int
+_kern_open_entry_ref_fd(dev_t device, ino_t node, const char* name,
+	int openMode, int perms)
+{
+	return _kern_open_entry_ref(device, node, name, openMode, perms);
+}
+
+
+status_t
+_kern_entry_ref_to_path_by_fd(int fd, team_id team, const char* name,
+	char* buffer, size_t bufferSize)
+{
+	// NULL or "." both mean "the fd itself" — "." is the sentinel used by
+	// BEntry for the filesystem root (where the directory is its own parent).
+	if (name == NULL || strcmp(name, ".") == 0) {
+		status_t ret = _kern_fd_to_path(fd, team, buffer, bufferSize);
+		return ret == B_OK ? _reject_deleted_path(buffer) : ret;
+	}
+
+	if (name != NULL && name[0] == '/') {
+		if (strlcpy(buffer, name, bufferSize) >= bufferSize)
+			return B_BUFFER_OVERFLOW;
+
+		return B_OK;
+	}
+
+	char resolvedPath[B_PATH_NAME_LENGTH];
+	status_t ret = _kern_fd_to_path(fd, team,
+		resolvedPath, sizeof(resolvedPath));
+
+	if (ret != B_OK)
+		return ret;
+
+	ret = _reject_deleted_path(resolvedPath);
+	if (ret != B_OK)
+		return ret;
+
+	return join_path(resolvedPath, name, buffer, bufferSize);
+}
+
+
+status_t
+_kern_fd_to_path(int fd, team_id team, char* buffer, size_t bufferSize)
+{
+	CALLED();
+
+	if (fd < 0)
+		return B_FILE_ERROR;
+
+	if (buffer == NULL || bufferSize == 0)
+		return B_BAD_VALUE;
+
+	char procPath[B_PATH_NAME_LENGTH];
+	if (team == -1 || team == getpid())
+		snprintf(procPath, sizeof(procPath), "/proc/self/fd/%d", fd);
+	else
+		snprintf(procPath, sizeof(procPath), "/proc/%d/fd/%d", team, fd);
+
+	ssize_t size = readlink(procPath, buffer, bufferSize - 1);
+	if (size < 0)
+		return -errno;
+
+	buffer[size] = '\0';
+
+	return B_OK;
+}
+
+
+status_t
+_kern_read_link(int fd, const char* path, char* buffer, size_t* _bufferSize)
+{
+	CALLED();
+
+	if (_bufferSize == NULL || buffer == NULL)
+		return B_BAD_VALUE;
+
+	if (fd < 0 && path == NULL)
+		return B_BAD_VALUE;
+
+	if (fd < 0)
+		fd = AT_FDCWD;
+
+	// Since Linux 2.6.39, path can be an empty string; allow path==NULL => ""
+	if (path == NULL)
+		path = "";
+
+	if (*_bufferSize == 0)
+		return B_BAD_VALUE;
+
+	char target[PATH_MAX];
+	ssize_t size = readlinkat(fd, path, target, sizeof(target));
+	if (size < 0)
+		return (errno == ENOENT && path[0] == '\0') ? B_BAD_VALUE : -errno;
+
+	memcpy(buffer, target, (size_t)size < *_bufferSize ? (size_t)size : *_bufferSize);
+	if ((size_t)size < *_bufferSize)
+		buffer[size] = '\0';
+	*_bufferSize = (size_t)size;
+	return B_OK;
+}
+
+
+status_t
+_kern_fsync(int fd)
+{
+	CALLED();
+	
+	if (fd < 0)
+		return B_FILE_ERROR;
+
+	return (fsync(fd) < 0) ? -errno : B_OK ;
+}
+
+
+status_t
+_kern_write_stat(int fd, const char* path, bool traverseLink,
+	const struct stat* st, size_t statSize, int statMask)
+{
+	CALLED();
+
+	if (st == NULL || statSize != sizeof(struct stat)
+			|| (fd < 0 && path == NULL))
+		return B_BAD_VALUE;
+
+	if (fd < 0)
+		fd = AT_FDCWD;
+
+	int flags = traverseLink ? 0 : AT_SYMLINK_NOFOLLOW;
+
+	if (path == NULL)
+		flags |= AT_EMPTY_PATH;
+
+	if (statMask & B_STAT_MODE) {
+		// When path is NULL we operate directly on the fd.
+		if (path == NULL) {
+			if (fchmod(fd, st->st_mode) < 0)
+				return (errno == EBADF) ? B_NOT_SUPPORTED : -errno;
+		} else {
+			if (fchmodat(fd, path, st->st_mode,
+					traverseLink ? 0 : AT_SYMLINK_NOFOLLOW) < 0) {
+				if (errno == EOPNOTSUPP || errno == ENOTSUP)
+					return B_NOT_SUPPORTED;
+				return -errno;
+			}
+		}
+	}
+
+	if (statMask & (B_STAT_UID | B_STAT_GID)) {
+		uid_t uid = (statMask & B_STAT_UID) ? st->st_uid : (uid_t)-1;
+		gid_t gid = (statMask & B_STAT_GID) ? st->st_gid : (gid_t)-1;
+		if (path == NULL) {
+			if (fchown(fd, uid, gid) < 0) {
+				if (errno != EBADF || fchownat(fd, "", uid, gid,
+						AT_EMPTY_PATH | AT_SYMLINK_NOFOLLOW) < 0)
+					return -errno;
+			}
+		} else {
+			if (fchownat(fd, path, uid, gid, flags) < 0)
+				return -errno;
+		}
+	}
+
+	if (statMask & B_STAT_SIZE && S_ISREG(st->st_mode)) {
+		if (ftruncate64(fd, st->st_size) < 0)
+			return -errno;
+	}
+
+	// Linux has no userspace API to set the inode birth time (btime). statx
+	// can read STATX_BTIME but no setter exists. If a caller sets only
+	// B_STAT_CREATION_TIME we report B_NOT_SUPPORTED; if combined with other
+	// flags we honour those and ignore the creation-time portion.
+	if (statMask == B_STAT_CREATION_TIME)
+		return B_NOT_SUPPORTED;
+
+	if (statMask & (B_STAT_MODIFICATION_TIME | B_STAT_ACCESS_TIME)) {
+		struct timespec times[2];
+		times[0].tv_nsec = UTIME_OMIT;
+		times[1].tv_nsec = UTIME_OMIT;
+
+		if (statMask & B_STAT_ACCESS_TIME) {
+			times[0].tv_sec = st->st_atime;
+			times[0].tv_nsec = 0;
+		} else {
+			times[0].tv_sec = 0;
+		}
+
+		if (statMask & B_STAT_MODIFICATION_TIME) {
+			times[1].tv_sec = st->st_mtime;
+			times[1].tv_nsec = 0;
+		} else {
+			times[1].tv_sec = 0;
+		}
+
+		if (path == NULL) {
+			if (futimens(fd, times) < 0) {
+				if (errno != EBADF
+					|| utimensat(fd, "", times, AT_EMPTY_PATH) < 0)
+					return -errno;
+			}
+		} else {
+			if (utimensat(fd, path, times, flags) < 0)
+				return -errno;
+		}
+	}
+
+	return B_OK;
+}
+
+
+ssize_t
+_kern_read_dir(int fd, struct dirent* buffer, size_t bufferSize, uint32 maxCount)
+{
+	CALLED();
+
+	if (buffer == NULL || bufferSize == 0 || maxCount == 0)
+		return B_BAD_VALUE;
+
+	if (fd < 0)
+		return B_FILE_ERROR;
+
+	// linux_dirent64 header (LP64): d_ino(8) + d_off(8) + d_reclen(2) + d_type(1) = 19 bytes
+	const size_t LINUX_DIRENT64_HEADER = 8 + 8 + 2 + 1;
+
+	// Callers pass INT32_MAX for "as many as fit": clamp before sizing.
+	uint32 maxEntriesInBuffer = bufferSize / sizeof(dirent);
+	if (maxEntriesInBuffer == 0)
+		return B_BUFFER_OVERFLOW;
+	if (maxCount > maxEntriesInBuffer)
+		maxCount = maxEntriesInBuffer;
+
+	size_t bufSize = maxCount * (LINUX_DIRENT64_HEADER + NAME_MAX);
+
+	void* direntBuffer = malloc(bufSize);
+	if (direntBuffer == NULL)
+		return B_NO_MEMORY;
+
+	// Initialize to 0; will be updated to d_off of the last processed entry
+	// in the loop below. The initial lseek(SEEK_CUR) that was here previously
+	// was dead code (overwritten in the loop) and broke on some fd types.
+	off_t seekOffset = 0;
+
+	ssize_t ret = syscall(SYS_getdents64, fd, direntBuffer, bufSize);
+	if (ret < 0) {
+		int saved_errno = errno;
+		free(direntBuffer);
+		return -saved_errno;
+	}
+
+	int i = 0;
+	size_t pos = 0;
+
+	while (pos < (size_t)ret && i < (int)maxCount) {
+		if ((size_t)ret - pos < LINUX_DIRENT64_HEADER)
+			break;
+
+		char* base = (char*)direntBuffer + pos;
+		uint64_t d_ino = *(uint64_t*)(base + 0);
+		int64_t  d_off = *(int64_t*)(base + 8);
+		uint16_t reclen = *(uint16_t*)(base + 16);
+
+		if (reclen < LINUX_DIRENT64_HEADER)
+			break;
+		if (pos + reclen > (size_t)ret)
+			break;
+
+		buffer[i].d_ino = (ino_t)d_ino;
+		buffer[i].d_off = (off_t)d_off;
+		buffer[i].d_reclen = sizeof(dirent);
+
+		size_t name_len = reclen - LINUX_DIRENT64_HEADER;
+		size_t dst_size = sizeof(buffer[i].d_name);
+		size_t to_copy = name_len;
+		if (to_copy >= dst_size) {
+			free(direntBuffer);
+			return B_BUFFER_OVERFLOW;
+		}
+		memcpy(buffer[i].d_name, base + LINUX_DIRENT64_HEADER, to_copy);
+		buffer[i].d_name[to_copy] = '\0';
+
+		pos += reclen;
+		seekOffset = d_off;
+		i++;
+	}
+
+	free(direntBuffer);
+
+	if (pos < (size_t)ret) {
+		off_t offset = _kern_seek(fd, seekOffset, SEEK_SET);
+		if (offset < 0)
+			return offset;
+	}
+
+	// Return 0 for end-of-directory (not B_ENTRY_NOT_FOUND which is negative
+	// and would be misinterpreted as an error by callers such as
+	// BMergedDirectory::_GetNextDirents).
+	return i;
+}
+
+
+ssize_t
+_kern_read_dents(int fd, void* buffer, size_t bufferSize)
+{
+	if (buffer == NULL || bufferSize == 0)
+		return B_BAD_VALUE;
+	if (fd < 0)
+		return B_FILE_ERROR;
+
+	ssize_t ret = syscall(SYS_getdents64, fd, buffer, bufferSize);
+	return ret < 0 ? -errno : ret;
+}
+
+
+off_t
+_kern_seek(int fd, off_t pos, int seekType)
+{
+	CALLED();
+
+	if (fd < 0)
+		return B_FILE_ERROR;
+
+	off_t size = lseek(fd, pos, seekType);
+	return (size < 0) ? -errno : size;
+}
+
+
+ssize_t
+_kern_read(int fd, off_t pos, void* buffer, size_t bufferSize)
+{
+	CALLED();
+
+	if (fd < 0)
+		return B_FILE_ERROR;
+
+	ssize_t size = (pos < 0) ? read(fd, buffer, bufferSize)
+		: pread(fd, buffer, bufferSize, pos);
+	return (size < 0) ? -errno : size;
+}
+
+
+ssize_t
+_kern_write(int fd, off_t pos, const void* buffer, size_t bufferSize)
+{
+	CALLED();
+
+	if (fd < 0)
+		return B_FILE_ERROR;
+
+	ssize_t size = (pos < 0) ? write(fd, buffer, bufferSize)
+		: pwrite(fd, buffer, bufferSize, pos);
+	return (size < 0) ? -errno : size;
+}
+
+
+status_t
+_kern_rewind_dir(int fd)
+{
+	CALLED();
+
+	if (fd < 0)
+		return B_FILE_ERROR;
+
+	return _kern_seek(fd, 0, SEEK_SET);
+}
+
+
+status_t
+_kern_remove_dir(int fd, const char* path)
+{
+	CALLED();
+
+	if (fd < 0 && path == NULL)
+		return B_BAD_VALUE; 
+
+	if (fd < 0)
+		fd = AT_FDCWD;
+
+	int flags = AT_REMOVEDIR;
+
+	if (path == NULL)
+		flags |= AT_EMPTY_PATH;
+
+	if (unlinkat(fd, path, flags) < 0)
+		return -errno;
+
+	return B_OK;
+}
+
+
+status_t
+_kern_rename(int oldDir, const char* oldPath,
+	int newDir, const char* newPath)
+{
+	CALLED();
+
+	if ((oldDir < 0 && oldPath == NULL)
+			|| (newDir < 0 && newPath == NULL)) {
+		return B_BAD_VALUE;
+	}
+
+	if (oldDir < 0)
+		oldDir = AT_FDCWD;
+
+	if (newDir < 0)
+		newDir = AT_FDCWD;
+
+	return (renameat(oldDir, oldPath, newDir, newPath) < 0) ? -errno : B_OK;
+}
+
+
+int
+_kern_dup(int fd)
+{
+	CALLED();
+	if (fd < 0)
+		return B_FILE_ERROR;
+
+	int ret = dup(fd);
+	return (ret < 0) ? -errno : ret;
+}
+
+
+status_t
+_kern_create_dir(int fd, const char* path, int perms)
+{
+	CALLED();
+
+	if (path == NULL)
+		return B_BAD_VALUE;
+
+	return (mkdirat((fd < 0 ? AT_FDCWD : fd), path, perms) < 0) ? -errno : B_OK;
+}
+
+
+status_t
+_kern_create_symlink(int fd, const char* path,
+	const char* toPath, int mode)
+{
+	CALLED();
+
+	if (path == NULL || toPath == NULL)
+		return B_BAD_VALUE;
+
+	return (symlinkat(toPath, (fd < 0 ? AT_FDCWD : fd), path) < 0) ? -errno : B_OK;
+}
+
+
+status_t
+_kern_unlink(int fd, const char* path)
+{
+	CALLED();
+
+	if (fd < 0 && path == NULL)
+		return B_FILE_ERROR;
+
+	if (fd < 0)
+		fd = AT_FDCWD;
+
+	if (path == NULL)
+		return (unlinkat(fd, "", AT_EMPTY_PATH) < 0) ? -errno : B_OK;
+	return (unlinkat(fd, path, 0) < 0) ? -errno : B_OK;
+}
+
+
+status_t
+_kern_lock_node(int fd)
+{
+	if (fd < 0)
+		return B_FILE_ERROR;
+
+	struct flock lock;
+	lock.l_type = F_WRLCK;
+	lock.l_whence = SEEK_SET;
+	lock.l_start = 0;
+	lock.l_len = 0;
+
+	if (fcntl(fd, F_SETLK, &lock) == -1) {
+		if (errno != EBADF)
+			return -errno;
+
+		lock.l_type = F_RDLCK;
+		if (fcntl(fd, F_SETLK, &lock) == -1)
+			return -errno;
+	}
+
+	return B_OK;
+}
+
+
+status_t
+_kern_unlock_node(int fd)
+{
+	if (fd < 0)
+		return B_FILE_ERROR;
+
+	struct flock lock;
+	lock.l_type = F_UNLCK;
+	lock.l_whence = SEEK_SET;
+	lock.l_start = 0;
+	lock.l_len = 0;
+
+	if (fcntl(fd, F_SETLK, &lock) == -1)
+		return -errno;
+
+	return B_OK;
+}
+
+
+ssize_t
+read_pos(int fd, off_t pos, void* buffer, size_t count)
+{
+	CALLED();
+	return _kern_read(fd, pos, buffer, count);
+}
+
+
+ssize_t
+write_pos(int fd, off_t pos, const void* buffer,size_t count)
+{
+	CALLED();
+	return _kern_write(fd, pos, buffer, count);
+}

@@ -16,7 +16,9 @@
 #include <new>
 
 #include <errno_private.h>
+#ifndef __VOS__
 #include <launch.h>
+#endif
 #include <libroot_private.h>
 #include <locks.h>
 #include <RegistrarDefs.h>
@@ -55,6 +57,12 @@ BPrivate::user_group_unlock()
 port_id
 BPrivate::get_registrar_authentication_port()
 {
+#ifdef __VOS__
+	// VitruvianOS has no launch_daemon: the registrar publishes its
+	// authentication port by name.
+	if (sRegistrarPort < 0)
+		sRegistrarPort = find_port(B_REGISTRAR_AUTHENTICATION_PORT_NAME);
+#else
 	if (sRegistrarPort < 0) {
 		BPrivate::KMessage data;
 		if (BPrivate::get_launch_data(B_REGISTRAR_SIGNATURE, data)
@@ -63,6 +71,7 @@ BPrivate::get_registrar_authentication_port()
 				B_REGISTRAR_AUTHENTICATION_PORT_NAME "_port", -1);
 		}
 	}
+#endif
 	return sRegistrarPort;
 }
 

@@ -1,5 +1,6 @@
 /*
  * Copyright 2002-2006, Haiku, Inc. All Rights Reserved.
+ * Copyright 2025-2026, The Vitruvian Project. All Rights Reserved.
  * Distributed under the terms of the MIT License.
  */
 #ifndef _DEF_STORAGE_H
@@ -14,8 +15,13 @@
 /* Limits */
 #define B_DEV_NAME_LENGTH		128
 #define B_FILE_NAME_LENGTH		NAME_MAX
+#ifndef __VOS__
 #define B_PATH_NAME_LENGTH		MAXPATHLEN
 #define B_ATTR_NAME_LENGTH		(B_FILE_NAME_LENGTH - 1)
+#else /* __VOS__ */
+#define B_PATH_NAME_LENGTH		PATH_MAX
+#define B_ATTR_NAME_LENGTH		XATTR_NAME_MAX
+#endif /* __VOS__ */
 #define B_MIME_TYPE_LENGTH		(B_ATTR_NAME_LENGTH - 15)
 #define B_MAX_SYMLINKS			SYMLOOP_MAX
 
@@ -36,6 +42,18 @@ enum node_flavor {
 	B_DIRECTORY_NODE	= 0x04,
 	B_ANY_NODE			= 0x07
 };
+#ifdef __VOS__
+
+/* V\OS Extensions **Experimental** */
+
+// The reason for adding the following glags is that since dev_t
+// on linux is unsigned, comparisons like "device > -1" are always true.
+// However, (dev_t)-1 equals to the maximum possible unsigned value and
+// it works very well as a sentinel, while at the same time it
+// keeps working for systems where dev_t is signed.
+#define B_INVALID_DEV ((dev_t)-1)
+#define B_INVALID_INO ((ino_t)-1)
+#endif /* __VOS__ */
 
 
 #endif /* _DEF_STORAGE_H */

@@ -124,15 +124,60 @@ enum command_code {
 	B_TRASH_TARGET				= 'DDRM',
 	B_LINK_TARGET				= 'DDLN',
 	B_INPUT_DEVICES_CHANGED		= 'IDCH',
+#ifdef __VOS__
+	// Joystick hotplug (Game Kit): "be:opcode" (joystick_device_notification),
+	// "be:device_name" (device path, as returned by GetDeviceName()).
+	B_JOYSTICK_DEVICES_CHANGED	= 'JDCH',
+#endif /* __VOS__ */
 	B_INPUT_METHOD_EVENT		= 'IMEV',
 	B_WINDOW_MOVE_TO			= 'WDMT',
 	B_WINDOW_MOVE_BY			= 'WDMB',
 	B_SILENT_RELAUNCH			= 'AREL',
 	B_OBSERVER_NOTICE_CHANGE	= 'NTCH',
 	B_CONTROL_INVOKED			= 'CIVK',
+#ifndef __VOS__
 	B_CONTROL_MODIFIED			= 'CMOD'
+#else /* __VOS__ */
+	B_CONTROL_MODIFIED			= 'CMOD',
+
+	// Vitruvian seat session events (sent by janus on VT switch)
+	B_SEAT_ENABLED				= 'STEN',
+	B_SEAT_DISABLED				= 'STDS',
+
+	// Screen lock, root only. LOCK takes "team" (int32): the unlock app,
+	// whose windows alone stay visible. Replied once applied.
+	B_SESSION_LOCK				= 'SLCK',
+	B_SESSION_UNLOCK			= 'SUNL',
+
+	// Vitruvian system power events (broadcast by registrar on logind
+	// PrepareForSleep). Fields: none in v1. Fire-and-forget; the
+	// registrar locks the screen, then releases the sleep inhibit.
+	B_SYSTEM_SUSPENDING			= '_sSU',
+	B_SYSTEM_RESUMED			= '_sRE'
+#endif /* __VOS__ */
 
 	// Media Kit reserves all reserved codes starting in 'TRI'
 };
+#ifdef __VOS__
+
+// Fields of the B_QUIT_REQUESTED message the registrar sends when the
+// session ends, telling apps why they are asked to quit:
+//
+//	B_LOGOUT_FIELD	true when the user logs out
+//	B_REBOOT_FIELD	true when the system restarts
+//
+// Neither set means the system is shutting down. A quit request without
+// them came from the user or another app. Check them in QuitRequested():
+//
+//	bool MyApp::QuitRequested()
+//	{
+//		bool loggingOut = false;
+//		if (CurrentMessage() != NULL)
+//			CurrentMessage()->FindBool(B_LOGOUT_FIELD, &loggingOut);
+//		...
+//	}
+#define B_LOGOUT_FIELD	"be:logout"
+#define B_REBOOT_FIELD	"be:reboot"
+#endif /* __VOS__ */
 
 #endif	// _APP_DEFS_H

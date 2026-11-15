@@ -1,12 +1,16 @@
 /*
+ * Copyright 2026, Dario Casalinuovo. All rights reserved.
  * Copyright 2004-2019, Haiku, Inc. All rights reserved.
+ * Copyright 2025-2026, The Vitruvian Project, All rights Reserved.
  * Distributed under the terms of the MIT License.
  */
 #ifndef _OS_H
 #define _OS_H
 
 
+#ifndef __VOS__
 #include <limits.h>
+#endif /* ! __VOS__ */
 #include <stdarg.h>
 #include <sys/types.h>
 
@@ -22,9 +26,14 @@ extern "C" {
 
 #define B_OS_NAME_LENGTH	32
 #define B_INFINITE_TIMEOUT	(0x7FFFFFFFFFFFFFFFLL)
+#ifdef __VOS__
+#define B_PAGE_SIZE			4096
+#endif /* __VOS__ */
 
+#ifndef __VOS__
 #define B_PAGE_SIZE			PAGESIZE
 
+#endif /* ! __VOS__ */
 enum {
 	B_TIMEOUT						= 0x8,	/* relative timeout */
 	B_RELATIVE_TIMEOUT				= 0x8,	/* fails after a relative timeout
@@ -47,9 +56,25 @@ enum {
 typedef int32 area_id;
 typedef int32 port_id;
 typedef int32 sem_id;
+#ifndef __VOS__
 typedef int32 team_id;
 typedef int32 thread_id;
+#else /* __VOS__ */
+typedef pid_t team_id;
+typedef pid_t thread_id;
+typedef int32 vref_id;
+typedef uint64 vref_key;
 
+#if defined(__cplusplus)
+  #define TYPE_ASSERT(expr, msg) static_assert((expr), msg)
+#else
+  #define TYPE_ASSERT(expr, msg) _Static_assert((expr), msg)
+#endif
+#endif /* __VOS__ */
+
+#ifdef __VOS__
+TYPE_ASSERT(sizeof(pid_t) == sizeof(int32_t), "WARNING: pid_t is not 32-bit on this platform!");
+#endif /* __VOS__ */
 
 /* Areas */
 
@@ -148,6 +173,12 @@ extern ssize_t		port_buffer_size_etc(port_id port, uint32 flags,
 extern ssize_t		port_count(port_id port);
 extern status_t		set_port_owner(port_id port, team_id team);
 
+#ifdef __VOS__
+/* pollable fd (POLLIN while a message is queued); owner team only,
+ * close() it when done */
+extern int			port_to_fd(port_id port);
+
+#endif /* __VOS__ */
 /* system private, use the macros instead */
 extern status_t		_get_port_info(port_id port, port_info *portInfo,
 						size_t portInfoSize);
@@ -217,9 +248,15 @@ extern status_t		release_sem(sem_id id);
 extern status_t		release_sem_etc(sem_id id, int32 count, uint32 flags);
 /* TODO: the following two calls are not part of the BeOS API, and might be
    changed or even removed for the final release of Haiku R1 */
+#ifndef __VOS__
 extern status_t		switch_sem(sem_id semToBeReleased, sem_id id);
 extern status_t		switch_sem_etc(sem_id semToBeReleased, sem_id id,
 						int32 count, uint32 flags, bigtime_t timeout);
+#else /* __VOS__ */
+//extern status_t		switch_sem(sem_id semToBeReleased, sem_id id);
+//extern status_t		switch_sem_etc(sem_id semToBeReleased, sem_id id,
+//						int32 count, uint32 flags, bigtime_t timeout);
+#endif /* __VOS__ */
 extern status_t		get_sem_count(sem_id id, int32 *threadCount);
 extern status_t		set_sem_owner(sem_id id, team_id team);
 
@@ -300,13 +337,26 @@ extern status_t		_get_team_usage_info(team_id team, int32 who,
 
 /* Threads */
 
+#ifdef __VOS__
+
+typedef status_t (*thread_func)(void *);
+#define thread_entry thread_func
+	/* thread_entry is for backward compatibility only! Use thread_func */
+
+
+#endif /* __VOS__ */
 typedef enum {
 	B_THREAD_RUNNING	= 1,
 	B_THREAD_READY,
 	B_THREAD_RECEIVING,
 	B_THREAD_ASLEEP,
 	B_THREAD_SUSPENDED,
+#ifndef __VOS__
 	B_THREAD_WAITING
+#else /* __VOS__ */
+	B_THREAD_WAITING,
+	B_THREAD_SPAWNED
+#endif /* __VOS__ */
 } thread_state;
 
 typedef struct {
@@ -338,14 +388,24 @@ typedef struct {
 
 #define B_FIRST_REAL_TIME_PRIORITY		B_REAL_TIME_DISPLAY_PRIORITY
 
+#ifndef __VOS__
 typedef status_t (*thread_func)(void *);
 #define thread_entry thread_func
 	/* thread_entry is for backward compatibility only! Use thread_func */
+#endif /* ! __VOS__ */
 
 extern thread_id	spawn_thread(thread_func, const char *name, int32 priority,
 						void *data);
+#ifdef __VOS__
+/* V\OS: Linux cannot kill a single thread, so kill_thread() kills the
+ * whole team the thread belongs to (it is kill_team() on that team). To stop
+ * one thread, have it return and wait_for_thread() on it. */
+#endif /* __VOS__ */
 extern status_t		kill_thread(thread_id thread);
 extern status_t		resume_thread(thread_id thread);
+#ifdef __VOS__
+/* V\OS: not supported, always returns B_NOT_SUPPORTED. */
+#endif /* __VOS__ */
 extern status_t		suspend_thread(thread_id thread);
 
 extern status_t		rename_thread(thread_id thread, const char *newName);
@@ -389,14 +449,24 @@ extern status_t		convert_to_pthread(thread_id thread, pthread_t *_thread);
 
 /* Time */
 
+#ifndef __VOS__
 extern unsigned long real_time_clock(void);
 extern void			set_real_time_clock(unsigned long secsSinceJan1st1970);
+#else /* __VOS__ */
+extern uint64_t real_time_clock(void);
+extern void			set_real_time_clock(uint64_t secsSinceJan1st1970);
+#endif /* __VOS__ */
 extern bigtime_t	real_time_clock_usecs(void);
 extern bigtime_t	system_time(void);
 						/* time since booting in microseconds */
 extern nanotime_t	system_time_nsecs(void);
 						/* time since booting in nanoseconds */
 
+#ifdef __VOS__
+					/* via systemd-timedated; B_NOT_ALLOWED if refused */
+extern status_t		set_timezone(const char *timezone);
+
+#endif /* __VOS__ */
 /* Alarm */
 
 enum {
@@ -414,9 +484,15 @@ extern void			debugger(const char *message);
 extern int			disable_debugger(int state);
 
 /* TODO: Remove. Temporary debug helper. */
+#ifdef __VOS__
+extern void			debug_printf(const char *format, ...)
+						__attribute__ ((format (__printf__, 1, 2)));
+extern void			debug_vprintf(const char *format, va_list args);
+#else
 extern int			debug_printf(const char *format, ...)
 						__attribute__ ((format (__printf__, 1, 2)));
 extern int			debug_vprintf(const char *format, va_list args);
+#endif /* __VOS__ */
 extern void			ktrace_printf(const char *format, ...)
 						__attribute__ ((format (__printf__, 1, 2)));
 extern void			ktrace_vprintf(const char *format, va_list args);
@@ -555,8 +631,13 @@ typedef struct {
 extern status_t		get_system_info(system_info* info);
 extern status_t		_get_cpu_info_etc(uint32 firstCPU, uint32 cpuCount,
 						cpu_info* info, size_t size);
+#ifdef __VOS__
+extern status_t		get_cpu_info(uint32 firstCPU, uint32 cpuCount,
+						cpu_info* info);
+#else
 #define get_cpu_info(firstCPU, cpuCount, info) \
 	_get_cpu_info_etc((firstCPU), (cpuCount), (info), sizeof(*(info)))
+#endif /* __VOS__ */
 
 extern status_t		get_cpu_topology_info(cpu_topology_node_info* topologyInfos,
 						uint32* topologyInfoCount);
@@ -665,6 +746,70 @@ typedef struct object_wait_info {
 extern ssize_t		wait_for_objects(object_wait_info* infos, int numInfos);
 extern ssize_t		wait_for_objects_etc(object_wait_info* infos, int numInfos,
 						uint32 flags, bigtime_t timeout);
+#ifdef __VOS__
+
+// V\OS API
+
+// Keyed vref primitives. Every successful acquire (including create) returns
+// a fresh key bound to a private kernel slot for this team. Release consumes
+// the slot identified by (id, key). Open requires a valid (id, key) owned by
+// the calling team. Losing a key leaks the slot until team exit.
+extern vref_id		create_vref(int fd, vref_key* outKey);
+extern status_t		acquire_vref(vref_id id, vref_key* outKey);
+extern int			open_vref(vref_id id, vref_key key);
+extern status_t		release_vref(vref_id id, vref_key key);
+extern dev_t		get_vref_dev();
+
+// Port capability transport.
+//
+// A cap is a structured side-channel descriptor that travels alongside a
+// port message. Today the only kind is B_PORT_CAP_VREF: the sender names
+// a vref_id it owns; the kernel mints a fresh per-team slot for the
+// receiver and returns the new key in `port_cap_out`. The receiver
+// registers the (id, key) via BPrivate::VRefCache::AdoptCaps before
+// touching the message bytes — no separate acquire round-trip is
+// needed for cross-team handoff.
+//
+// `buffer_offset` is receiver-side bookkeeping (offset within the message
+// buffer where the corresponding wire field lives); the kernel does not
+// interpret message bytes.
+#define B_PORT_CAP_VREF		1
+
+typedef struct port_cap_in {
+	uint32			kind;
+	int32			vref_id_;
+	uint32			buffer_offset;
+	uint32			_pad;
+} port_cap_in;
+
+typedef struct port_cap_out {
+	uint32			kind;
+	int32			vref_id_;
+	uint32			buffer_offset;
+	uint32			_pad;
+	uint64			key;	// freshly minted slot in receiver team
+} port_cap_out;
+
+extern status_t		write_port_with_caps(port_id id, int32 msgCode,
+						const void* msgBuffer, size_t bufferSize,
+						const port_cap_in* caps, size_t capsCount,
+						uint32 flags, bigtime_t timeout);
+// `bufferSize` and `capsCount` are in/out: capacity in, actual out.
+// Returns `B_BUFFER_OVERFLOW` if either is insufficient — the out values
+// then tell the caller how much to reallocate.
+extern ssize_t		read_port_with_caps(port_id id, int32* msgCode,
+						void* msgBuffer, size_t* bufferSize,
+						port_cap_out* caps, size_t* capsCount,
+						uint32 flags, bigtime_t timeout);
+// Same as read_port_with_caps, but also returns the writer's uid/gid/team
+// via `senderInfo` (kernel-populated on the message actually consumed).
+// Pass NULL to ignore.
+extern ssize_t		read_port_with_caps_etc(port_id id, int32* msgCode,
+						void* msgBuffer, size_t* bufferSize,
+						port_cap_out* caps, size_t* capsCount,
+						uint32 flags, bigtime_t timeout,
+						port_message_info* senderInfo);
+#endif /* __VOS__ */
 
 
 #ifdef __cplusplus
