@@ -1,0 +1,75 @@
+target_sources(root PRIVATE
+	Team.cpp
+	exec_status.cpp
+
+	thread.cpp
+	rtkit.cpp
+	port.cpp
+	sem.cpp
+	area.cpp
+
+	proc_read.cpp
+
+	byteorder.cpp
+	debug.cpp
+	driver_settings.cpp
+	extended_system_info.cpp
+	framebuffer.cpp
+	image.cpp
+	parsedate.cpp
+	real_time_clock.c
+	shutdown.cpp
+	system_info.cpp
+	system_revision.c
+	hardware_info.cpp
+	hardware_info_parse.cpp
+
+	SystemWatcher.cpp
+	KMessage.cpp
+
+	fs/fs.cpp
+	fs/vref.cpp
+	fs/VRefCache.cpp
+	fs/VRefTrack.cpp
+	fs/node_monitor.cpp
+	fs/disk_monitor.cpp
+	fs/disk_device.cpp
+	fs/fs_info.cpp
+	fs/MountInfo.cpp
+	fs/mount.cpp
+	fs/attr.cpp
+	fs/index.cpp
+	fs/query.cpp
+	fs/find_directory.cpp
+	fs/find_paths.cpp
+	fs/normalize_path.cpp
+
+	compat/Architecture.cpp
+	compat/libc.c
+	compat/scheduler.c
+	compat/signal.cpp
+	compat/system_info.cpp
+	compat/system_ioctl.c
+	compat/time.cpp
+	compat/tls.cpp
+	compat/wait_for_objects.cpp
+	compat/getenv.c
+
+	compat/mutex.cpp
+	compat/locks/init_once.cpp
+	compat/locks/mutex.cpp
+	compat/locks/recursive_lock.cpp
+
+	posix/strdup.c
+	posix/strndup.c
+	posix/errors.cpp
+)
+
+# Debug-only vref tracing, off by default: set VREF_TRACE=/dir and re-add this.
+# target_compile_definitions(root PRIVATE ENABLE_VREF_TRACKING)
+
+add_dependencies(root nexus)
+
+target_include_directories(root PRIVATE
+	"./"
+)
