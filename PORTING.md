@@ -117,16 +117,36 @@ headers libroot2 compiles against (`syscalls.h`, `VRefCache.h`,
 `git log --oneline upstream/master -- src/add-ons/input_server/devices/keyboard src/add-ons/input_server/devices/mouse`).
 air/OS has 229 of its own commits on the same add-ons (touchpad gestures,
 scroll phases), so this is a three-way merge, not a copy.
-- [ ] `devices/LinuxEvdevShim.h`, `devices/UdevDeviceName.h`, `devices/CMakeLists.txt` imported
-- [ ] `keyboard/`: evdev + xkbcommon backend merged into the air/OS
-      `KeyboardInputDevice`, `LinuxKeycodeMap.h` imported, `CMakeLists.txt`
-- [ ] `mouse/`: evdev/libinput backend merged into the air/OS
-      `MouseInputDevice` (keep air/OS's `movement_maker` gestures), `CMakeLists.txt`
-- [ ] `src/kits/shared/PointerControlCore.cpp` (used by the mouse add-on) imported
+- [x] `devices/LinuxEvdevShim.h`, `devices/UdevDeviceName.h`, `devices/CMakeLists.txt` imported — `665ba4e11c`
+- [x] `keyboard/`: evdev + xkbcommon backend merged into the air/OS
+      `KeyboardInputDevice`, `LinuxKeycodeMap.h` imported, `CMakeLists.txt` — `a2078d6b88`
+- [x] `mouse/`: evdev/libinput backend merged into the air/OS
+      `MouseInputDevice` (keep air/OS's `movement_maker` gestures), `CMakeLists.txt` — `9e98c0ec6b`.
+      Merge shape: base is VitruvianOS's 2019 import `49ecebd96d`; every air/OS change
+      since is either already in VitruvianOS or Haiku-driver specific, so each file is
+      the air/OS text and the VitruvianOS text interleaved under `#ifdef __VOS__`
+      (`-D__VOS__` reduces byte-for-byte to `upstream/master`, without it to air/OS).
+      Follow-up: split the two backends into separate source files
+- [x] `src/kits/shared/PointerControlCore.cpp` (used by the mouse add-on) imported, plus
+      `headers/private/input/{PointerControlCore,XVitruvianInputProtocol}.h`,
+      `headers/private/interface/PanelOrientationTransform.h`
 - [ ] Both add-ons compile under CMake (needs `libbe`, `input_server` on
-      CMake: **blocked until the kits are ported**, note the exact missing
-      targets)
-- [ ] Jam build of the two add-ons still passes (`jam -q "<input>keyboard" "<input>mouse"`)
+      CMake: **blocked until the kits are ported**). Missing targets: `be`, `shared`,
+      `localestub`, `input_server`; no `src/add-ons/CMakeLists.txt` chain yet. Missing
+      header deltas (each an observed error against this tree's headers):
+      `headers/build/LinuxBuildCompatibility.h` (defines `__VOS__`),
+      `InputServerDevice.h` (`B_GET_DEVICE_DESCRIPTION`, `UDEV_ROLE_*`...),
+      `AppDefs.h` (`B_SEAT_ENABLED`...), `InterfaceDefs.h` (`B_F13_KEY`..`B_F24_KEY`),
+      `private/shared/Keymap.h` (xkb lookups), `LaunchDaemonDefs.h` (`B_JANUS_SWITCH_VT`),
+      `private/system/syscalls.h` (`fd_set` vs glibc). Hazard: VitruvianOS's
+      `private/input/keyboard_mouse_driver.h` redefines `KEY_*` as evdev codes; must
+      come with the kits under `__VOS__`. Syntax check with `-D__VOS__` against
+      VitruvianOS's headers: 0 errors in all 6 files
+- [ ] Jam build of the two add-ons still passes — not run (no cross tools here).
+      Evidence: `cpp`-equivalence of every merged file without `__VOS__` to the
+      air/OS original; Jamfiles untouched; `Keyboard.rdef` keeps
+      `x-vnd.Haiku-KeyboardInputServerDevice` (`25ceefa95a`'s tree-wide signature
+      rename is a separate decision; the VOS path launches `x-vnd.vos-Terminal`)
 
 ### Not started (later milestones)
 - Kits (`libbe`) and `input_server` on CMake, needed before M5 can link
@@ -139,3 +159,4 @@ scroll phases), so this is a three-way merge, not a copy.
 | --- | --- | --- |
 | 2026-11-15 | `0ff2aa2a09` | M0: branch, licence appendix, tracker |
 | 2026-11-15 | `654269f633` | M1: CMake/Debian pipeline merged (`port/debian-builder`); buildtools blocked on M4 |
+| 2026-11-15 | `d31169c430` | M5: evdev add-ons merged (`port/evdev`); CMake link blocked on the kits |
