@@ -110,17 +110,33 @@ at `posix/signal/`, `posix/sys/`, `posix/`), `headers/private/system`,
 `headers/private/kernel` deltas, `headers/os/kernel/OS.h` and other shared
 headers libroot2 compiles against (`syscalls.h`, `VRefCache.h`,
 `MountInfo.h`, `fs_volume.h`, `locks.h`, `util/KMessage.h`, ...).
-- [ ] Snapshot import of `src/system/libroot2/` (Author Numerio)
-- [ ] `src/system/libroot/{,posix/}CMakeLists.txt`; the three posix files
-      merged onto the Haiku ones (or VitruvianOS copies placed where its
-      CMake expects them, if the Haiku ones cannot be shared)
-- [ ] VitruvianOS-only private headers imported; shared headers get the
-      VitruvianOS deltas guarded by `__VOS__` where the Haiku kernel build
-      would otherwise see them
-- [ ] `ninja -C generated.amd64 root` links `libroot.so`
-- [ ] `src/tests/system/libroot2` (if any) run under the container
+- [x] Snapshot import of `src/system/libroot2/` (Author Numerio) — `e5d7ee766a`
+- [x] `src/system/libroot/{,posix/}CMakeLists.txt`; the three posix files —
+      `4c197f871e`, `4c60665ee7`: `send_signal.c` (identical to Haiku's) and
+      `stat.c` (Linux rewrite) placed at `libroot/posix/`, Haiku's copies untouched;
+      `user_group_common.cpp` merged under `__VOS__` (registrar port by `find_port`)
+- [x] VitruvianOS-only private headers imported (`fc3e2d248d`, `ae9bc680d3`);
+      29 shared headers/sources merged under `__VOS__` (`6e9e18da96`): `OS.h`,
+      `Errors.h` (host errno table), `SupportDefs.h`, `Message.h`, `Roster.h`,
+      `Entry/Node/Statable/StorageDefs.h`, `Locker.h` + `Locker.cpp` (BLocker on a
+      user_sem), `syscalls.h`, `KMessage.h`, `directories.h`, ... `gcc -E` without
+      `__VOS__` is identical to air/OS for all 29. `build/defs.cmake` defines
+      `__VOS__=1` globally; `headers/posix` (Haiku libc) is replaced on the include
+      path by a 7-file overlay of VitruvianOS's posix headers (`22e59bfe34`).
+      Merge bases were the closest Haiku revisions (histories share no commit)
+- [x] `ninja root` links `libroot.so` — `[70/70] Linking CXX shared library
+      src/system/libroot.so` in `vitruvian_build` (host lacks libudev headers);
+      undefined symbols only glibc/libstdc++/udev/blkid. Links against a
+      `be_bootstrap` subset (List, PointerList, String, StringList, Flattenable,
+      Locker, UserSemaphore) in new `src/kits/{,support/}CMakeLists.txt` (`dadf6629b1`)
+- [ ] libroot tests — upstream has none for libroot2; `src/tests/system/libroot/os/system_watching_test`
+      hand-linked against `libroot.so` runs to "Can't open Nexus IPC" (needs nexus.ko;
+      its `Test()` macro needs `be`)
 - [ ] Remaining libroot2 commits after the snapshot listed here as they are
-      cherry-picked
+      cherry-picked — none yet (snapshot is at `4d8c5ed719`)
+- [ ] Buildtools: `vos-configure --build-buildtools` still fails at
+      `src/build/libbe/storage` (`src/kits/storage/sniffer/CharStream.cpp` missing);
+      `packages.cmake` still installs all of `headers/` (needs the 7-file posix subset)
 
 ### M5 - evdev input add-ons (from VitruvianOS `upstream/master`)
 43 commits touch `src/add-ons/input_server/devices/{keyboard,mouse}`,
@@ -172,3 +188,5 @@ scroll phases), so this is a three-way merge, not a copy.
 | 2026-11-15 | `654269f633` | M1: CMake/Debian pipeline merged (`port/debian-builder`); buildtools blocked on M4 |
 | 2026-11-15 | `d31169c430` | M5: evdev add-ons merged (`port/evdev`); CMake link blocked on the kits |
 | 2026-11-15 | `ce44a5947b` | M2: Podman build container merged (`port/docker-builder`); pipeline reaches configure with prebuilt buildtools |
+| 2026-11-15 | `3a28f25a0b` | M4: libroot2 merged (`port/libroot2`); `libroot.so` links in the container |
+| 2026-11-15 | | Integrated check on the merged tree (`vitruvian_build` container, Koan buildtools mounted): `vos-configure` "Configured correctly!", `ninja root` → `libroot.so` (620680 bytes), `ninja nexus` → `nexus-dkms_0.3.0+git0.unknown_all.deb` |
