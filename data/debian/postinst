@@ -1,0 +1,260 @@
+#!/bin/sh
+set -e
+
+case "$1" in
+    configure) ;;
+    triggered)
+        case " $2 " in
+            *" /usr/share/vos/attrs "*) /usr/libexec/vos-attrs-sync || true ;;
+        esac
+        case " $2 " in
+            *" /usr/share/applications "*|*" /usr/local/share/applications "*|*" /var/lib/flatpak/exports/share/applications "*)
+                /usr/libexec/vos-desktop-sync || true ;;
+        esac
+        exit 0 ;;
+    abort-upgrade|abort-remove|abort-deconfigure) exit 0 ;;
+    *) echo "postinst: unknown action $1" >&2; exit 0 ;;
+esac
+
+_first_install=0
+[ -z "$2" ] && _first_install=1
+
+mkdir -p /system/add-ons/
+mkdir -p /system/apps/
+mkdir -p /system/data/
+mkdir -p /system/demos/
+mkdir -p /system/develop/
+mkdir -p /system/documentation/
+mkdir -p /system/preferences/
+mkdir -p /system/servers/
+mkdir -p /system/settings/
+
+ln -sf /bin /system/bin
+# `ln -sf SRC DST` silently creates DST/<basename SRC> when DST already
+# exists as a dir, so /system/lib must be removed before relinking.
+rm -rf /system/lib
+ln -sf /lib /system/lib
+ln -sf /tmp /system/cache
+ln -sf /var /system/var
+
+# Per-user Desktop/home and Desktop/System symlinks are created on first
+# login by /system/boot/first_login/00-desktop-shortcuts, not here.
+
+mkdir -p /etc/skel/config/settings/deskbar/menu/
+
+mkdir -p /system/data/deskbar/menu/
+mkdir -p /system/data/deskbar/menu/Applications/
+mkdir -p "/system/data/deskbar/menu/Desktop applets/"
+mkdir -p /system/data/deskbar/menu/Demos/
+mkdir -p /system/data/deskbar/menu/Preferences/
+
+
+# The trash dir is NOT pre-created here; Tracker provisions the XDG Trash
+# layout on demand via FSGetTrashDir.
+
+mkdir -p /system/boot/post_install/
+mkdir -p /system/boot/first_login/
+mkdir -p /system/data/profile.d/
+
+mkdir -p "/etc/skel/config/settings/Tracker/Tracker New Templates"
+mkdir -p /etc/skel/config/settings/printers/Preview
+mkdir -p "/etc/skel/config/settings/printers/Save as PDF"
+
+# addattr is not used here: it loads libroot2, which needs
+# nexus IPC that is unavailable when postinst runs on the host.
+
+beos_string() {
+	local name="$1" value="$2" target="$3"
+	# B_STRING_TYPE LE prefix + value bytes (no null; setfattr adds none,
+	# fs_read_attr only reads dataSize = attrSize - 4 bytes)
+	local hex
+	hex="52545343$(printf '%s' "$value" | od -A n -t x1 | tr -d ' \n')00"
+	setfattr -n "user.beos.${name}" --value="0x${hex}" "${target}"
+}
+
+beos_mime() {
+	local name="$1" value="$2" target="$3"
+	# B_MIME_STRING_TYPE LE prefix
+	local hex
+	hex="534d494d$(printf '%s' "$value" | od -A n -t x1 | tr -d ' \n')00"
+	setfattr -n "user.beos.${name}" --value="0x${hex}" "${target}"
+}
+
+# 0x54494e5501000000 = B_UINT32_TYPE ('UINT') LE prefix + value 1.
+beos_hidden() {
+	local target="$1"
+	[ -e "$target" ] || return 0
+	setfattr -n "user.beos.SYS:HIDDEN" --value="0x54494e5501000000" "${target}" 2>/dev/null || true
+}
+
+beos_string SYS:NAME "x-vnd.vos-libtracker:B_SYSTEM_DIRECTORY:system" /system
+beos_string SYS:NAME "x-vnd.vos-libtracker:B_USER_DIRECTORY:home" /home
+# B_DESKTOP_DIRECTORY xattr is stamped per-user at first login (there is
+# no shared /home/Desktop). B_USER_CONFIG_DIRECTORY rides skel via cp -a.
+beos_string SYS:NAME "x-vnd.vos-libtracker:B_USER_CONFIG_DIRECTORY:config" /etc/skel/config
+beos_string SYS:NAME "x-vnd.vos-libtracker:B_APPS_DIRECTORY:apps" /system/apps
+beos_string SYS:NAME "x-vnd.vos-libtracker:B_PREFERENCES_DIRECTORY:preferences" /system/preferences
+beos_string SYS:NAME "x-vnd.vos-libtracker:B_SYSTEM_DEVELOP_DIRECTORY:develop" /system/develop
+beos_string SYS:NAME "x-vnd.Be-TSKB:B_USER_DESKBAR_DIRECTORY/Applications:Applications" /system/data/deskbar/menu/Applications
+beos_string SYS:NAME "x-vnd.Be-TSKB:B_USER_DESKBAR_DIRECTORY/Demos:Demos" /system/data/deskbar/menu/Demos
+beos_string SYS:NAME "x-vnd.Be-TSKB:B_USER_DESKBAR_DIRECTORY/Preferences:Preferences" /system/data/deskbar/menu/Preferences
+beos_string SYS:NAME "x-vnd.Be-TSKB:B_USER_DESKBAR_DIRECTORY/Desktop applets:Desktop applets" "/system/data/deskbar/menu/Desktop applets"
+beos_string SYS:NAME "x-vnd.vos-libtracker:B_USER_SETTINGS_DIRECTORY/Tracker/Tracker New Templates:Tracker New Templates" "/etc/skel/config/settings/Tracker/Tracker New Templates"
+
+# Hide Linux-userland root dirs; /boot /system /home /dev /tmp stay visible.
+for _p in /bin /sbin /lib /lib32 /lib64 /libx32 /etc /proc /sys /run \
+		/usr /var /mnt /media /opt /srv /root /lost+found /initrd.img \
+		/initrd.img.old /vmlinuz /vmlinuz.old /localdeb; do
+	beos_hidden "$_p"
+done
+
+# This MIME type makes Model::IsVirtualDirectory() return true, so Tracker
+# aggregates the three menu directories listed in the file.
+beos_mime BEOS:TYPE "application/x-vnd.vos-virtual-directory" /system/data/deskbar/menu_entries
+
+beos_mime BEOS:TYPE "application/x-vnd.Be.printer" /etc/skel/config/settings/printers/Preview
+beos_string "Printer Name" "Preview" /etc/skel/config/settings/printers/Preview
+beos_string "Driver Name" "Preview" /etc/skel/config/settings/printers/Preview
+beos_string "transport" "" /etc/skel/config/settings/printers/Preview
+beos_string "transport_address" "" /etc/skel/config/settings/printers/Preview
+beos_string "connection" "Local" /etc/skel/config/settings/printers/Preview
+beos_string "state" "free" /etc/skel/config/settings/printers/Preview
+
+beos_mime BEOS:TYPE "application/x-vnd.Be.printer" "/etc/skel/config/settings/printers/Save as PDF"
+beos_string "Printer Name" "Save as PDF" "/etc/skel/config/settings/printers/Save as PDF"
+beos_string "Driver Name" "PDF Writer" "/etc/skel/config/settings/printers/Save as PDF"
+beos_string "transport" "Print To File" "/etc/skel/config/settings/printers/Save as PDF"
+beos_string "transport_address" "" "/etc/skel/config/settings/printers/Save as PDF"
+beos_string "connection" "Local" "/etc/skel/config/settings/printers/Save as PDF"
+beos_string "state" "free" "/etc/skel/config/settings/printers/Save as PDF"
+
+# Must run before the beos_mime calls below, which stamp MIME types onto
+# these template files.
+if [ -f /usr/share/vos/templates_attrs.tar ]; then
+    mkdir -p "/etc/skel/config/settings/Tracker/Tracker New Templates"
+    tar --xattrs -xf /usr/share/vos/templates_attrs.tar \
+        -C "/etc/skel/config/settings/Tracker/Tracker New Templates"
+fi
+
+beos_mime BEOS:TYPE "text/plain" "/etc/skel/config/settings/Tracker/Tracker New Templates/text file"
+beos_mime BEOS:TYPE "text/x-source-code" "/etc/skel/config/settings/Tracker/Tracker New Templates/C++ source"
+beos_mime BEOS:TYPE "text/x-source-code" "/etc/skel/config/settings/Tracker/Tracker New Templates/C++ header"
+
+cat > /etc/profile.d/vitruvian.sh << 'VITRUVIAN_PROFILE_EOF'
+# Guard against recursive sourcing: Vitruvian's profile itself sources
+# /etc/profile.d/*.sh, which would otherwise re-enter this file.
+if [ -z "$_VOS_PROFILE_SOURCED" ] && [ -f /system/settings/etc/profile ]; then
+    export _VOS_PROFILE_SOURCED=1
+    . /system/settings/etc/profile
+fi
+VITRUVIAN_PROFILE_EOF
+
+# CPack cannot preserve xattrs in install(DIRECTORY), so the BeOS-xattr'd
+# mime_db tree is extracted here instead from a tar --xattrs archive.
+mkdir -p /system/data
+tar --xattrs -xf /usr/share/vos/mime_db.tar -C /system/data/
+
+# apps_attrs.tar holds zero-byte placeholders carrying the user.beos.*
+# xattrs to restore onto the real installed binaries.
+if [ -f /usr/share/vos/apps_attrs.tar ]; then
+    _tmp=$(mktemp -d)
+    tar --xattrs -xf /usr/share/vos/apps_attrs.tar -C "$_tmp"
+    find "$_tmp" -type f | while IFS= read -r _src; do
+        _dst="/${_src#$_tmp/}"
+        [ -f "$_dst" ] || continue
+        getfattr -d -m user.beos -e hex "$_src" 2>/dev/null \
+            | sed "s|${_src#/}|${_dst#/}|g" \
+            | setfattr --restore - 2>/dev/null || true
+    done
+    rm -rf "$_tmp"
+fi
+
+systemctl enable janus.service registrar.service app_server.service input_server.service mount_server.service notification_server.service deskbar.service tracker.service
+# live-boot exists only on the live ISO; enabling it on installed targets would undo the Installer's disable on every upgrade.
+if [ "$(dpkg-query -W -f='${Status}' live-boot 2>/dev/null || true)" = "install ok installed" ]; then
+    systemctl enable userbootscript@vos-live.service
+fi
+# Printing goes straight to cupsd, with no legacy print server on V\OS.
+systemctl enable cups.service 2>/dev/null || true
+systemctl enable vos-pdf-printer.service 2>/dev/null || true
+systemctl enable vos-attrs-sync.service 2>/dev/null || true
+systemctl enable vos-desktop-sync.service 2>/dev/null || true
+# Menu entries for everything already installed.
+/usr/libexec/vos-desktop-sync || true
+
+install -m 0644 -D /usr/share/vos/systemd/vos-session.service \
+	/etc/systemd/user/vos-session.service 2>/dev/null || true
+# vos-polkit-agent is launched by janus_session's own fan-out, not here.
+install -m 0644 -D /usr/share/vos/profile.d/vos-session.sh \
+	/etc/profile.d/vos-session.sh 2>/dev/null || true
+
+install -m 0644 -D /usr/share/vos/pam.d/vitruvian-auth \
+	/etc/pam.d/vitruvian-auth 2>/dev/null || true
+
+# Recovery TTY if janus wedges.
+systemctl enable getty@tty2.service 2>/dev/null || true
+
+install -d -m 0755 /etc/vos /var/lib/vos /usr/share/vos 2>/dev/null || true
+
+# vos_login: pre-auth graphical uid (greeter + FBP + live Installer).
+if ! getent passwd vos_login >/dev/null; then
+	useradd --system --no-create-home \
+		--home-dir /system/login \
+		--shell /usr/sbin/nologin \
+		--comment "Vitruvian pre-auth graphical uid" \
+		vos_login || true
+fi
+for _g in video input tty nexus; do
+	getent group "$_g" >/dev/null && adduser vos_login "$_g" >/dev/null 2>&1 || true
+done
+install -d -m 0755 -o vos_login -g vos_login /system/login 2>/dev/null || true
+for _sub in config config/settings config/cache; do
+	install -d -m 0755 -o vos_login -g vos_login \
+		/system/login/$_sub 2>/dev/null || true
+ done
+install -d -m 0755 -o vos_login -g vos_login \
+	/system/login/.config /system/login/.config/systemd \
+	/system/login/.config/systemd/user 2>/dev/null || true
+for _unit in pipewire.service pipewire.socket pipewire-pulse.service \
+		pipewire-pulse.socket wireplumber.service filter-chain.service; do
+	ln -sf /dev/null "/system/login/.config/systemd/user/$_unit" \
+		2>/dev/null || true
+done
+chown -h vos_login:vos_login /system/login/.config/systemd/user/* \
+	2>/dev/null || true
+
+# Audio is PipeWire only. gstreamer1.0-plugins-good ships the pulse
+# sink, which WebKit picks by name over pipewiresink; keep it out.
+install -d -m 0755 /etc/dpkg/dpkg.cfg.d
+printf 'path-exclude=/usr/lib/*/gstreamer-1.0/libgstpulseaudio.so\n' \
+	> /etc/dpkg/dpkg.cfg.d/vos-no-pulse
+rm -f /usr/lib/*/gstreamer-1.0/libgstpulseaudio.so
+
+# First install only — upgrades preserve the admin's autologin choice.
+if [ "${1:-}" = "configure" ] && [ -z "${2:-}" ]; then
+    touch /var/lib/vos/greeter-enabled
+fi
+
+# vos-live: ephemeral live persona; gated on /etc/vos/live.
+if [ -e /etc/vos/live ]; then
+    if ! getent passwd vos-live >/dev/null; then
+        useradd --system --create-home \
+            --home-dir /home/vos-live \
+            --shell /bin/bash \
+            --comment "Vitruvian live/try persona" \
+            vos-live || true
+        passwd -l vos-live 2>/dev/null || true
+    fi
+    for _g in sudo audio video render input plugdev scanner lpadmin nexus; do
+        getent group "$_g" >/dev/null \
+            && adduser vos-live "$_g" >/dev/null 2>&1 || true
+    done
+
+    # Without lingering, the user manager (and pipewire with it) exists
+    # only while someone is logged in over ssh.
+    mkdir -p /var/lib/systemd/linger 2>/dev/null || true
+    touch /var/lib/systemd/linger/vos-live 2>/dev/null || true
+fi
+
+# Renamed to 15_vos; a kept copy would list every entry twice.
+rm -f /etc/grub.d/40_vos

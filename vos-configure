@@ -1,0 +1,283 @@
+#!/bin/sh
+#   --build-type=TYPE           CMake build type: Debug|Release (default: Debug)
+#   --chroot-build              Use chroot sysroot for libraries/headers
+#   --chroot-path=PATH          Path to chroot (default: <build>/LIVE_BOOT/chroot)
+#   --arch=ARCH                 Target architecture: amd64, arm64, arm32, riscv64
+#                                 (default: autodetected from `uname -m` for native builds)
+#   --override-toolchain=NAME   Use a specific cross-compilation toolchain
+#                                 (e.g. arm64_raspberry)
+#   --sshdebug                  Stage the Vitruvian (SSH Debug) boot entry and its
+#                                 SSH server in built images (off by default)
+#   --sanitize=NAME             Instrument the whole tree with a sanitizer:
+#                                 thread (TSan) or address (ASan). Not the
+#                                 default; intended for stress/debug builds.
+
+set -e
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+
+BUILD_TYPE="Debug"
+CHROOT_BUILD=0
+CHROOT_PATH=""
+TARGET_ARCH=""
+OVERRIDE_TOOLCHAIN=""
+SSHDEBUG=0
+BUILDTOOLS_ONLY=0
+BUILDTOOLS_DIR=""
+SANITIZE=""
+
+for arg in "$@"; do
+    case "$arg" in
+        --build-buildtools)
+            BUILDTOOLS_ONLY=1
+            ;;
+        --buildtools=*)
+            BUILDTOOLS_DIR="${arg#*=}"
+            ;;
+        --build-type=*)
+            BUILD_TYPE="${arg#*=}"
+            ;;
+        --chroot-build)
+            CHROOT_BUILD=1
+            ;;
+        --chroot-path=*)
+            CHROOT_PATH="${arg#*=}"
+            ;;
+        --arch=*)
+            TARGET_ARCH="${arg#*=}"
+            ;;
+        --override-toolchain=*)
+            OVERRIDE_TOOLCHAIN="${arg#*=}"
+            ;;
+        --sshdebug)
+            SSHDEBUG=1
+            ;;
+        --sanitize=*)
+            SANITIZE="${arg#*=}"
+            ;;
+        --help|-h)
+            head -n 17 "$0" | grep "^#" | sed 's/^# \?//'
+            exit 0
+            ;;
+        *)
+            echo "Unknown option: $arg"
+            echo "Run ./configure --help for usage."
+            exit 1
+            ;;
+    esac
+done
+
+# --build-buildtools shortcut: build the host buildtools tree and exit.
+if [ $BUILDTOOLS_ONLY -eq 1 ]; then
+    mkdir -p "$SCRIPT_DIR/buildtools"
+    cd "$SCRIPT_DIR/buildtools"
+    cmake -DBUILDTOOLS_MODE=1 .. -GNinja
+    ninja
+    echo "buildtools built in $SCRIPT_DIR/buildtools"
+    exit 0
+fi
+
+# On native Vitruvian (self-hosting) the resource toolchain (rc / xres /
+# resattr / linkcatkeys) is installed system-wide and picked up from PATH,
+# so --buildtools is optional. /dev/nexus is the reliable presence check.
+_is_vitruvian_native=0
+if [ -e /dev/nexus ]; then
+    _is_vitruvian_native=1
+fi
+
+if [ -z "$BUILDTOOLS_DIR" ]; then
+    if [ $_is_vitruvian_native -eq 1 ]; then
+        echo "Native Vitruvian host detected — building without a buildtools tree."
+    else
+        echo "Error: --buildtools=PATH is required on non-Vitruvian hosts."
+        echo "First run: ./configure --build-buildtools"
+        echo "Then:      ./configure --buildtools=../buildtools [other opts]"
+        exit 1
+    fi
+else
+    if [ ! -d "$BUILDTOOLS_DIR" ]; then
+        echo "Error: --buildtools path does not exist: $BUILDTOOLS_DIR"
+        exit 1
+    fi
+    # Validate presence of the built binaries via an absolute lookup, but
+    # pass the user's path form verbatim to cmake. engine.cmake resolves
+    # BUILDTOOLS_DIR against CMAKE_BINARY_DIR — feeding it an absolute
+    # path here breaks that concatenation and yields malformed ninja rules.
+    _abs_buildtools="$(cd "$BUILDTOOLS_DIR" && pwd)"
+    for _tool in rc xres resattr; do
+        if [ ! -x "$_abs_buildtools/src/bin/$_tool" ]; then
+            echo "Error: $BUILDTOOLS_DIR looks incomplete — missing $_tool binary."
+            echo "Run ./configure --build-buildtools first."
+            exit 1
+        fi
+    done
+fi
+
+
+# Resolve effective arch (CLI > buildstate.conf > autodetect from `uname -m`).
+# Autodetection only fires for native builds; passing --override-toolchain
+# or --arch skips it. Cross-compilation always requires --arch.
+if [ -z "$TARGET_ARCH" ]; then
+    if [ -f ./buildstate.conf ]; then
+        . ./buildstate.conf
+        TARGET_ARCH="${ARCH:-}"
+    fi
+fi
+if [ -z "$TARGET_ARCH" ]; then
+    _host_machine=$(uname -m)
+    case "$_host_machine" in
+        x86_64|amd64)      TARGET_ARCH="amd64" ;;
+        aarch64|arm64)     TARGET_ARCH="arm64" ;;
+        armv7*|armv6*|armhf) TARGET_ARCH="arm32" ;;
+        riscv64)           TARGET_ARCH="riscv64" ;;
+        *)
+            echo "Error: cannot autodetect a supported arch from 'uname -m' = $_host_machine."
+            echo "Supported: amd64, arm64, arm32, riscv64. Pass --arch=<name> explicitly."
+            exit 1
+            ;;
+    esac
+    echo "Autodetected target arch: $TARGET_ARCH (host: $_host_machine)"
+fi
+
+# Map user-facing arch to setupenv arch form
+case "$TARGET_ARCH" in
+    amd64|x86_64)    _setup_arch=amd64 ;;
+    arm64)           _setup_arch=arm64 ;;
+    arm32|armhf|arm) _setup_arch=arm32 ;;
+    riscv64)         _setup_arch=riscv64 ;;
+    *) echo "Error: Unknown architecture: $TARGET_ARCH"; exit 1 ;;
+esac
+
+# Invoke setupenv as needed: create chroot if --chroot-build and missing,
+# or write buildstate.conf if absent (native case).
+if [ $CHROOT_BUILD -eq 1 ] && [ ! -d ./image_tree/chroot ] && [ -z "$CHROOT_PATH" ]; then
+    "$SCRIPT_DIR/build/scripts/setupenv.sh" --chroot-build --arch="$_setup_arch"
+elif [ ! -f ./buildstate.conf ]; then
+    "$SCRIPT_DIR/build/scripts/setupenv.sh" --arch="$_setup_arch"
+fi
+
+if [ -f ./CMakeCache.txt ]; then
+    _cached_arch="$(grep -m1 '^VITRUVIAN_TARGET_ARCH:' ./CMakeCache.txt | cut -d= -f2)"
+    if [ -n "$_cached_arch" ] && [ "$_cached_arch" != "$TARGET_ARCH" ]; then
+        echo "Error: build tree was configured for $_cached_arch but current arch is $TARGET_ARCH."
+        echo "Remove this generated directory and start fresh."
+        exit 1
+    fi
+
+    _cached_chroot="$(grep -m1 '^VITRUVIAN_CHROOT_BUILD:' ./CMakeCache.txt | cut -d= -f2)"
+    if [ -n "$_cached_chroot" ]; then
+        case "$_cached_chroot" in
+            ON|on|1|TRUE|true|YES|yes|Y|y) _cmake_chroot=1 ;;
+            *) _cmake_chroot=0 ;;
+        esac
+        if [ "$CHROOT_BUILD" -ne "$_cmake_chroot" ]; then
+            if [ "$CHROOT_BUILD" -eq 1 ]; then
+                echo "Error: build tree was configured as a host build, but --chroot-build was requested."
+            else
+                echo "Error: build tree was configured with --chroot-build, but that flag was not passed."
+            fi
+            echo "Chroot settings cannot be changed in place."
+            echo "Remove this generated directory and start again."
+            exit 1
+        fi
+    fi
+fi
+
+case "$TARGET_ARCH" in
+    x86_64|amd64) ;;
+    arm64)
+        if [ -z "$OVERRIDE_TOOLCHAIN" ]; then
+            OVERRIDE_TOOLCHAIN="aarch64-linux-gnu"
+            echo "Note: arm64 cross-compilation — defaulting to toolchain $OVERRIDE_TOOLCHAIN."
+        fi
+        ;;
+    riscv64)
+        if [ -z "$OVERRIDE_TOOLCHAIN" ]; then
+            OVERRIDE_TOOLCHAIN="riscv64-linux-gnu"
+            echo "Note: riscv64 cross-compilation — defaulting to toolchain $OVERRIDE_TOOLCHAIN."
+        fi
+        ;;
+    arm32|armhf)
+        TARGET_ARCH="arm"
+        if [ -z "$OVERRIDE_TOOLCHAIN" ]; then
+            OVERRIDE_TOOLCHAIN="rpi-arm32"
+            echo "Note: arm32 cross-compilation — defaulting to toolchain $OVERRIDE_TOOLCHAIN."
+        fi
+        ;;
+    *)
+        echo "Error: Unknown architecture: $TARGET_ARCH"
+        echo "Supported: amd64, arm64, arm32, riscv64"
+        exit 1
+        ;;
+esac
+
+# Kernel versions
+uname -r > hostkernelversion.conf
+hostkernel=$(cat ./hostkernelversion.conf)
+
+if [ $CHROOT_BUILD -eq 1 ] && [ -f ./imagekernelversion.conf ]; then
+    guestkernel=$(cat ./imagekernelversion.conf)
+    echo "Chroot build: using guest kernel $guestkernel"
+else
+    guestkernel=$(cat ./imagekernelversion.conf 2>/dev/null || echo "$hostkernel")
+fi
+
+# Only build types with flags defined in build/defs.cmake are accepted. An
+# unrecognised value is passed straight to CMake, which then finds no
+# CMAKE_<LANG>_FLAGS_<TYPE> and silently compiles with no optimisation flags
+# at all, which is what the old "Workflow" type did.
+case "$BUILD_TYPE" in
+    Debug|Release) ;;
+    *)
+        echo "Error: unknown --build-type=$BUILD_TYPE (expected Debug or Release)." >&2
+        exit 1
+        ;;
+esac
+
+case "$SANITIZE" in
+    ""|thread|address) ;;
+    *)
+        echo "Error: unknown --sanitize=$SANITIZE (expected thread or address)." >&2
+        exit 1
+        ;;
+esac
+
+# Build up cmake options
+CMAKE_OPTS="-DCMAKE_BUILD_TYPE=$BUILD_TYPE"
+CMAKE_OPTS="$CMAKE_OPTS -DBUILDTOOLS_DIR=$BUILDTOOLS_DIR"
+CMAKE_OPTS="$CMAKE_OPTS -DHOST_KERNEL=$hostkernel"
+CMAKE_OPTS="$CMAKE_OPTS -DKERNEL_RELEASE=$guestkernel"
+CMAKE_OPTS="$CMAKE_OPTS -DVITRUVIAN_TARGET_ARCH=$TARGET_ARCH"
+
+if [ $SSHDEBUG -eq 1 ]; then
+    CMAKE_OPTS="$CMAKE_OPTS -DVITRUVIAN_SSHDEBUG=1"
+fi
+
+if [ -n "$SANITIZE" ]; then
+    CMAKE_OPTS="$CMAKE_OPTS -DVITRUVIAN_SANITIZE=$SANITIZE"
+    echo "Note: $SANITIZE sanitizer instrumentation enabled for the whole tree."
+fi
+
+if [ $CHROOT_BUILD -eq 1 ]; then
+    CMAKE_OPTS="$CMAKE_OPTS -DVITRUVIAN_CHROOT_BUILD=ON"
+    if [ -n "$CHROOT_PATH" ]; then
+        [ -d "$CHROOT_PATH" ] || { echo "Error: --chroot-path $CHROOT_PATH does not exist."; exit 1; }
+        CMAKE_OPTS="$CMAKE_OPTS -DVITRUVIAN_CHROOT_PATH=$CHROOT_PATH"
+    else
+        CMAKE_OPTS="$CMAKE_OPTS -DVITRUVIAN_CHROOT_PATH=$(realpath ./image_tree/chroot)"
+    fi
+fi
+
+if [ -n "$OVERRIDE_TOOLCHAIN" ]; then
+    TOOLCHAIN_FILE="../build/cross/$OVERRIDE_TOOLCHAIN.cmake"
+    [ -f "$TOOLCHAIN_FILE" ] || { echo "Toolchain not found: $TOOLCHAIN_FILE"; exit 1; }
+    CMAKE_OPTS="$CMAKE_OPTS -DCMAKE_TOOLCHAIN_FILE=$TOOLCHAIN_FILE"
+fi
+
+cmake $CMAKE_OPTS .. -GNinja
+
+if [ $SSHDEBUG -eq 1 ]; then
+    echo "NOTE: images will stage the Vitruvian (SSH Debug) entry: root or vos-live over SSH (password: live), only when booted from that entry."
+fi
+
+echo "Configured correctly!"
