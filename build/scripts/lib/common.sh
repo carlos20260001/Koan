@@ -27,6 +27,100 @@ die() {
 # sudo resets the environment; chroot apt sees a proxy only as an env argument.
 CHROOT_PROXY="${http_proxy:+http_proxy=$http_proxy}"
 
+# Detect container environment (Docker/Podman). Inside a container running as
+# root, sudo is unnecessary and often unavailable; use direct commands instead.
+is_container() {
+    [ -f /.dockerenv ] || [ -f /.containerenv ] || \
+    grep -qi 'container' /proc/1/cgroup 2>/dev/null || \
+    [ "${container:-}" != "" ]
+}
+
+# Rootless mode: a non-root user with no way to elevate. If sudo exists we
+# keep using it (the original host build path); vsudo_auth prompts later.
+is_rootless() {
+    [ "$(id -u)" -ne 0 ] && ! command -v sudo >/dev/null 2>&1
+}
+
+# VOS_SUDO is "sudo" on the host (non-root with sudo), empty inside a container
+# (already root) or in rootless mode (no sudo available).
+if is_container || [ "$(id -u)" -eq 0 ]; then
+    VOS_SUDO=""
+    VOS_ROOTLESS=0
+elif is_rootless; then
+    VOS_SUDO=""
+    VOS_ROOTLESS=1
+else
+    VOS_SUDO="sudo"
+    VOS_ROOTLESS=0
+fi
+export VOS_SUDO VOS_ROOTLESS
+
+# A rootless container still gives uid 0 a privileged user namespace:
+# mount/chroot/unshare work, but loop devices and mknod do not. Track that
+# separately so image code can fail with a clear message instead of a
+# confusing losetup error.
+VOS_NO_LOOP=0
+if is_container; then
+    _uid0_host="$(awk '$1 == 0 { print $2; exit }' /proc/self/uid_map 2>/dev/null)"
+    if [ -n "$_uid0_host" ] && [ "$_uid0_host" != 0 ]; then
+        VOS_NO_LOOP=1
+    fi
+fi
+export VOS_NO_LOOP
+
+# vrun: run a command with VOS_SUDO prefix (no-op on host as root/container, sudo on host user).
+vrun() {
+    if [ -n "$VOS_SUDO" ]; then
+        sudo "$@"
+    else
+        "$@"
+    fi
+}
+
+# vrootless: run a command in rootless mode. Tries proot if available,
+# otherwise runs directly (may fail for operations needing root).
+vrootless() {
+    if [ "$VOS_ROOTLESS" -eq 1 ] && command -v proot >/dev/null 2>&1; then
+        proot "$@"
+    else
+        "$@"
+    fi
+}
+
+# vchroot: run a command inside a directory as if chrooted.
+# Uses proot -r in rootless mode, vrun chroot otherwise.
+vchroot() {
+    _vchroot_dir="$1"; shift
+    if [ "$VOS_ROOTLESS" -eq 1 ]; then
+        if command -v proot >/dev/null 2>&1; then
+            # Bind host proc/sys/dev so apt/dpkg work inside the proot.
+            proot -r "$_vchroot_dir" \
+                -b /proc -b /sys -b /dev -b /dev/pts \
+                "$@"
+        else
+            # No proot: cannot chroot. Run directly (limited functionality).
+            ( cd "$_vchroot_dir" && "$@" )
+        fi
+    else
+        vrun chroot "$_vchroot_dir" "$@"
+    fi
+}
+
+# vsudo_auth: authenticate sudo if needed (no-op inside container, root, or rootless).
+vsudo_auth() {
+    if [ -n "$VOS_SUDO" ]; then
+        sudo -v
+    fi
+}
+
+# vsudo_keepalive: refresh sudo timestamp in background (no-op inside container, root, or rootless).
+# Usage: vsudo_keepalive &   then trap 'kill $!' EXIT
+vsudo_keepalive() {
+    if [ -n "$VOS_SUDO" ]; then
+        while true; do sleep 60; sudo -n true 2>/dev/null || exit; kill -0 "$$" 2>/dev/null || exit; done
+    fi
+}
+
 arch_to_deb() {
     case "$1" in
         amd64)   printf 'amd64' ;;
@@ -101,7 +195,7 @@ native_pkg_unpack() {
     # --force-depends: Pre-Depends are checked as configured state, which a bulk unpack can't satisfy;
     # the in-chroot `dpkg --configure -a` that follows sorts it out.
     # shellcheck disable=SC2086  # word-splitting the deb list is intended
-    sudo dpkg --root="$_npu_root" --unpack --force-depends $_npu_debs
+    vrun dpkg --root="$_npu_root" --unpack --force-depends $_npu_debs
 }
 
 # Debian leaves the sbin dirs off a normal user's PATH, but sfdisk, mke2fs
@@ -157,7 +251,7 @@ find_qemu_user_binary() {
 register_binfmt() {
     if [ ! -f /proc/sys/fs/binfmt_misc/status ]; then
         log_warn "binfmt_misc not mounted. Mounting..."
-        sudo mount binfmt_misc -t binfmt_misc /proc/sys/fs/binfmt_misc 2>/dev/null || true
+        vrun mount binfmt_misc -t binfmt_misc /proc/sys/fs/binfmt_misc 2>/dev/null || true
     fi
 }
 
