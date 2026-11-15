@@ -2,13 +2,18 @@ set(CORE_APPLICATIONS
 	Deskbar
 	Tracker
 )
+VosKeepTargets(CORE_APPLICATIONS)
 ImageInclude("/system/" ${CORE_APPLICATIONS})
 
 # Greeter binary — /system/servers/ so janus finds it by name.
+if(TARGET vitruvian-login) # ported subset: not in this tree yet
 ImageInclude("/system/servers" vitruvian-login)
+endif()
 
 # Polkit authentication agent (auto-started with the graphical session).
+if(TARGET vos-polkit-agent) # ported subset: not in this tree yet
 ImageInclude("/system/servers" vos-polkit-agent)
+endif()
 
 set(SYSTEM_APPS
 	AboutSystem
@@ -44,6 +49,7 @@ set(SYSTEM_APPS
 	WebMail
 	Workspaces
 )
+VosKeepTargets(SYSTEM_APPS)
 ImageInclude("/system/apps" ${SYSTEM_APPS})
 
 # Installed but not in the Deskbar menu: started by the system, not users.
@@ -52,6 +58,7 @@ set(SYSTEM_APPS_UNLISTED
 	# TryNow popup: launched by /system/boot/first_login/10-expand-volume.
 	ExpandVolume
 )
+VosKeepTargets(SYSTEM_APPS_UNLISTED)
 ImageInclude("/system/apps" ${SYSTEM_APPS_UNLISTED})
 
 install(CODE "
@@ -82,6 +89,8 @@ set(DESKBAR_DEMOS_TARGETS
 	Sudoku
 )
 
+VosKeepTargets(DESKBAR_DEMOS_TARGETS)
+VosKeepTargets(DESKBAR_DEMOS)
 ImageInclude("/system/apps" ${DESKBAR_DEMOS_TARGETS})
 
 install(CODE "
@@ -111,6 +120,7 @@ set(DESKBAR_APPLETS
 	Pulse
 )
 
+VosKeepTargets(DESKBAR_APPLETS)
 ImageInclude("/system/apps" ${DESKBAR_APPLETS})
 
 install(CODE "

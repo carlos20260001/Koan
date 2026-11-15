@@ -56,6 +56,30 @@ function( ImageCreateDir dest )
 	install(DIRECTORY DESTINATION ${dest} COMPONENT ${_component})
 endfunction()
 
+# ported subset: the image lists name the whole VitruvianOS userland, most
+# of which this tree does not build yet. Keep the targets that exist; with
+# PARALLEL, drop the same positions from a second list.
+function( VosKeepTargets listvar )
+	cmake_parse_arguments(_ARG "" "PARALLEL" "" ${ARGN})
+	set(_kept "")
+	set(_kept_parallel "")
+	set(_index 0)
+	foreach(_item IN LISTS ${listvar})
+		if(TARGET ${_item})
+			list(APPEND _kept "${_item}")
+			if(_ARG_PARALLEL)
+				list(GET ${_ARG_PARALLEL} ${_index} _other)
+				list(APPEND _kept_parallel "${_other}")
+			endif()
+		endif()
+		math(EXPR _index "${_index} + 1")
+	endforeach()
+	set(${listvar} "${_kept}" PARENT_SCOPE)
+	if(_ARG_PARALLEL)
+		set(${_ARG_PARALLEL} "${_kept_parallel}" PARENT_SCOPE)
+	endif()
+endfunction()
+
 include(build/baseimage.cmake)
 include(build/profiles/base.cmake)
 
@@ -63,7 +87,11 @@ if(CMAKE_BUILD_TYPE STREQUAL "Debug")
 include(build/profiles/debug.cmake)
 endif()
 
+# ported subset: VitruvianOS's data/ (systemd units, libexec helpers,
+# polkit, pam, boot scripts) is not in this tree yet.
+if(EXISTS "${CMAKE_SOURCE_DIR}/data/systemd")
 include(build/profiles/data.cmake)
+endif()
 
 string(REPLACE ";" "," RESULT "${RUN_LIST}")
 
@@ -280,9 +308,12 @@ set(CPACK_DEBIAN_ARCHIVE_DESCRIPTION
 	"V\\\\OS package repository signing key and apt source")
 set(CPACK_DEBIAN_ARCHIVE_PACKAGE_CONTROL_EXTRA
 	"${CMAKE_CURRENT_SOURCE_DIR}/data/debian/archive/postinst")
+# ported subset: no repository signing key in this tree yet.
+if(EXISTS "${CMAKE_SOURCE_DIR}/data/keys/vitruvian-archive-keyring.asc")
 install(FILES data/keys/vitruvian-archive-keyring.asc
 	DESTINATION /usr/share/keyrings
 	COMPONENT archive)
+endif()
 
 # These files used to ship in vos itself.
 set(CPACK_DEBIAN_DATA_PACKAGE_REPLACES "vos (<< ${_vos_runtime_version})")

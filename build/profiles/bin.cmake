@@ -77,4 +77,5 @@
 	screen_blanker
 	screenshot_cli
 )
+VosKeepTargets(BIN_DIRECTORY)
 ImageInclude("/bin" ${BIN_DIRECTORY})

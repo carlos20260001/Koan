@@ -1,3 +1,7 @@
+# ported subset: libroot and libroot2 (milestone M4) supply every source of
+# root; until they are here the target cannot be defined at all.
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/libroot2/CMakeLists.txt")
+
 AddOn(
 	root
 	SHARED
@@ -32,6 +36,13 @@ endif()
 # TODO: get rid of runtime loader
 UsePrivateHeaders(root app shared libroot2 system kernel runtime_loader)
 
+endif()
+
 add_subdirectory(kernel)
-add_subdirectory(libroot)
-add_subdirectory(libroot2)
+# ported subset: libroot and libroot2 arrive in milestone M4.
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/libroot/CMakeLists.txt")
+	add_subdirectory(libroot)
+endif()
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/libroot2/CMakeLists.txt")
+	add_subdirectory(libroot2)
+endif()

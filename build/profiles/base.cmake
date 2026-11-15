@@ -13,14 +13,19 @@ set(SYSTEM_SERVERS
 	keystore_server
 	notifications_bridge
 )
+VosKeepTargets(SYSTEM_SERVERS)
 ImageInclude("/system/servers" ${SYSTEM_SERVERS})
+# ported subset: notification_server is not in this tree yet.
+if(EXISTS "${CMAKE_SOURCE_DIR}/src/servers/notification/org.freedesktop.Notifications.service")
 ImageIncludeFile("${CMAKE_SOURCE_DIR}/src/servers/notification/org.freedesktop.Notifications.service" "/usr/share/dbus-1/services")
+endif()
 
 
 set(INPUT_SERVER_ADDONS
 	keyboard
 	mouse
 )
+VosKeepTargets(INPUT_SERVER_ADDONS)
 ImageInclude("/system/add-ons/input_server/devices" ${INPUT_SERVER_ADDONS})
 
 
@@ -33,6 +38,7 @@ set(INPUT_SERVER_FILTERS
 	xvitruvian
 #	shortcut_catcher
 )
+VosKeepTargets(INPUT_SERVER_FILTERS)
 ImageInclude("/system/add-ons/input_server/filters" ${INPUT_SERVER_FILTERS})
 
 
@@ -42,6 +48,7 @@ set(OPENGL_RENDERERS
 	mesa_egl
 	mesa_surfaceless
 )
+VosKeepTargets(OPENGL_RENDERERS)
 ImageInclude("/system/add-ons/opengl" ${OPENGL_RENDERERS})
 
 
@@ -50,6 +57,7 @@ set(ACCOUNT_PROVIDER_ADDONS
 	ImapProvider
 	Oauth2Provider
 )
+VosKeepTargets(ACCOUNT_PROVIDER_ADDONS)
 ImageInclude("/system/add-ons/accounts" ${ACCOUNT_PROVIDER_ADDONS})
 
 
@@ -77,6 +85,7 @@ set(SYSTEM_LIBS
 	outputaddon
 	vos_x_client
 )
+VosKeepTargets(SYSTEM_LIBS)
 ImageInclude("/lib" ${SYSTEM_LIBS})
 
 
@@ -101,6 +110,7 @@ set(SYSTEM_TRANSLATORS
 	WEBPTranslator
 	WonderbrushTranslator
 )
+VosKeepTargets(SYSTEM_TRANSLATORS)
 ImageInclude("/system/add-ons/Translators" ${SYSTEM_TRANSLATORS})
 
 
@@ -113,11 +123,13 @@ set(TRACKER_ADDONS
 	ZipOMatic
 #	mark_as: needs libmail (not ported); skipped
 )
+VosKeepTargets(TRACKER_ADDONS)
 ImageInclude("/system/add-ons/Tracker" ${TRACKER_ADDONS})
 
 set(CATALOG_ADDONS
 	plaintext
 )
+VosKeepTargets(CATALOG_ADDONS)
 ImageInclude("/system/add-ons/locale/catalogs" ${CATALOG_ADDONS})
 
 # media2 units and the LV2/LADSPA plugin adapter.
@@ -125,6 +137,7 @@ set(MEDIA_ADDONS
 	equalizer
 	plugin_adapter
 )
+VosKeepTargets(MEDIA_ADDONS)
 ImageInclude("/system/add-ons/media" ${MEDIA_ADDONS})
 
 set(DECORATORS
@@ -133,12 +146,14 @@ set(DECORATORS
 	MacDecorator
 	WinDecorator
 )
+VosKeepTargets(DECORATORS)
 ImageInclude("/system/add-ons/decorators" ${DECORATORS})
 
 set(CONTROL_LOOKS
 	BeControlLook
 	FlatControlLook
 )
+VosKeepTargets(CONTROL_LOOKS)
 ImageInclude("/system/add-ons/control_look" ${CONTROL_LOOKS})
 
 # Menu label is the file name; the kit loads from .../Screen Savers/<name>.
@@ -158,6 +173,7 @@ set(SCREEN_SAVERS
 	slideshowsaver
 	spider
 )
+VosKeepTargets(SCREEN_SAVERS)
 ImageInclude("/system/add-ons/Screen Savers" ${SCREEN_SAVERS})
 
 
@@ -221,6 +237,8 @@ endforeach()
 # which uses per-subdirectory scoping — cmake uses a single global target namespace.)
 list(LENGTH SYSTEM_PREFERENCES_TARGETS _nprefs)
 math(EXPR _nprefs_last "${_nprefs} - 1")
+# ported subset: the list can be empty, and RANGE -1 would still iterate.
+if(_nprefs GREATER 0)
 foreach(_i RANGE ${_nprefs_last})
     list(GET SYSTEM_PREFERENCES_TARGETS ${_i} _target)
     list(GET SYSTEM_PREFERENCES         ${_i} _outname)
@@ -228,6 +246,7 @@ foreach(_i RANGE ${_nprefs_last})
         COMMAND cp -a "${_FLAT}/${_target}" "${_FINAL}/system/preferences/${_outname}"
     )
 endforeach()
+endif()
 
 foreach(_addon ${TRACKER_ADDONS})
     list(APPEND _ARRANGE_CMDS
@@ -245,9 +264,15 @@ list(APPEND _ARRANGE_CMDS
     COMMAND tar --xattrs -cf "${_TAR}" -C "${_FINAL}" .
 )
 
+# ported subset: the web kit is not in this tree yet.
+set(_VOS_WEB_TARGET "")
+if(TARGET web)
+    set(_VOS_WEB_TARGET web)
+endif()
+
 add_custom_target(apps_attrs ALL
     ${_ARRANGE_CMDS}
-    DEPENDS ${SYSTEM_APPS} ${DESKBAR_DEMOS_TARGETS} ${DESKBAR_APPLETS} ${CORE_APPLICATIONS} ${SYSTEM_SERVERS} ${SYSTEM_PREFERENCES_TARGETS} ${TRACKER_ADDONS} ${SYSTEM_TRANSLATORS} web
+    DEPENDS ${SYSTEM_APPS} ${DESKBAR_DEMOS_TARGETS} ${DESKBAR_APPLETS} ${CORE_APPLICATIONS} ${SYSTEM_SERVERS} ${SYSTEM_PREFERENCES_TARGETS} ${TRACKER_ADDONS} ${SYSTEM_TRANSLATORS} ${_VOS_WEB_TARGET}
     COMMENT "Packaging app attrs"
 )
 

@@ -11,13 +11,27 @@ macro( DeclareDependency name )
 		${ARGN}
 	)
 
+	# ported subset: until src/kits is on CMake, only what the ported code
+	# needs (root, the input add-ons, setfattr for the attrs tarballs, Debug
+	# tooling) is declared, so vos does not depend on unused libraries.
+	if("${name}" IN_LIST VOS_PORTED_DEPENDENCIES
+			OR EXISTS "${CMAKE_SOURCE_DIR}/src/kits/CMakeLists.txt")
 	set ("${name}_LIBRARIES" "${_DECLAREDEPENDENCY_LIBRARIES}")
 	set ("${name}_INCLUDES" "${_DECLAREDEPENDENCY_INCLUDES}")
 
 	list (APPEND PACKAGES_LIST "${_DECLAREDEPENDENCY_PACKAGES}")
 	set (DEP_LIST "${DEP_LIST} ${_DECLAREDEPENDENCY_PACKAGES}")
 	set (RUN_LIST ${RUN_LIST} ${_DECLAREDEPENDENCY_RUNTIMES})
+	endif()
 endmacro()
+
+set(VOS_PORTED_DEPENDENCIES
+	GNUC GNUCPP
+	UDEV BLKID ZLIB
+	EVDEV INPUT XKBCOMMON XKEYBOARD_CONFIG
+	SHELL_ATTR
+	BACKTRACE GDB STRACE
+)
 
 DeclareDependency(
 	GNUC

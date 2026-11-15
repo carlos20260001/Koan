@@ -98,8 +98,17 @@ set(TEST_ADDONS
 	libexampletest
 )
 
-ImageInclude("/system/tests" ${TEST_BINARIES} ${TEST_VOS_BINARIES} ${TEST_KERNEL_BINARIES} ${TEST_LIBROOT_BINARIES} cppunit)
+list(APPEND TEST_BINARIES ${TEST_VOS_BINARIES} ${TEST_KERNEL_BINARIES} ${TEST_LIBROOT_BINARIES} cppunit)
+VosKeepTargets(TEST_BINARIES)
+VosKeepTargets(TEST_GUI_BINARIES)
+VosKeepTargets(TEST_ADDONS)
+ImageInclude("/system/tests" ${TEST_BINARIES})
 ImageInclude("/system/tests/interface" ${TEST_GUI_BINARIES})
 ImageInclude("/system/tests/lib" ${TEST_ADDONS})
+# ported subset: src/tests is not on CMake yet; runsuite.sh is VitruvianOS's.
+if(EXISTS "${CMAKE_SOURCE_DIR}/src/tests/runsuite.sh")
 ImageIncludeFile("src/tests/runsuite.sh" "/system/tests")
+endif()
+if(EXISTS "${CMAKE_SOURCE_DIR}/src/tests/CMakeLists.txt")
 ImageIncludeDir("src/tests/kits/storage/resources" "/system/tests")
+endif()
