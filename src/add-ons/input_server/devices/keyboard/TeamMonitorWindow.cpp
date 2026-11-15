@@ -1,3 +1,16 @@
+#ifdef __VOS__
+/*
+ * Copyright 2004-2020, Haiku.
+ * Copyright 2026, The Vitruvian Project
+ * Distributed under the terms of the MIT License.
+ *
+ * Authors:
+ *		Jérôme Duval
+ *		Axel Doerfler, axeld@pinc-software.de
+ *		Pawan Yerramilli, me@pawanyerramilli.com
+ *		Dario Casalinuovo
+ */
+#else	// !__VOS__
 /*
  * Copyright 2004-2020, Haiku.
  * Distributed under the terms of the MIT License.
@@ -7,6 +20,7 @@
  *		Axel Doerfler, axeld@pinc-software.de
  *		Pawan Yerramilli, me@pawanyerramilli.com
  */
+#endif	// !__VOS__
 
 //!	Keyboard input server addon
 
@@ -25,6 +39,9 @@
 #include <Message.h>
 #include <MessageRunner.h>
 #include <Roster.h>
+#ifdef __VOS__
+#include <RosterPrivate.h>
+#endif	// __VOS__
 #include <ScrollView.h>
 #include <Screen.h>
 #include <SpaceLayoutItem.h>
@@ -40,6 +57,44 @@
 #include "TeamListItem.h"
 
 
+#ifdef __VOS__
+// PF_KTHREAD lives in field 9 of /proc/<pid>/stat. The comm field can hold
+// spaces and parens, so anchor on the trailing ')' before tokenising.
+static bool
+is_kernel_thread(pid_t pid)
+{
+	char path[64];
+	snprintf(path, sizeof(path), "/proc/%d/stat", (int)pid);
+
+	FILE* file = fopen(path, "r");
+	if (file == NULL)
+		return false;
+
+	char line[4096];
+	size_t length = fread(line, 1, sizeof(line) - 1, file);
+	fclose(file);
+	if (length == 0)
+		return false;
+	line[length] = '\0';
+
+	char* rparen = strrchr(line, ')');
+	if (rparen == NULL || rparen[1] != ' ')
+		return false;
+
+	// After ')' the fields are: state ppid pgrp session tty tpgid flags...
+	char* saveptr = NULL;
+	char* token = strtok_r(rparen + 2, " ", &saveptr);
+	for (int i = 0; token != NULL && i < 6; i++)
+		token = strtok_r(NULL, " ", &saveptr);
+	if (token == NULL)
+		return false;
+
+	const unsigned long PF_KTHREAD = 0x00200000UL;
+	return (strtoul(token, NULL, 10) & PF_KTHREAD) != 0;
+}
+
+
+#endif	// __VOS__
 #undef B_TRANSLATION_CONTEXT
 #define B_TRANSLATION_CONTEXT "Team monitor"
 
@@ -278,12 +333,21 @@ TeamMonitorWindow::MessageReceived(BMessage* msg)
 			break;
 
 		case kMsgLaunchTerminal:
+#ifdef __VOS__
+			be_roster->Launch("application/x-vnd.vos-Terminal");
+			PostMessage(B_QUIT_REQUESTED);
+			break;
+
+		case TM_FORCE_REBOOT:
+			BRoster::Private().ShutDown(true, false, false);
+#else	// !__VOS__
 			be_roster->Launch("application/x-vnd.Haiku-Terminal");
 			PostMessage(B_QUIT_REQUESTED);
 			break;
 
 		case TM_FORCE_REBOOT:
 			_kern_shutdown(true);
+#endif	// !__VOS__
 			break;
 
 		case TM_KILL_APPLICATION:
@@ -521,7 +585,12 @@ TeamMonitorWindow::_UpdateList()
 	int32 cookie = 0;
 	team_info info;
 	while (get_next_team_info(&cookie, &info) == B_OK) {
+#ifdef __VOS__
+		// Hide init and kernel threads — Haiku exposes only kernel_team.
+		if (info.team <= 1 || is_kernel_thread(info.team))
+#else	// !__VOS__
 		if (info.team <=16)
+#endif	// !__VOS__
 			continue;
 
 		app_info ai;

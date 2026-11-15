@@ -1,3 +1,14 @@
+#ifdef __VOS__
+/*
+ * Copyright 2004-2008, Haiku.
+ * Copyright 2026, The Vitruvian Project
+ * Distributed under the terms of the MIT License.
+ *
+ * Authors:
+ *		Jérôme Duval
+ *		Dario Casalinuovo
+ */
+#else	// !__VOS__
 /*
  * Copyright 2004-2008, Haiku.
  * Distributed under the terms of the MIT License.
@@ -5,6 +16,7 @@
  * Authors:
  *		Jérôme Duval
  */
+#endif	// !__VOS__
 #ifndef TEAM_LIST_ITEM_H
 #define TEAM_LIST_ITEM_H
 
@@ -49,6 +61,11 @@ public:
 
 			int32				MinimalHeight();
 
+#ifdef __VOS__
+private:
+			void				_FetchIcons();
+
+#endif	// __VOS__
 private:
 			team_info			fTeamInfo;
 			app_info			fAppInfo;
