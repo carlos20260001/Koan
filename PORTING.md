@@ -50,18 +50,25 @@ Files: `CMakeLists.txt` (root), `configure`, `bake`, `build/*.cmake`,
 `build/scripts/lib/*.sh`, `build/scripts/{runkvm,setupenv,vm-boot-recovery}.sh`,
 `data/debian/`, `vos.pc.in`, `src/CMakeLists.txt`, `src/tools` (buildtools:
 `rc`, `xres`, `resattr`), `.dockerignore`.
-- [ ] Import the files above (snapshot, Author Numerio)
-- [ ] `src/CMakeLists.txt` and `build/profiles/*.cmake` trimmed to directories
+- [x] Import the files above (snapshot, Author Numerio) — `a13fa8401a`; VitruvianOS's
+      `configure` lives as `vos-configure` (Haiku's Jam `configure` keeps its name and
+      execs it for the CMake options); run it from inside the build dir
+- [x] `src/CMakeLists.txt` and `build/profiles/*.cmake` trimmed to directories
       that exist in this tree; `src/system/CMakeLists.txt` adds `kernel`,
-      `libroot`, `libroot2` only
-- [ ] `build/deps.cmake` keeps only the dependencies the ported subset needs
+      `libroot`, `libroot2` only — `94c1b676c4` (guards marked "ported subset")
+- [x] `build/deps.cmake` keeps only the dependencies the ported subset needs
       (udev, blkid, zlib, evdev, libinput, xkbcommon); the rest stays behind
       the same `find_package` guards it has upstream
-- [ ] `./configure --build-buildtools` builds `rc`/`xres`/`resattr`
-- [ ] `./configure --buildtools=buildtools --arch=amd64` then `ninja -C generated.amd64`
-      configures (targets may still fail to compile until M4)
-- [ ] `bake` packaging (`packages.cmake`, `data/debian/*`) produces a `vos`
-      deb from whatever is installed (not run until M4 gives it content)
+- [ ] `./vos-configure --build-buildtools` builds `rc`/`xres`/`resattr` — FAIL:
+      buildtools mode compiles 8 libroot2 files (M4), 26 `src/kits` files and 25
+      shared files that differ from air/OS (`headers/build/*`, `src/bin/rc`,
+      `src/build/lib{be,root}`, `src/tools/locale`); host also lacks bison/flex
+- [x] `cd generated.amd64 && ../vos-configure --buildtools=<Koan buildtools> --arch=amd64 --build-type=Release`
+      → "Configured correctly!"; in the `vitruvian_build` container `ninja` and
+      `ninja nexus` pass (host lacks `attr`, debhelper, dkms)
+- [ ] `bake` packaging produces a `vos` deb — not run; `cpack -G DEB` in the
+      container already emits `VOS-0.6.3-Linux-{runtime,data,dev,buildtools}.deb`
+      (runtime is empty until M4)
 
 ### M2 - Docker builder (from Koan `master`)
 Files: `docker/Dockerfile`, `docker/build.sh`, `docker/run-qemu.sh`,
@@ -78,9 +85,10 @@ Files: `docker/Dockerfile`, `docker/build.sh`, `docker/run-qemu.sh`,
 - [ ] `docs/koan/BUILDING.md`: how to build this tree with the container
 
 ### M3 - Nexus
-- [ ] Submodule added and initialised (M0)
-- [ ] `src/system/kernel/CMakeLists.txt` from VitruvianOS (dkms packaging)
-- [ ] `nexus-dkms` deb builds inside the container
+- [x] Submodule added and initialised (M0)
+- [x] `src/system/kernel/CMakeLists.txt` from VitruvianOS (dkms packaging) — in `a13fa8401a`
+- [x] `nexus-dkms` deb builds inside the container — `ninja nexus` in
+      `vitruvian_build` → `nexus-dkms_0.3.0+git0.0730b1c_all.deb`
 - [ ] Module builds against the container's `linux-headers` (`make -C src/system/kernel/nexus/nexus`)
 
 ### M4 - libroot and libroot2 (from VitruvianOS `upstream/master`)
@@ -129,4 +137,5 @@ scroll phases), so this is a three-way merge, not a copy.
 
 | Date | Commit | What |
 | --- | --- | --- |
-| 2026-11-15 | | M0: branch, licence appendix, tracker |
+| 2026-11-15 | `0ff2aa2a09` | M0: branch, licence appendix, tracker |
+| 2026-11-15 | `654269f633` | M1: CMake/Debian pipeline merged (`port/debian-builder`); buildtools blocked on M4 |
