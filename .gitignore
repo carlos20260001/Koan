@@ -31,3 +31,9 @@ compile_commands.json
 /tools/rock5-itx/__pycache__/
 /artifacts/
 /state/
+
+# VitruvianOS CMake/Debian build (vos-configure, bake)
+/buildtools/
+/buildstate.conf
+/hostkernelversion.conf
+/imagekernelversion.conf

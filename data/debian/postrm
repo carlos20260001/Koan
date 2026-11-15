@@ -1,0 +1,82 @@
+#!/bin/sh
+# Cleans up what postinst created and dpkg doesn't track (symlinks, profile.d hook, extracted trees, scaffolding).
+# purge also removes the skel config tree and per-user copies; remove keeps them. Tolerates all failures.
+
+set -e
+
+ACTION="$1"
+
+# --- remove the postinst symlinks ----------------------------------------
+for link in /system/bin /system/lib /system/cache /system/var; do
+    [ -L "$link" ] && rm -f "$link" || true
+done
+
+# --- remove the /etc/profile.d hook --------------------------------------
+rm -f /etc/profile.d/vitruvian.sh || true
+# A reinstall of gstreamer1.0-plugins-good brings the pulse sink back.
+rm -f /etc/dpkg/dpkg.cfg.d/vos-no-pulse || true
+
+# --- remove tar-extracted trees ------------------------------------------
+# mime_db.tar was extracted into /system/data/mime_db/
+rm -rf /system/data/mime_db || true
+# apps_attrs.tar / templates_attrs.tar wrote into existing trees; the
+# binaries themselves are gone via dpkg, so the placeholder xattrs they
+# applied are also gone.
+
+# Empty postinst dirs only; rmdir leaves non-empty ones alone.
+for dir in \
+    /system/data/deskbar/menu/Applications \
+    "/system/data/deskbar/menu/Desktop applets" \
+    /system/data/deskbar/menu/Demos \
+    /system/data/deskbar/menu/Preferences \
+    /system/data/deskbar/menu \
+    /system/data/deskbar \
+    /system/data \
+    /system/add-ons \
+    /system/apps \
+    /system/demos \
+    /system/develop \
+    /system/documentation \
+    /system/preferences \
+    /system/servers \
+    /system/settings/etc/profile.d \
+    /system/settings/etc \
+    /system/settings \
+    /system/boot/post_install \
+    /system/boot/first_login \
+    /system/boot \
+    /system; do
+    rmdir "$dir" 2>/dev/null || true
+done
+
+if [ "$ACTION" = "purge" ]; then
+    # Wipe the skel template we planted.
+    rm -rf /etc/skel/config || true
+    rm -rf /etc/skel/Desktop || true
+    rm -f  /etc/skel/.vitruvian/provisioned 2>/dev/null || true
+    rmdir /etc/skel/.vitruvian 2>/dev/null || true
+
+    # Best-effort per-user cleanup. Only touch subtrees we own; leave
+    # user-authored content alone.
+    for home in /home/*; do
+        [ -d "$home" ] || continue
+        rm -rf "$home/config/settings/deskbar" || true
+        rm -rf "$home/config/settings/Tracker" || true
+        rm -rf "$home/config/settings/printers" || true
+        rmdir "$home/config/settings" 2>/dev/null || true
+        rmdir "$home/config" 2>/dev/null || true
+        rm -f "$home/.vitruvian/provisioned" 2>/dev/null || true
+        rmdir "$home/.vitruvian" 2>/dev/null || true
+        # Desktop symlinks
+        for link in "$home/Desktop/home" "$home/Desktop/Home" \
+            "$home/Desktop/System"; do
+            [ -L "$link" ] && rm -f "$link" || true
+        done
+        rmdir "$home/Desktop" 2>/dev/null || true
+    done
+
+    # XDG Trash is user data; respect that even on purge — if the
+    # user wants it gone they'll delete it themselves.
+fi
+
+exit 0

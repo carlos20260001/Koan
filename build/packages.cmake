@@ -1,0 +1,369 @@
+ #  Copyright 2019-2026, Dario Casalinuovo. All rights reserved.
+ #  Distributed under the terms of the LGPL License.
+
+# install() helpers. The destination picks the package: vos-dev for the
+# development tree, vos-data for data and configuration, vos for the rest.
+function( VosComponentFor dest outvar )
+	if(dest MATCHES "^/system/develop(/|$)")
+		set(${outvar} dev PARENT_SCOPE)
+	elseif(dest MATCHES "^/(etc|usr/share|usr/lib/tmpfiles\\.d|system/data|system/settings)(/|$)")
+		set(${outvar} data PARENT_SCOPE)
+	else()
+		set(${outvar} runtime PARENT_SCOPE)
+	endif()
+endfunction()
+
+function( ImageInclude path )
+	foreach(arg IN LISTS ARGN)
+		# Static libraries are only for linking.
+		get_target_property(_type ${arg} TYPE)
+		if(_type STREQUAL "STATIC_LIBRARY")
+			set(_component dev)
+		else()
+			set(_component runtime)
+		endif()
+		install(TARGETS ${arg}
+			COMPONENT ${_component}
+			ARCHIVE DESTINATION ${path}
+			RUNTIME DESTINATION ${path}
+			LIBRARY DESTINATION ${path}
+			DESTINATION ${path}
+			# Tracker's add-on enumerator and BTranslatorRoster require
+			# the +x bit (IsExecutable filter in LoadAddOnDir). CMake's
+			# default for shared libraries is 644.
+			PERMISSIONS
+				OWNER_READ OWNER_WRITE OWNER_EXECUTE
+				GROUP_READ GROUP_EXECUTE
+				WORLD_READ WORLD_EXECUTE
+		)
+	endforeach()
+endfunction()
+
+function( ImageIncludeFile source dest )
+	VosComponentFor("${dest}" _component)
+	install(FILES ${source} DESTINATION ${dest} COMPONENT ${_component})
+endfunction()
+
+function( ImageIncludeDir source dest )
+	# Preserve +x on shipped scripts (e.g. /system/boot/first_login/*).
+	VosComponentFor("${dest}" _component)
+	install(DIRECTORY ${source} DESTINATION ${dest} USE_SOURCE_PERMISSIONS
+		COMPONENT ${_component})
+endfunction()
+
+function( ImageCreateDir dest )
+	VosComponentFor("${dest}" _component)
+	install(DIRECTORY DESTINATION ${dest} COMPONENT ${_component})
+endfunction()
+
+include(build/baseimage.cmake)
+include(build/profiles/base.cmake)
+
+if(CMAKE_BUILD_TYPE STREQUAL "Debug")
+include(build/profiles/debug.cmake)
+endif()
+
+include(build/profiles/data.cmake)
+
+string(REPLACE ";" "," RESULT "${RUN_LIST}")
+
+set(CORE_DEPS "${RESULT}")
+
+execute_process(
+	COMMAND git rev-parse --short HEAD
+	WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
+	OUTPUT_VARIABLE VOS_GIT_SHA
+	OUTPUT_STRIP_TRAILING_WHITESPACE
+	ERROR_QUIET)
+
+# The sha is read at configure time: reconfigure whenever HEAD moves.
+execute_process(
+	COMMAND git rev-parse --absolute-git-dir
+	WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
+	OUTPUT_VARIABLE _vos_git_dir
+	OUTPUT_STRIP_TRAILING_WHITESPACE
+	ERROR_QUIET)
+foreach(_head HEAD logs/HEAD)
+	if(_vos_git_dir AND EXISTS "${_vos_git_dir}/${_head}")
+		set_property(DIRECTORY APPEND PROPERTY
+			CMAKE_CONFIGURE_DEPENDS "${_vos_git_dir}/${_head}")
+	endif()
+endforeach()
+
+if(DEFINED ENV{VOS_SOURCE_DATE_EPOCH} AND NOT "$ENV{VOS_SOURCE_DATE_EPOCH}" STREQUAL "")
+	set(VOS_SOURCE_DATE_EPOCH "$ENV{VOS_SOURCE_DATE_EPOCH}")
+else()
+	execute_process(
+		COMMAND git log -1 --format=%ct
+		WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
+		OUTPUT_VARIABLE VOS_SOURCE_DATE_EPOCH
+		OUTPUT_STRIP_TRAILING_WHITESPACE
+		ERROR_QUIET)
+endif()
+if(VOS_SOURCE_DATE_EPOCH)
+	set(CPACK_DEB_PACKAGE_MTIME "${VOS_SOURCE_DATE_EPOCH}")
+	# Some CPack internals read the env, not the variable.
+	set(ENV{SOURCE_DATE_EPOCH} "${VOS_SOURCE_DATE_EPOCH}")
+	message(STATUS "VOS SOURCE_DATE_EPOCH: ${VOS_SOURCE_DATE_EPOCH}")
+else()
+	message(WARNING "no git commit timestamp available - package build will not be byte-reproducible")
+endif()
+
+if(DEFINED ENV{VOS_PKG_REVISION} AND NOT "$ENV{VOS_PKG_REVISION}" STREQUAL "")
+	set(VOS_PKG_REVISION "$ENV{VOS_PKG_REVISION}")
+else()
+	set(VOS_PKG_REVISION "1")
+endif()
+# '-' would be ambiguous (dpkg splits on the last hyphen); anything outside
+# Debian's alphabet is rejected by reprepro after the build already ran.
+if(NOT VOS_PKG_REVISION MATCHES "^[0-9A-Za-z.+~]+$")
+	message(FATAL_ERROR "VOS_PKG_REVISION='${VOS_PKG_REVISION}' is not a valid Debian packaging revision ([0-9A-Za-z.+~]+)")
+endif()
+# The build number is what makes versions order. A sha does not: dpkg
+# compares digit runs numerically and letter runs as text, so roughly half
+# of all consecutive commit pairs sort backwards and apt reports a
+# downgrade. VOS_PKG_REV comes from the CI run number and is strictly
+# increasing.
+# The number is allocated outside this repo and handed in, so no build
+# counter is kept in the source history. Nothing derives it from local
+# tags: a checkout that happens to carry one must not mint versions.
+if(DEFINED ENV{VOS_PKG_REV} AND NOT "$ENV{VOS_PKG_REV}" STREQUAL "")
+	set(VOS_PKG_REV "$ENV{VOS_PKG_REV}")
+	if(NOT VOS_PKG_REV MATCHES "^[0-9]+$")
+		message(FATAL_ERROR "VOS_PKG_REV='${VOS_PKG_REV}' is not a build number ([0-9]+)")
+	endif()
+	set(_vos_build "git${VOS_PKG_REV}")
+else()
+	# Local builds always upgrade: "local" sorts above "git" and the stamp
+	# orders them; a version bump still wins. Stamped at cpack time.
+	set(_vos_build "localVOSLOCALSTAMP")
+	set(CPACK_PROJECT_CONFIG_FILE
+		"${CMAKE_CURRENT_SOURCE_DIR}/build/cpack-local-version.cmake")
+endif()
+
+# The build must sit before the sha, inside the upstream part: the
+# revision field after the final '-' is only a tiebreak, and upstream is
+# compared first.
+if(VOS_GIT_SHA)
+	set(CPACK_DEBIAN_PACKAGE_VERSION
+		"${PROJECT_VERSION}+${_vos_build}.${VOS_GIT_SHA}-${VOS_PKG_REVISION}")
+	message(STATUS "VOS package version: ${CPACK_DEBIAN_PACKAGE_VERSION}")
+else()
+	message(WARNING "no git sha available - package version stays ${PROJECT_VERSION}, which collides in the pool on the next rebuild")
+endif()
+
+# Two DEB components: runtime -> vos.deb (OS image), dev -> vos-dev.deb
+# (public headers, link libraries, vos.pc).
+
+SET(CPACK_GENERATOR "DEB")
+SET(CPACK_DEBIAN_PACKAGE_ARCHITECTURE ${VITRUVIAN_TARGET_ARCH})
+SET(CPACK_DEBIAN_PACKAGE_MAINTAINER "The Vitruvian Project")
+SET(CPACK_DEB_COMPONENT_INSTALL ON)
+
+# CPackDeb uppercases the component when it looks these up; spelled in
+# lower case they are silently ignored and the debs come out named
+# vos-runtime / vos-dev-dev.
+set(CPACK_DEBIAN_RUNTIME_PACKAGE_NAME "vos")
+set(CPACK_DEBIAN_RUNTIME_PACKAGE_CONTROL_EXTRA
+	"${CMAKE_CURRENT_SOURCE_DIR}/data/debian/postinst"
+	"${CMAKE_CURRENT_SOURCE_DIR}/data/debian/prerm"
+	"${CMAKE_CURRENT_SOURCE_DIR}/data/debian/postrm"
+	"${CMAKE_CURRENT_SOURCE_DIR}/data/debian/triggers")
+
+# CPACK_PACKAGE_VERSION is only defined once CPack itself is included, so
+# the strict dependency has to name the version computed above.
+if(CPACK_DEBIAN_PACKAGE_VERSION)
+	set(_vos_runtime_version "${CPACK_DEBIAN_PACKAGE_VERSION}")
+else()
+	set(_vos_runtime_version "${PROJECT_VERSION}")
+endif()
+
+# Depend on a kernel image nexus builds for: floor from the dkms
+# BUILD_EXCLUSIVE_KERNEL_MIN, no ceiling, names from packages.sh.
+set(_vos_kern_min "")
+set(_vos_kern_dkms
+	"${CMAKE_CURRENT_SOURCE_DIR}/src/system/kernel/nexus/debian/nexus-dkms.dkms")
+if(EXISTS "${_vos_kern_dkms}")
+	file(STRINGS "${_vos_kern_dkms}" _vos_kern_line
+		REGEX "^BUILD_EXCLUSIVE_KERNEL_MIN=")
+	if(_vos_kern_line)
+		string(REGEX REPLACE "^BUILD_EXCLUSIVE_KERNEL_MIN=\"([0-9.]+)\".*$" "\\1"
+			_vos_kern_min "${_vos_kern_line}")
+	endif()
+endif()
+if(NOT _vos_kern_min)
+	message(WARNING
+		"no BUILD_EXCLUSIVE_KERNEL_MIN in ${_vos_kern_dkms} - vos ships no kernel floor")
+endif()
+
+set(_vos_kern_cmd
+	". '${CMAKE_CURRENT_SOURCE_DIR}/build/scripts/lib/common.sh' && . '${CMAKE_CURRENT_SOURCE_DIR}/build/scripts/lib/packages.sh' && get_kernel_packages '${VITRUVIAN_TARGET_ARCH}'")
+execute_process(
+	COMMAND sh -c "${_vos_kern_cmd}"
+	OUTPUT_VARIABLE _vos_kern_pkgs
+	OUTPUT_STRIP_TRAILING_WHITESPACE
+	ERROR_VARIABLE _vos_kern_err
+	RESULT_VARIABLE _vos_kern_rc)
+if(NOT _vos_kern_rc EQUAL 0 OR _vos_kern_pkgs STREQUAL "")
+	message(FATAL_ERROR
+		"no kernel image package for ${VITRUVIAN_TARGET_ARCH}: ${_vos_kern_err}")
+endif()
+
+string(REPLACE " " ";" _vos_kern_list "${_vos_kern_pkgs}")
+set(_vos_kern_alts "")
+foreach(_vos_pkg IN LISTS _vos_kern_list)
+	if(_vos_kern_min)
+		list(APPEND _vos_kern_alts "${_vos_pkg} (>= ${_vos_kern_min})")
+	else()
+		list(APPEND _vos_kern_alts "${_vos_pkg}")
+	endif()
+endforeach()
+string(JOIN " | " _vos_kernel_dep ${_vos_kern_alts})
+message(STATUS "VOS kernel dependency: ${_vos_kernel_dep}")
+
+set(CPACK_DEBIAN_RUNTIME_PACKAGE_DEPENDS
+	"${CORE_DEPS}, vos-data (= ${_vos_runtime_version}), vos-archive, ${_vos_kernel_dep}")
+
+set(CPACK_DEBIAN_DEV_PACKAGE_NAME "vos-dev")
+set(CPACK_DEBIAN_DEV_PACKAGE_DEPENDS "vos (= ${_vos_runtime_version})")
+set(CPACK_DEBIAN_DEV_PACKAGE_DESCRIPTION
+	"V\\\\OS development files: public headers, static libraries and pkg-config")
+
+# Data and configuration: the same bytes on every architecture.
+set(CPACK_DEBIAN_DATA_PACKAGE_NAME "vos-data")
+set(CPACK_DEBIAN_DATA_PACKAGE_ARCHITECTURE "all")
+set(CPACK_DEBIAN_DATA_PACKAGE_DESCRIPTION
+	"V\\\\OS data and configuration: catalogs, fonts, MIME database and system settings")
+
+# NetPlus starter extensions: separate so the store can update the
+# lists without an OS upgrade. CPackDeb looks the settings up by the
+# uppercased component name with the dash kept; without an explicit
+# PACKAGE_NAME the deb silently falls back to vos-<component>.
+set(CPACK_DEBIAN_NETPLUS-EXTENSIONS_PACKAGE_NAME "netplus-extensions")
+set(CPACK_DEBIAN_NETPLUS-EXTENSIONS_PACKAGE_ARCHITECTURE "all")
+set(CPACK_DEBIAN_NETPLUS-EXTENSIONS_PACKAGE_DEPENDS
+	"vos (= ${_vos_runtime_version})")
+set(CPACK_DEBIAN_NETPLUS-EXTENSIONS_DESCRIPTION
+	"NetPlus starter extensions: adblock lists, dark mode, reader mode and the cookie banner hider")
+
+# Host build tools: rc, xres, resattr and linkcatkeys from the
+# BUILDTOOLS_MODE pass. Unlike the /bin copies they run without nexus, so
+# packages build in a plain chroot.
+set(CPACK_DEBIAN_BUILDTOOLS_PACKAGE_NAME "vos-buildtools")
+set(CPACK_DEBIAN_BUILDTOOLS_PACKAGE_DEPENDS "libc6, libstdc++6")
+set(CPACK_DEBIAN_BUILDTOOLS_DESCRIPTION
+	"V\\\\OS build tools that run without nexus: rc, xres, resattr, linkcatkeys")
+
+if(BUILDTOOLS_DIR)
+	install(PROGRAMS
+		"${BUILDTOOLS_DIR}/src/bin/rc/rc"
+		"${BUILDTOOLS_DIR}/src/bin/xres"
+		"${BUILDTOOLS_DIR}/src/bin/resattr"
+		"${BUILDTOOLS_DIR}/src/tools/locale/linkcatkeys"
+		DESTINATION /usr/lib/vos/buildtools
+		COMPONENT buildtools)
+endif()
+
+# debhelper add-on for port packages: dh $@ --with vos.
+set(CPACK_DEBIAN_DH-VOS_PACKAGE_NAME "dh-vos")
+set(CPACK_DEBIAN_DH-VOS_PACKAGE_ARCHITECTURE "all")
+set(CPACK_DEBIAN_DH-VOS_PACKAGE_DEPENDS
+	"debhelper (>= 13), attr, vos-buildtools, vos-dev")
+set(CPACK_DEBIAN_DH-VOS_DESCRIPTION
+	"debhelper add-on and Makefile-Engine buildsystem for V\\\\OS packages")
+
+# The repository signing key and, on systems installed without one, the
+# apt source.
+set(CPACK_DEBIAN_ARCHIVE_PACKAGE_NAME "vos-archive")
+set(CPACK_DEBIAN_ARCHIVE_PACKAGE_ARCHITECTURE "all")
+set(CPACK_DEBIAN_ARCHIVE_DESCRIPTION
+	"V\\\\OS package repository signing key and apt source")
+set(CPACK_DEBIAN_ARCHIVE_PACKAGE_CONTROL_EXTRA
+	"${CMAKE_CURRENT_SOURCE_DIR}/data/debian/archive/postinst")
+install(FILES data/keys/vitruvian-archive-keyring.asc
+	DESTINATION /usr/share/keyrings
+	COMPONENT archive)
+
+# These files used to ship in vos itself.
+set(CPACK_DEBIAN_DATA_PACKAGE_REPLACES "vos (<< ${_vos_runtime_version})")
+set(CPACK_DEBIAN_DATA_PACKAGE_BREAKS "vos (<< ${_vos_runtime_version})")
+set(CPACK_DEBIAN_DEV_PACKAGE_REPLACES "vos (<< ${_vos_runtime_version})")
+set(CPACK_DEBIAN_DEV_PACKAGE_BREAKS "vos (<< ${_vos_runtime_version})")
+
+# Make `ninja clean` (and `make clean`) wipe CPack outputs too. CPack writes
+# its artifacts into the build root, so they normally survive `clean` and
+# accumulate stale .deb files across reconfigurations.
+set_property(DIRECTORY "${CMAKE_SOURCE_DIR}" APPEND PROPERTY
+	ADDITIONAL_CLEAN_FILES
+		"${CMAKE_BINARY_DIR}/_CPack_Packages"
+		"${CMAKE_BINARY_DIR}/${CPACK_PACKAGE_FILE_NAME}.deb"
+		"${CMAKE_BINARY_DIR}/${CPACK_PACKAGE_FILE_NAME}-runtime.deb"
+		"${CMAKE_BINARY_DIR}/${CPACK_PACKAGE_FILE_NAME}-dev.deb"
+		"${CMAKE_BINARY_DIR}/${CPACK_PACKAGE_FILE_NAME}-data.deb"
+		"${CMAKE_BINARY_DIR}/${CPACK_PACKAGE_FILE_NAME}-netplus-extensions.deb"
+		"${CMAKE_BINARY_DIR}/${CPACK_PACKAGE_FILE_NAME}-buildtools.deb"
+		"${CMAKE_BINARY_DIR}/${CPACK_PACKAGE_FILE_NAME}-dh-vos.deb"
+)
+
+# vos-dev component: public headers + pkg-config. The shared libraries are
+# vos's, in /usr/lib, where the linker already looks.
+
+# Install public headers under /usr/include/vos/ so external builds
+# use the same include patterns as in-tree builds.
+set(_vos_dev_includedir "include/vos")
+
+install(DIRECTORY headers/
+	DESTINATION ${_vos_dev_includedir}
+	COMPONENT dev
+	USE_SOURCE_PERMISSIONS
+	PATTERN "private" EXCLUDE
+	# agg, linprog: internal libs, not public API.
+	PATTERN "libs" EXCLUDE
+	PATTERN "tools" EXCLUDE
+	PATTERN "be" EXCLUDE
+)
+
+install(CODE "
+	execute_process(COMMAND \${CMAKE_COMMAND} -E create_symlink os
+		\$ENV{DESTDIR}\${CMAKE_INSTALL_PREFIX}/${_vos_dev_includedir}/be)
+	"
+	COMPONENT dev
+)
+
+set(_vos_dev_pcdir "lib/${VITRUVIAN_MULTIARCH_TRIPLE}/pkgconfig")
+
+# Compute VOS_CFLAGS from PUBLIC_HEADERS in build/headers.cmake.
+set(_vos_cflags "")
+foreach(_hdir IN LISTS PUBLIC_HEADERS)
+	string(REGEX REPLACE "/$" "" _hdir_clean "${_hdir}")
+	if(_hdir_clean STREQUAL "headers")
+		list(APPEND _vos_cflags "-I/usr/${_vos_dev_includedir}")
+	else()
+		string(REGEX REPLACE "^headers/" "" _rel "${_hdir_clean}")
+		list(APPEND _vos_cflags "-I/usr/${_vos_dev_includedir}/${_rel}")
+	endif()
+endforeach()
+list(REMOVE_DUPLICATES _vos_cflags)
+
+# In-tree builds get LinuxBuildCompatibility.h (status_t, int32, ...) via
+# -include; external builds need it from pkg-config Cflags instead.
+list(APPEND _vos_cflags
+	"-I/usr/${_vos_dev_includedir}/build"
+	"-I/usr/${_vos_dev_includedir}/build/config_headers"
+	"-I/usr/${_vos_dev_includedir}/config"
+	"-include LinuxBuildCompatibility.h"
+)
+string(REPLACE ";" " " VOS_PC_CFLAGS "${_vos_cflags}")
+
+configure_file(
+	"${CMAKE_CURRENT_SOURCE_DIR}/vos.pc.in"
+	"${CMAKE_CURRENT_BINARY_DIR}/vos.pc"
+	@ONLY
+)
+
+install(FILES "${CMAKE_CURRENT_BINARY_DIR}/vos.pc"
+	DESTINATION "${_vos_dev_pcdir}"
+	COMPONENT dev
+)
+
+INCLUDE(CPack)
