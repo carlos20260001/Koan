@@ -1,0 +1,3 @@
+[submodule "src/system/kernel/nexus"]
+	path = src/system/kernel/nexus
+	url = https://github.com/Numerio/Nexus.git

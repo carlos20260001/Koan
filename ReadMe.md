@@ -29,6 +29,12 @@ project; it is not made or endorsed by Haiku, Inc., and upstream Haiku does
 not accept AI-assisted contributions, so none of this work is submitted
 there. Haiku® and the HAIKU logo® are registered trademarks of Haiku, Inc.
 
+This branch (`airos-haiku-master`) is the Koan port of VitruvianOS onto the
+air/OS tree: it adds code derived from
+[VitruvianOS](https://github.com/VitruvianOS/Vitruvian) and
+[Koan](https://github.com/carlos20260001/Koan) under the GPL-2.0; see the
+appendix in `License.md` and the progress tracker in `PORTING.md`.
+
 Supported machines
 ------------------
 Each machine below runs air/OS natively in the lab. The linked status page

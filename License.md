@@ -29,3 +29,30 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
+
+
+Appendix: code derived from VitruvianOS and Koan
+-----------------------------------------------------------
+
+The MIT notice above is reproduced unmodified. This appendix is a separate
+notice for third-party code included in this tree.
+
+Parts of this tree are derived from VitruvianOS
+(https://github.com/VitruvianOS/Vitruvian) and from Koan
+(https://github.com/carlos20260001/Koan), a VitruvianOS derivative. That
+code is distributed under the GNU General Public License, version 2
+(`data/system/data/licenses/GNU GPL v2`), or where a file says so under the
+GNU Lesser General Public License (`data/system/data/licenses/GNU LGPL v2.1`).
+The Nexus kernel modules in `src/system/kernel/nexus` are GPL-2.0,
+Copyright (C) 2022-2026 Dario Casalinuovo.
+
+Each derived file keeps its original copyright header (for example
+"Copyright 2019-2026, Dario Casalinuovo"), and each ported commit keeps its
+original VitruvianOS author (git "Author") and records the source commit
+("cherry picked from commit <sha>", or "Ported from VitruvianOS/Vitruvian
+<sha>" for a snapshot). Modifications made here are additionally covered by
+the license stated in each file.
+
+A binary built from this tree that links or ships the GPL-2.0 parts is
+distributed under the terms of the GPL-2.0 as a whole; the MIT-licensed
+Haiku and air/OS code keeps its own notice.
