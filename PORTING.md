@@ -77,12 +77,23 @@ Files: `docker/Dockerfile`, `docker/build.sh`, `docker/run-qemu.sh`,
 `build/scripts/lib/{chroot,common,image}.sh`, `build/scripts/bake.sh`,
 `build/profiles/*.cmake`, `configure` (rootless Podman, tmpfs build, ccache,
 `VOS_WITH_WLROOTS` passthrough).
-- [ ] Import `docker/`, `docker-compose.yml`, `podman-compose`
-- [ ] Apply Koan's `build/scripts` and `configure` deltas on top of M1
-- [ ] `./podman-compose build` (image builds)
+- [x] Import `docker/`, `docker-compose.yml`, `podman-compose` — `e0f128dc98`; the
+      service is `container_name: vitruvian-airos-build` so it never starts Koan's
+      `vitruvian-build` container
+- [x] Apply Koan's `build/scripts` and `configure` deltas on top of M1 — `0243fdf7ee`
+      (applied to `vos-configure`); `e90c04cf62` makes `docker/build.sh` call
+      `vos-configure`, adds `VOS_BUILDTOOLS_DIR` and a clear stop while the
+      buildtools cannot be built (M4); `VOS_WITH_WLROOTS` is inert here
+- [x] `./podman-compose build` → `localhost/airos-port-docker_build` (all layers from Koan's cache)
 - [ ] `VOS_IMAGE_TYPES=none ./podman-compose up --build` runs configure in
-      the container (compile may still fail until M4)
-- [ ] `docs/koan/BUILDING.md`: how to build this tree with the container
+      the container — as given it stops at the buildtools step with the M4 message.
+      With `VOS_BUILDTOOLS_DIR=prebuilt-buildtools VOS_TMPFS_BUILD=0
+      VOS_BUILD_DIR=generated.release` (Koan's rc/xres/resattr copied in) it
+      debootstraps trixie, `vos-configure` says "Configured correctly!", `ninja`
+      runs its 2 attr steps, exit 0. `data/keys/` imported afterwards so
+      `VOS_REPO_KEY` is no longer needed. Git is unusable inside the container for a
+      worktree (`.git` is a file), so versions read `git0.unknown`
+- [x] `docs/koan/BUILDING.md`: how to build this tree with the container — `10f1726d76`
 
 ### M3 - Nexus
 - [x] Submodule added and initialised (M0)
@@ -160,3 +171,4 @@ scroll phases), so this is a three-way merge, not a copy.
 | 2026-11-15 | `0ff2aa2a09` | M0: branch, licence appendix, tracker |
 | 2026-11-15 | `654269f633` | M1: CMake/Debian pipeline merged (`port/debian-builder`); buildtools blocked on M4 |
 | 2026-11-15 | `d31169c430` | M5: evdev add-ons merged (`port/evdev`); CMake link blocked on the kits |
+| 2026-11-15 | `ce44a5947b` | M2: Podman build container merged (`port/docker-builder`); pipeline reaches configure with prebuilt buildtools |
