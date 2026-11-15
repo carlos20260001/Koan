@@ -12,7 +12,9 @@
 
 #include <shared/AutoLocker.h>
 
+#ifndef __VOS__
 #include <interrupts.h>
+#endif
 #include <lock.h>
 
 

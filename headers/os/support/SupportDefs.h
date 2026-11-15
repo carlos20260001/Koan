@@ -16,6 +16,15 @@
 #include <inttypes.h>
 #include <sys/types.h>
 
+#ifdef __VOS__
+/* Open mode bit asking for the link itself instead of its target. It lives
+   outside the Linux O_* range and is consumed by libroot before the kernel
+   sees the mode. */
+#ifndef O_NOTRAVERSE
+#	define O_NOTRAVERSE	0x40000000
+#endif
+
+#endif /* __VOS__ */
 
 /* fixed-size integer types */
 typedef	__haiku_int8			int8;
@@ -48,6 +57,9 @@ typedef volatile unsigned short	vushort;
 typedef volatile unsigned char	vuchar;
 
 typedef unsigned char			uchar;
+#ifdef __VOS__
+typedef unsigned short			unichar;
+#endif /* __VOS__ */
 
 /* descriptive types */
 typedef int32					status_t;
@@ -168,12 +180,25 @@ typedef	generic_addr_t			generic_size_t;
 #define B_SCNxOFF		B_SCNx64
 
 /* dev_t */
+#ifndef __VOS__
 #define B_PRIdDEV		B_PRId32
 #define B_PRIiDEV		B_PRIi32
+#else /* __VOS__ */
+#define B_PRIdDEV		B_PRId64
+#define B_PRIiDEV		B_PRIi64
+#define B_PRIuDEV		B_PRIu64
+#define B_PRIxDEV		B_PRIx64
+#define B_PRIXDEV		B_PRIX64
+#endif /* __VOS__ */
 
 /* ino_t */
 #define B_PRIdINO		B_PRId64
 #define B_PRIiINO		B_PRIi64
+#ifdef __VOS__
+#define B_PRIuINO		B_PRIu64
+#define B_PRIxINO		B_PRIx64
+#define B_PRIXINO		B_PRIX64
+#endif /* __VOS__ */
 
 /* time_t */
 #if defined(__i386__) && !defined(__x86_64__)

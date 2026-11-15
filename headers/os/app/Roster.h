@@ -146,8 +146,17 @@ private:
 	friend class Private;
 
 			status_t			_ShutDown(bool reboot, bool confirm,
+#ifndef __VOS__
 									bool synchronous);
+#else /* __VOS__ */
+									bool synchronous, bool logOut = false);
+#endif /* __VOS__ */
 			status_t			_IsShutDownInProgress(bool* inProgress);
+#ifdef __VOS__
+			status_t			_RequestSleep(const char* which);
+			status_t			_IsSleepAvailable(const char* which,
+									bool* available);
+#endif /* __VOS__ */
 
 			status_t			_AddApplication(const char* signature,
 									const entry_ref* ref, uint32 flags,
