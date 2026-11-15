@@ -1,0 +1,61 @@
+#!/bin/sh
+# podman-compose wrapper for VitruvianOS
+#
+# Delegates to podman-compose (or podman compose) using the project's
+# docker-compose.yml file. All arguments are passed through.
+#
+# Usage:
+#   ./podman-compose build
+#   ./podman-compose up --build                  # configure + compile + ISO
+#   VOS_IMAGE_TYPES=iso,raw ./podman-compose up --build
+#   VOS_IMAGE_TYPES=none ./podman-compose up --build     # packages only
+#   ./podman-compose run --rm build ./docker/build.sh
+#   ./podman-compose run --rm -w /vitruvian/generated.amd64 build ninja
+#   ./podman-compose down
+#
+# `up` is run with --abort-on-container-failure so a failed build is visible
+# in the shell exit status; podman-compose otherwise returns 0 when the
+# container exits non-zero.
+#
+# Prerequisites:
+#   - podman installed
+#   - podman-compose OR podman compose plugin available
+#
+# The compose file is docker-compose.yml in the project root.
+
+set -e
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+COMPOSE_FILE="$SCRIPT_DIR/docker-compose.yml"
+
+if [ ! -f "$COMPOSE_FILE" ]; then
+    echo "Error: docker-compose.yml not found at $COMPOSE_FILE" >&2
+    exit 1
+fi
+
+# For `up`, propagate the container's exit status. Skip when the caller asked
+# for detached mode or already chose an abort policy.
+if [ "${1:-}" = "up" ]; then
+    _has_abort=0
+    _detached=0
+    for _arg in "$@"; do
+        case "$_arg" in
+            --abort-on-container-failure|--abort-on-container-exit) _has_abort=1 ;;
+            -d|--detach) _detached=1 ;;
+        esac
+    done
+    if [ "$_has_abort" -eq 0 ] && [ "$_detached" -eq 0 ]; then
+        set -- "$@" --abort-on-container-failure
+    fi
+fi
+
+# Detect which podman compose frontend is available
+if command -v podman-compose >/dev/null 2>&1; then
+    exec podman-compose -f "$COMPOSE_FILE" "$@"
+elif command -v podman >/dev/null 2>&1 && podman compose --help >/dev/null 2>&1; then
+    exec podman compose -f "$COMPOSE_FILE" "$@"
+else
+    echo "Error: neither 'podman-compose' nor 'podman compose' is available" >&2
+    echo "Install podman-compose (python package) or use podman with the compose plugin." >&2
+    exit 1
+fi

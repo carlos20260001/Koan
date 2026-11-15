@@ -143,7 +143,10 @@ ImageInclude("/system/add-ons/media" ${MEDIA_ADDONS})
 set(DECORATORS
 	BeDecorator
 	FlatDecorator
+	KoiPopDecorator
 	MacDecorator
+	ModernDecorator
+	ModernTabDecorator
 	WinDecorator
 )
 VosKeepTargets(DECORATORS)
@@ -152,6 +155,7 @@ ImageInclude("/system/add-ons/decorators" ${DECORATORS})
 set(CONTROL_LOOKS
 	BeControlLook
 	FlatControlLook
+	KoiPopControlLook
 )
 VosKeepTargets(CONTROL_LOOKS)
 ImageInclude("/system/add-ons/control_look" ${CONTROL_LOOKS})

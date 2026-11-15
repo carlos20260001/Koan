@@ -111,7 +111,10 @@ set(DESKBAR_APPLETS
 	Clock
 	LocationStatus
 	Messages
+	MPRISReplicant
 	NetworkStatus
+	NetworkStatus
+	NotificationReplicant
 	OverlayImage
 	Phone
 	PhoneSignal
