@@ -5,6 +5,9 @@
 .gitmodules
 generated*
 buildtools
+prebuilt-buildtools
+# Haiku's Jam build output (normally under generated/, also objects/ at the root)
+objects
 image_tree
 output
 shared

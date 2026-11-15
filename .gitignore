@@ -37,3 +37,7 @@ compile_commands.json
 /buildstate.conf
 /hostkernelversion.conf
 /imagekernelversion.conf
+
+# CMake/Debian container build (docker/build.sh): host buildtools trees
+/buildtools/
+/prebuilt-buildtools/

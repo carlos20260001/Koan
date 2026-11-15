@@ -31,7 +31,11 @@ services:
     build:
       context: .
       dockerfile: docker/Dockerfile
-    container_name: vitruvian-build
+    # air/OS port: not Koan's "vitruvian-build". podman-compose starts an
+    # existing container of the same name instead of creating one, and Koan's
+    # container bind-mounts the Koan checkout, so sharing the name would run
+    # the Koan build when this tree's `up` is invoked.
+    container_name: vitruvian-airos-build
     # mount/chroot/unshare for debootstrap and the chroot build
     privileged: true
     # rootless podman supports host networking; avoids slirp overhead
@@ -63,4 +67,7 @@ services:
       VOS_TMPFS_BUILD: ${VOS_TMPFS_BUILD:-auto}
       VOS_WITH_WLROOTS: ${VOS_WITH_WLROOTS:-}
       VOS_CMAKE_EXTRA_OPTS: ${VOS_CMAKE_EXTRA_OPTS:-}
+      # air/OS port: prebuilt buildtools inside the source tree, until the
+      # tree can build its own (libroot2, PORTING.md M4).
+      VOS_BUILDTOOLS_DIR: ${VOS_BUILDTOOLS_DIR:-}
       USER: ${USER:-vitruvian}
