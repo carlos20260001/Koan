@@ -1,0 +1,20 @@
+# The Dockerfile installs packages only; the source tree is bind-mounted at
+# runtime. Keep the build context small so `up --build` does not ship the
+# chroot, object files, or images to the container runtime.
+.git
+.gitmodules
+generated*
+buildtools
+image_tree
+output
+shared
+deb
+*.deb
+*.iso
+*.raw
+*.zst
+*.log
+OVMF_VARS.fd
+buildstate.conf
+hostkernelversion.conf
+imagekernelversion.conf
