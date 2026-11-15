@@ -1,3 +1,26 @@
+#ifdef __VOS__
+/*
+ * Copyright 2004-2008, Haiku.
+ * Copyright 2026, The Vitruvian Project
+ * Distributed under the terms of the MIT License.
+ *
+ * Authors:
+ *		Jérôme Duval
+ *		Dario Casalinuovo
+ */
+
+#include "TeamListItem.h"
+
+#include <string.h>
+#include <unistd.h>
+
+#include <AppFileInfo.h>
+#include <ControlLook.h>
+#include <File.h>
+#include <FindDirectory.h>
+#include <LocaleRoster.h>
+#include <Mime.h>
+#else	// !__VOS__
 /*
  * Copyright 2004-2008, Haiku.
  * Distributed under the terms of the MIT License.
@@ -13,6 +36,7 @@
 #include <ControlLook.h>
 #include <FindDirectory.h>
 #include <LocaleRoster.h>
+#endif	// !__VOS__
 #include <NodeInfo.h>
 #include <Path.h>
 #include <View.h>
@@ -32,6 +56,61 @@ TeamListItem::TeamListItem(team_info &teamInfo)
 	fIsParent(false)
 {
 	int32 cookie = 0;
+#ifdef __VOS__
+	image_info imageInfo;
+	if (get_next_image_info(teamInfo.team, &cookie, &imageInfo) == B_OK) {
+		fPath = BPath(imageInfo.name);
+	} else {
+		// get_next_image_info only works for the current process on VOS,
+		// so fall back to /proc/<pid>/exe and then to the cmdline / comm
+		// name for teams without a readable exe symlink.
+		char procExe[64];
+		char exePath[B_PATH_NAME_LENGTH];
+		snprintf(procExe, sizeof(procExe), "/proc/%d/exe",
+			(int)teamInfo.team);
+
+		ssize_t length = readlink(procExe, exePath, sizeof(exePath) - 1);
+		if (length > 0) {
+			exePath[length] = '\0';
+			fPath = BPath(exePath);
+		} else if (teamInfo.args[0] != '\0') {
+			char args[sizeof(teamInfo.args)];
+			strlcpy(args, teamInfo.args, sizeof(args));
+			char* space = strchr(args, ' ');
+			if (space != NULL)
+				*space = '\0';
+			fPath = BPath(args);
+		} else if (teamInfo.name[0] != '\0')
+			fPath = BPath(teamInfo.name);
+	}
+
+	fIsApplication = be_roster->GetRunningAppInfo(fTeamInfo.team, &fAppInfo) == B_OK;
+
+	_FetchIcons();
+	CacheLocalizedName();
+}
+
+
+void
+TeamListItem::_FetchIcons()
+{
+	if (fPath.Path() != NULL && fPath.Path()[0] == '/') {
+		BNode node(fPath.Path());
+		if (node.InitCheck() == B_OK) {
+			BNodeInfo nodeInfo(&node);
+			if (nodeInfo.GetTrackerIcon(&fMiniIcon, B_MINI_ICON) == B_OK
+				&& nodeInfo.GetTrackerIcon(&fLargeIcon, B_LARGE_ICON) == B_OK)
+				return;
+		}
+	}
+
+	BMimeType genericApp(B_APP_MIME_TYPE);
+	genericApp.GetIcon(&fMiniIcon, B_MINI_ICON);
+	genericApp.GetIcon(&fLargeIcon, B_LARGE_ICON);
+}
+
+
+#else	// !__VOS__
 	image_info info;
 	if (get_next_image_info(teamInfo.team, &cookie, &info) == B_OK) {
 		fPath = BPath(info.name);
@@ -47,6 +126,7 @@ TeamListItem::TeamListItem(team_info &teamInfo)
 }
 
 
+#endif	// !__VOS__
 TeamListItem::~TeamListItem()
 {
 }
