@@ -20,6 +20,8 @@
 
 #include "Kernels.h"
 
+#include <stddef.h>
+
 
 namespace BPrivate {
 
