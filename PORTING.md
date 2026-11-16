@@ -341,7 +341,25 @@ Waves (each on its own `port/*` branch, merged here when green):
 - [ ] W1-K1: `headers/os`, `headers/private`, `src/kits/{support,app,storage,bootstrap}`,
       buildtools (`src/build`, `src/bin/{rc,resattr,xres}`, `src/tools/locale`);
       `be` (partial) links; `vos-configure --build-buildtools` works
-- [ ] W1-C: cleanup — Haiku-only dirs deleted, GPU option, dead tests deleted
+- [x] W1-C: cleanup — merged `c774b58282` (`port/cleanup`). **No userland deleted**
+      (user rule); every candidate kept for a later wave with its Linux counterpart:
+      `disk_systems` → blkid/libfdisk/mkfs via `PartitionPlanBuilder`;
+      `network_settings`, `servers/net`, `bin/network/*` → NetworkManager
+      (VitruvianOS `libnetapi/NMBackend`, ModemManager), iproute2/netlink;
+      `system/libnetwork` → glibc + nss-mdns; `libs/compat` → nl80211/OpenSSL;
+      bluetooth server/add-ons/tools → BlueZ (VitruvianOS `BlueZBackend`);
+      makebootable/bootmanager/writembr → GRUB/EFI; debugger/debug kit/debug_server →
+      ptrace, `/proc`, perf; bfs/fat shells → FUSE; `libs/nvmm` → KVM; Haiku image and
+      hpkg tools → bake/Debian. GPU: `VOS_WITH_HAIKU_GPU_DRIVERS` (OFF) in
+      `src/add-ons/CMakeLists.txt` + `HaikuGpu.cmake`; all 55 accelerant/graphics
+      directories have CMakeLists, Jamfiles gone, no source changed (`340df28d89`,
+      `d06a6a13ae`). OFF: configure + `ninja root` green. ON: configure green; 8
+      accelerants and `amdcopytest` compile, kernel drivers cannot (no Haiku kernel);
+      7 accelerants wait for `be`; `intel_extreme/kernel_cpp.cpp` came from the
+      deleted kernel. Tests of kernel code deleted (`0817ae4a6e`: system
+      boot/runtime_loader/glue, add-ons/kernel except `graphics/dp_sink`, kernel
+      net-stack shells, kernel tests VitruvianOS lacks); the libroot userspace tests
+      were restored (`b30650969d`). Jamfiles: 923 → 766
 - [ ] W2: `src/kits/{interface,locale,translation,shared,tracker,...}`, `localestub`;
       `be`, `tracker`, `translation`, `shared`, `localestub` link
 - [ ] W3: `src/servers/app` on a new Linux display backend (design below),
@@ -417,3 +435,4 @@ counterparts and Mesa:
 | 2026-11-16 | `252ff7be13` | D1: Haiku-kernel-only trees deleted (graphics drivers, accelerants kept); D2: Linux-only input add-ons; M7 splash planned |
 | 2026-11-16 | `b563cfb440` | M8: VitruvianOS DriveSetup, Installer, backend and polkit agent merged; apps wait for the kits |
 | 2026-11-16 | `b92bdc0170` | M7: original splash on Linux (DRM/fbdev, initramfs, systemd stages) merged |
+| 2026-11-16 | `c774b58282` | M9 W1-C: GPU trees on CMake behind an OFF option; userland kept; kernel tests removed |
