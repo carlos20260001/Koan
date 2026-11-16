@@ -49,9 +49,7 @@ extern "C" {
 
 
 status_t __get_system_info(system_info* info);
-#ifdef __VOS__
 status_t __get_cpu_info(uint32 firstCPU, uint32 cpuCount, cpu_info* info);
-#endif
 status_t __get_cpu_topology_info(cpu_topology_node_info* topologyInfos,
 			uint32* topologyInfoCount);
 

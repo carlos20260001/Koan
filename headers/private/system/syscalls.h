@@ -9,21 +9,14 @@
 
 #include <arch_config.h>
 #include <DiskDeviceDefs.h>
-#ifndef __VOS__
-#include <elf_private.h>
-#else /* __VOS__ */
 //#include <elf_private.h>
-#endif /* __VOS__ */
 #include <image.h>
 #include <image_defs.h>
 #include <OS.h>
 
 #include <signal.h>
-#ifdef __VOS__
 #include <stdint.h>
-#endif /* __VOS__ */
 #include <sys/socket.h>
-#ifdef __VOS__
 #include <sys/stat.h>
 
 struct linux_dirent64 {
@@ -33,7 +26,6 @@ struct linux_dirent64 {
 	uint8_t		d_type;
 	char		d_name[];
 };
-#endif /* __VOS__ */
 
 
 #ifdef __cplusplus
@@ -44,9 +36,6 @@ struct attr_info;
 struct dirent;
 struct event_wait_info;
 struct fd_info;
-#ifndef __VOS__
-struct fd_set;
-#endif /* ! __VOS__ */
 struct fs_info;
 struct iovec;
 struct loadavg;
@@ -91,9 +80,7 @@ extern int			_kern_getrlimit(int resource, struct rlimit * rlp);
 extern int			_kern_setrlimit(int resource, const struct rlimit * rlp);
 
 extern status_t		_kern_shutdown(bool reboot);
-#ifdef __VOS__
 extern status_t		_kern_suspend(void);
-#endif /* __VOS__ */
 extern status_t		_kern_get_safemode_option(const char *parameter,
 						char *buffer, size_t *_bufferSize);
 
@@ -109,22 +96,12 @@ extern ssize_t		_kern_event_queue_wait(int queue, struct event_wait_info* infos,
 /* user mutex functions */
 extern status_t		_kern_mutex_lock(int32* mutex, const char* name,
 						uint32 flags, bigtime_t timeout);
-#ifdef __VOS__
 extern status_t		_kern_mutex_unlock(int32* mutex, uint32 flags);
 extern status_t		_kern_mutex_switch_lock(int32* fromMutex, int32* toMutex,
 						const char* name, uint32 flags, bigtime_t timeout);
 extern status_t		_kern_mutex_sem_acquire(int32* sem, const char* name,
 						uint32 flags, bigtime_t timeout);
 extern status_t		_kern_mutex_sem_release(int32* sem);
-#else
-extern status_t		_kern_mutex_unblock(int32* mutex, uint32 flags);
-extern status_t		_kern_mutex_switch_lock(int32* fromMutex, uint32 fromFlags,
-						int32* toMutex, const char* name, uint32 toFlags,
-						bigtime_t timeout);
-extern status_t		_kern_mutex_sem_acquire(int32* sem, const char* name,
-						uint32 flags, bigtime_t timeout);
-extern status_t		_kern_mutex_sem_release(int32* sem, uint32 flags);
-#endif /* __VOS__ */
 
 /* sem functions */
 extern sem_id		_kern_create_sem(int count, const char *name);
@@ -195,11 +172,7 @@ extern pid_t		_kern_setsid(void);
 extern status_t		_kern_change_root(const char *path);
 
 extern thread_id	_kern_spawn_thread(
-#ifndef __VOS__
-						struct thread_creation_attributes* attributes);
-#else /* __VOS__ */
 	thread_func func, const char *name, int32 priority, void *data);
-#endif /* __VOS__ */
 extern thread_id	_kern_find_thread(const char *name);
 extern status_t		_kern_suspend_thread(thread_id thread);
 extern status_t		_kern_resume_thread(thread_id thread);
@@ -286,27 +259,13 @@ extern status_t		_kern_get_image_info(image_id id, image_info *info,
 						size_t size);
 extern status_t		_kern_get_next_image_info(team_id team, int32 *cookie,
 						image_info *info, size_t size);
-#ifndef __VOS__
-extern status_t		_kern_read_kernel_image_symbols(image_id id,
-						elf_sym* symbolTable, int32* _symbolCount,
-						char* stringTable, size_t* _stringTableSize,
-						addr_t* _imageDelta);
-#else /* __VOS__ */
 //extern status_t		_kern_read_kernel_image_symbols(image_id id,
 //						elf_sym* symbolTable, int32* _symbolCount,
 //						char* stringTable, size_t* _stringTableSize,
 //						addr_t* _imageDelta);
-#endif /* __VOS__ */
 
 // VFS functions
-#ifndef __VOS__
-extern dev_t		_kern_mount(const char *path, const char *device,
-						const char *fs_name, uint32 flags, const char *args,
-						size_t argsLength);
-extern status_t		_kern_unmount(const char *path, uint32 flags);
-#else /* __VOS__ */
 
-#endif /* __VOS__ */
 extern status_t		_kern_read_fs_info(dev_t device, struct fs_info *info);
 extern status_t		_kern_write_fs_info(dev_t device, const struct fs_info *info,
 						int mask);
@@ -316,10 +275,6 @@ extern status_t		_kern_entry_ref_to_path(dev_t device, ino_t inode,
 						const char *leaf, char *userPath, size_t pathLength);
 extern status_t		_kern_normalize_path(const char* userPath,
 						bool traverseLink, char* buffer);
-#ifndef __VOS__
-extern int			_kern_open_entry_ref(dev_t device, ino_t inode,
-						const char *name, int openMode, int perms);
-#endif /* ! __VOS__ */
 extern int			_kern_open(int fd, const char *path, int openMode,
 						int perms);
 extern int			_kern_open_dir_entry_ref(dev_t device, ino_t inode,
@@ -348,42 +303,17 @@ extern status_t		_kern_create_fifo(int fd, const char *path, mode_t perms);
 extern status_t		_kern_create_pipe(int *fds, int flags);
 extern status_t		_kern_access(int fd, const char *path, int mode,
 						bool effectiveUserGroup);
-#ifndef __VOS__
-extern ssize_t		_kern_select(int numfds, struct fd_set *readSet,
-						struct fd_set *writeSet, struct fd_set *errorSet,
-#else /* __VOS__ */
 extern ssize_t		_kern_select(int numfds, fd_set *readSet,
 						fd_set *writeSet, fd_set *errorSet,
-#endif /* __VOS__ */
 						bigtime_t timeout, const sigset_t *sigMask);
 extern ssize_t		_kern_poll(struct pollfd *fds, int numFDs,
 						bigtime_t timeout, const sigset_t *sigMask);
 
 extern int			_kern_open_attr_dir(int fd, const char *path,
 						bool traverseLeafLink);
-#ifndef __VOS__
-extern ssize_t		_kern_read_attr(int fd, const char *attribute, off_t pos,
-						void *buffer, size_t readBytes);
-extern ssize_t		_kern_write_attr(int fd, const char *attribute, uint32 type,
-						off_t pos, const void *buffer, size_t readBytes);
-extern status_t		_kern_stat_attr(int fd, const char *attribute,
-						struct attr_info *attrInfo);
-extern int			_kern_open_attr(int fd, const char* path, const char *name,
-						uint32 type, int openMode);
-#endif /* ! __VOS__ */
 extern status_t		_kern_remove_attr(int fd, const char *name);
 extern status_t		_kern_rename_attr(int fromFile, const char *fromName,
 						int toFile, const char *toName);
-#ifndef __VOS__
-extern int			_kern_open_index_dir(dev_t device);
-extern status_t		_kern_create_index(dev_t device, const char *name,
-						uint32 type, uint32 flags);
-extern status_t		_kern_read_index_stat(dev_t device, const char *name,
-						struct stat *stat);
-extern status_t		_kern_remove_index(dev_t device, const char *name);
-extern status_t		_kern_getcwd(char *buffer, size_t size);
-extern status_t		_kern_setcwd(int fd, const char *path);
-#endif /* ! __VOS__ */
 extern int			_kern_open_query(dev_t device, const char *query,
 						size_t queryLength, uint32 flags, port_id port,
 						int32 token);
@@ -400,19 +330,13 @@ extern ssize_t		_kern_writev(int fd, off_t pos, const struct iovec *vecs,
 extern status_t		_kern_ioctl(int fd, uint32 cmd, void *data, size_t length);
 extern ssize_t		_kern_read_dir(int fd, struct dirent *buffer,
 						size_t bufferSize, uint32 maxCount);
-#ifdef __VOS__
 extern ssize_t		_kern_read_dents(int fd, void *buffer, size_t bufferSize);
-#endif /* __VOS__ */
 extern status_t		_kern_rewind_dir(int fd);
 extern status_t		_kern_read_stat(int fd, const char *path, bool traverseLink,
-#ifndef __VOS__
-						struct stat *stat, size_t statSize);
-#else /* __VOS__ */
 					struct stat *stat, size_t statSize);
 struct statx;
 extern status_t		_kern_read_statx(int fd, const char *path, bool traverseLink,
 					unsigned int mask, struct statx *stx);
-#endif /* __VOS__ */
 extern status_t		_kern_write_stat(int fd, const char *path,
 						bool traverseLink, const struct stat *stat,
 						size_t statSize, int statMask);
@@ -553,9 +477,7 @@ extern ssize_t		_kern_read_port_etc(port_id port, int32 *msgCode,
 						void *msgBuffer, size_t bufferSize, uint32 flags,
 						bigtime_t timeout);
 extern status_t		_kern_set_port_owner(port_id port, team_id team);
-#ifdef __VOS__
 extern int			_kern_port_to_fd(port_id port);
-#endif /* __VOS__ */
 extern status_t		_kern_write_port_etc(port_id port, int32 msgCode,
 						const void *msgBuffer, size_t bufferSize, uint32 flags,
 						bigtime_t timeout);
@@ -568,9 +490,6 @@ extern status_t		_kern_get_port_message_info_etc(port_id port,
 
 // debug support functions
 extern status_t		_kern_kernel_debugger(const char *message);
-#ifndef __VOS__
-extern void			_kern_register_syslog_daemon(port_id port);
-#endif /* ! __VOS__ */
 extern void			_kern_debugger(const char *message);
 extern int			_kern_disable_debugger(int state);
 
@@ -645,13 +564,11 @@ extern void			_kern_clear_caches(void *address, size_t length,
 extern bool			_kern_cpu_enabled(int32 cpu);
 extern status_t		_kern_set_cpu_enabled(int32 cpu, bool enabled);
 
-#ifdef __VOS__
 // Kernel's own memory footprint (Slab + KernelStack + PageTables, in
 // bytes), not otherwise exposed via system_info. Linux-only accessor,
 // implemented by parsing /proc/meminfo; see libroot2/system_info.c.
 extern status_t		_kern_get_kernel_memory_footprint(uint64* _bytes);
 
-#endif /* __VOS__ */
 #if defined(__i386__) || defined(__x86_64__)
 // our only x86 only syscall
 extern status_t		_kern_get_cpuid(cpuid_info *info, uint32 eax, uint32 cpu);
@@ -680,12 +597,10 @@ extern status_t		_kern_unregister_file_device(partition_id deviceID,
 extern status_t		_kern_get_file_disk_device_path(partition_id id,
 						char* buffer, size_t bufferSize);
 
-#ifdef __VOS__
 // V\OS: implemented in src/system/libroot2/fs/disk_device.cpp
 extern status_t		_kern_get_partition_path(partition_id id, char* buffer,
 						size_t bufferSize);
 
-#endif /* __VOS__ */
 // disk systems
 extern status_t		_kern_get_disk_system_info(disk_system_id id,
 						struct user_disk_system_info *info);
@@ -742,7 +657,6 @@ extern status_t		_kern_start_watching_disks(uint32 eventMask, port_id port,
 						int32 token);
 extern status_t		_kern_stop_watching_disks(port_id port, int32 token);
 
-#ifdef __VOS__
 // V\OS
 
 extern status_t		_kern_entry_ref_to_path_by_fd(int fd, team_id team,
@@ -754,7 +668,6 @@ extern int			_kern_open_entry_ref(dev_t device, ino_t inode,
 extern int			_kern_open_virtual_ref(vref_id id, const char* name,
 						int openMode, int perms);
 extern int			_kern_open_dir_virtual_ref(vref_id id, const char* name);
-#endif /* __VOS__ */
 
 // The end mark for gensyscallinfos.
 #ifdef GEN_SYSCALL_INFOS_PROCESSING
