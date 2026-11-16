@@ -390,7 +390,24 @@ Waves (each on its own `port/*` branch, merged here when green):
             exists; new `VOS_BUILD_TESTS` option. For W3: app_server must not reply to
             AS_WINDOW_MOVE/RESIZE and must handle AS_ACQUIRE/RELEASE_POINTER/KEYBOARD_GRAB
       - [ ] W2-B shared/tracker/translation/textencoding/screensaver
-      - [ ] W2-C media/media2/midi/game/opengl/hwaccel/neural
+      - [x] W2-C merged `9aa147d50c`: VitruvianOS has no classic Media Kit (media2 on
+            PipeWire/GStreamer/fluidsynth is a different API), so both live side by
+            side: air/OS's classic `libmedia` (unchanged API, Nexus ports/areas to
+            media_server) for its hardware decoders, MediaConverter, audio device
+            choice, A2DP, UVC; VitruvianOS's `libmedia2` imported verbatim, used by
+            game, midi, midi2. 1009 clashing symbols separated by version nodes
+            (`MEDIA_1`, `MEDIA2_1`; CTest `media_symbol_versions`); `UseMediaKit()`
+            puts the classic headers first. game merged (BDirectWindow: air/OS
+            device_scale/drawing bits + VitruvianOS shared-event handshake; evdev
+            Joystick, termios SerialPort); midi/midi2 VitruvianOS's (+ air/OS
+            `MidiSettings`); opengl, hwaccel imported; media_controls, neural (air/OS)
+            on CMake. Integrated: `libmedia`, `libneural`, `libhwaccel`,
+            `libmedia_controls` link; `libmedia2` waits for `shared` (W2-B); libgame for
+            the merged `Joystick.h` (W2-D). Later: a PipeWire node add-on for
+            media_server (replaces `hmulti_audio`, W3/W4); midi_server redundant;
+            consider putting `headers/os/media` (not media2) on the global path in W4
+            and prefixing the ~9 unprefixed media2 includes. libroot2 lacks
+            `wait_for_thread_etc` (libneural). Build image gained media2/GL dev packages
       - [ ] W2-D network/bluetooth/mail/device/package/print/quicklook/debug + VitruvianOS-only kits and libs
 - [ ] W3: `src/servers/app` on a new Linux display backend (design below),
       registrar, input_server, the other servers
@@ -468,3 +485,4 @@ counterparts and Mesa:
 | 2026-11-16 | `c774b58282` | M9 W1-C: GPU trees on CMake behind an OFF option; userland kept; kernel tests removed |
 | 2026-11-16 | `3d55d7c27b` | M9 W1-K1: headers, support/app/storage kits, buildtools merged; libbe (partial) links, buildtools from this tree |
 | 2026-11-16 | `2d885506c7` | M9 W2-A: interface/locale kits merged, be complete except libshared |
+| 2026-11-16 | `9aa147d50c` | M9 W2-C: classic Media Kit + media2 side by side; game, MIDI, GL, hwaccel, neural kits |
