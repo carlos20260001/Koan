@@ -1,0 +1,9 @@
+SubDir HAIKU_TOP src tests system libroot posix string ;
+
+SimpleTest compare_test
+	: compare_test.cpp
+;
+
+SimpleTest memcpy_test
+	: memcpy_test.cpp
+;
