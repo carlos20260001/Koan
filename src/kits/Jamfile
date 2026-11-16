@@ -108,7 +108,6 @@ DoCatalogs libbe.so
 #	= [ FDirName $(HAIKU_TOP) src system libroot posix ] ;
 
 
-SubInclude HAIKU_TOP src kits app ;
 SubInclude HAIKU_TOP src kits bluetooth ;
 SubInclude HAIKU_TOP src kits debug ;
 SubInclude HAIKU_TOP src kits debugger ;
@@ -128,8 +127,6 @@ SubInclude HAIKU_TOP src kits neural ;
 SubInclude HAIKU_TOP src kits quicklook ;
 SubInclude HAIKU_TOP src kits screensaver ;
 SubInclude HAIKU_TOP src kits shared ;
-SubInclude HAIKU_TOP src kits storage ;
-SubInclude HAIKU_TOP src kits support ;
 SubInclude HAIKU_TOP src kits textencoding ;
 SubInclude HAIKU_TOP src kits tracker ;
 SubInclude HAIKU_TOP src kits translation ;
