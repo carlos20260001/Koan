@@ -37,6 +37,12 @@ RUN groupadd --gid $USER_GID $USERNAME \
     && useradd --uid $USER_UID --gid $USER_GID -m $USERNAME \
     && usermod -aG sudo $USERNAME
 
+# The Installer's simulated install (src/apps/installer/tests/sim) formats
+# xfs and btrfs roots and checks the BIOS path's grub-install refusal.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    xfsprogs btrfs-progs grub2-common \
+    && rm -rf /var/lib/apt/lists/*
+
 ENV DEBIAN_MIRROR=http://deb.debian.org/debian/
 ENV VOS_BASE_SUITE=trixie
 ENV VOS_KERNEL_FLAVOUR=rt-amd64
