@@ -1,12 +1,21 @@
+/*
+ * Copyright 2026, Dario Casalinuovo. All rights reserved.
+ * Distributed under the terms of the MIT License.
+ */
 
 #ifndef _MIDI_PRODUCER_H
 #define _MIDI_PRODUCER_H
 
 #include <List.h>
 #include <Locker.h>
-#include <MidiEndpoint.h>
+#include <midi2/MidiEndpoint.h>
 
-namespace BPrivate { class BMidiRosterLooper; }
+class BMidiOutput;
+
+namespace BPrivate {
+	class BMidiRosterLooper;
+	class MidiAccess;
+}
 
 class BMidiProducer : public BMidiEndpoint
 {
@@ -22,8 +31,9 @@ private:
 	friend class BMidiLocalProducer;
 	friend class BMidiRoster;
 	friend class BPrivate::BMidiRosterLooper;
-	
-	BMidiProducer(const char *name = NULL);	
+	friend class BPrivate::MidiAccess;
+
+	BMidiProducer(const char *name = NULL);
 	virtual ~BMidiProducer();
 
 	virtual void _Reserved1();
@@ -33,7 +43,7 @@ private:
 	virtual void _Reserved5();
 	virtual void _Reserved6();
 	virtual void _Reserved7();
-	virtual void _Reserved8();		
+	virtual void _Reserved8();
 
 	status_t SendConnectRequest(BMidiConsumer *, bool);
 	void ConnectionMade(BMidiConsumer *);
@@ -47,7 +57,8 @@ private:
 
 	BList *fConnections;
 	mutable BLocker fLocker;
-	
+	BMidiOutput* fOutput;
+
 	uint32 _reserved[2];
 };
 
@@ -55,29 +66,29 @@ class BMidiLocalProducer : public BMidiProducer
 {
 public:
 
-	BMidiLocalProducer(const char *name = NULL);	
-	
+	BMidiLocalProducer(const char *name = NULL);
+
 	virtual void Connected(BMidiConsumer *cons);
 	virtual void Disconnected(BMidiConsumer *cons);
-	
+
 	void SprayData(
-		void *data, size_t length, bool atomic = false, 
+		void *data, size_t length, bool atomic = false,
 		bigtime_t time = 0) const;
-	
+
 	void SprayNoteOff(
-		uchar channel, uchar note, uchar velocity, 
+		uchar channel, uchar note, uchar velocity,
 		bigtime_t time = 0) const;
 
 	void SprayNoteOn(
-		uchar channel, uchar note, uchar velocity, 
+		uchar channel, uchar note, uchar velocity,
 		bigtime_t time = 0) const;
 
 	void SprayKeyPressure(
-		uchar channel, uchar note, uchar pressure, 
+		uchar channel, uchar note, uchar pressure,
 		bigtime_t time = 0) const;
 
 	void SprayControlChange(
-		uchar channel, uchar controlNumber, uchar controlValue, 
+		uchar channel, uchar controlNumber, uchar controlValue,
 		bigtime_t time = 0) const;
 
 	void SprayProgramChange(
@@ -96,21 +107,23 @@ public:
 		uchar status, uchar data1, uchar data2, bigtime_t time = 0) const;
 
 	void SpraySystemRealTime(
-		uchar status, bigtime_t time = 0) const; 
+		uchar status, bigtime_t time = 0) const;
 
 	void SprayTempoChange(
-		int32 beatsPerMinute, bigtime_t time = 0) const;	
-	
+		int32 beatsPerMinute, bigtime_t time = 0) const;
+
 protected:
 
+	friend class BMidi;
+
 	~BMidiLocalProducer();
-	
+
 private:
 
 	void SprayEvent(
 		const void *data, size_t length, bool atomic, bigtime_t time,
 		bool sysex = false) const;
-	
+
 	virtual void _Reserved1();
 	virtual void _Reserved2();
 	virtual void _Reserved3();
@@ -120,7 +133,10 @@ private:
 	virtual void _Reserved7();
 	virtual void _Reserved8();
 
-	uint32 _reserved[2];		
+	// App-side scheduling queue (§9.3b). Held here, not in BMidiOutput.
+	void* fSchedule;
+
+	uint32 _reserved[2];
 };
 
 #endif // _MIDI_PRODUCER_H
