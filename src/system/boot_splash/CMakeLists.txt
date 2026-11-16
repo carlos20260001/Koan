@@ -38,6 +38,7 @@ endif()
 add_library(vos_splash_core STATIC
 	video_splash.cpp
 	boot_splash.cpp
+	splash_stages.cpp
 )
 target_include_directories(vos_splash_core PUBLIC
 	"${CMAKE_CURRENT_SOURCE_DIR}"
