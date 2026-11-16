@@ -1,5 +1,6 @@
 /*
  * Copyright 2002-2009, Haiku Inc.
+ * Copyright 2026, Dario Casalinuovo.
  * Distributed under the terms of the MIT License.
  *
  * Authors:
@@ -24,6 +25,7 @@
 #include <Bitmap.h>
 #include <Locker.h>
 #include <ObjectList.h>
+#include <String.h>
 #include <Window.h>
 
 #include <AutoLocker.h>
@@ -418,7 +420,7 @@ BPrivateScreen::ReadWindowBitmap(int32 windowToken, BBitmap* bitmap,
 rgb_color
 BPrivateScreen::DesktopColor(uint32 workspace)
 {
-	rgb_color color = { 51, 102, 152, 255 };
+	rgb_color color = { 78, 125, 172, 255 };
 	BPrivate::AppServerLink link;
 
 	link.StartMessage(AS_GET_DESKTOP_COLOR);
@@ -723,6 +725,111 @@ BPrivateScreen::GetBrightness(float* brightness)
 
 
 status_t
+BPrivateScreen::GetRotation(int32* rotation)
+{
+	if (rotation == NULL)
+		return B_BAD_VALUE;
+
+	BPrivate::AppServerLink link;
+	link.StartMessage(AS_SCREEN_GET_ROTATION);
+	link.Attach<int32>(ID());
+
+	status_t status = B_ERROR;
+	if (link.FlushWithReply(status) == B_OK && status == B_OK)
+		link.Read<int32>(rotation);
+
+	return status;
+}
+
+
+status_t
+BPrivateScreen::SetRotation(int32 rotation)
+{
+	BPrivate::AppServerLink link;
+	link.StartMessage(AS_SCREEN_SET_ROTATION);
+	link.Attach<int32>(ID());
+	link.Attach<int32>(rotation);
+
+	status_t status = B_ERROR;
+	link.FlushWithReply(status);
+
+	return status;
+}
+
+
+status_t
+BPrivateScreen::GetReflection(int32* reflection)
+{
+	if (reflection == NULL)
+		return B_BAD_VALUE;
+
+	BPrivate::AppServerLink link;
+	link.StartMessage(AS_SCREEN_GET_REFLECTION);
+	link.Attach<int32>(ID());
+
+	status_t status = B_ERROR;
+	if (link.FlushWithReply(status) == B_OK && status == B_OK)
+		link.Read<int32>(reflection);
+
+	return status;
+}
+
+
+status_t
+BPrivateScreen::SetReflection(int32 reflection)
+{
+	BPrivate::AppServerLink link;
+	link.StartMessage(AS_SCREEN_SET_REFLECTION);
+	link.Attach<int32>(ID());
+	link.Attach<int32>(reflection);
+
+	status_t status = B_ERROR;
+	link.FlushWithReply(status);
+
+	return status;
+}
+
+
+status_t
+BPrivateScreen::BeginScreenChange()
+{
+	BPrivate::AppServerLink link;
+	link.StartMessage(AS_SCREEN_BEGIN_CHANGE);
+
+	status_t status = B_ERROR;
+	link.FlushWithReply(status);
+
+	return status;
+}
+
+
+status_t
+BPrivateScreen::ConfirmScreenChange()
+{
+	BPrivate::AppServerLink link;
+	link.StartMessage(AS_SCREEN_CONFIRM_CHANGE);
+
+	status_t status = B_ERROR;
+	link.FlushWithReply(status);
+
+	return status;
+}
+
+
+status_t
+BPrivateScreen::CancelScreenChange()
+{
+	BPrivate::AppServerLink link;
+	link.StartMessage(AS_SCREEN_CANCEL_CHANGE);
+
+	status_t status = B_ERROR;
+	link.FlushWithReply(status);
+
+	return status;
+}
+
+
+status_t
 BPrivateScreen::SetBrightness(float brightness)
 {
 	BPrivate::AppServerLink link;
@@ -734,6 +841,57 @@ BPrivateScreen::SetBrightness(float brightness)
 	link.FlushWithReply(status);
 
 	return status;
+}
+
+
+status_t
+BPrivateScreen::GetTemperature(float* kelvin)
+{
+	if (kelvin == NULL)
+		return B_BAD_VALUE;
+
+	BPrivate::AppServerLink link;
+	link.StartMessage(AS_SCREEN_GET_TEMPERATURE);
+	link.Attach<int32>(ID());
+
+	status_t status;
+	if (link.FlushWithReply(status) == B_OK && status == B_OK)
+		link.Read<float>(kelvin);
+
+	return status;
+}
+
+
+status_t
+BPrivateScreen::SetTemperature(float kelvin)
+{
+	BPrivate::AppServerLink link;
+	link.StartMessage(AS_SCREEN_SET_TEMPERATURE);
+	link.Attach<int32>(ID());
+	link.Attach<float>(kelvin);
+
+	status_t status = B_ERROR;
+	link.FlushWithReply(status);
+
+	return status;
+}
+
+
+status_t
+BPrivateScreen::GetConnectorName(BString& name)
+{
+	BPrivate::AppServerLink link;
+	link.StartMessage(AS_SCREEN_GET_CONNECTOR_NAME);
+	link.Attach<int32>(ID());
+
+	status_t status;
+	if (link.FlushWithReply(status) != B_OK || status != B_OK)
+		return status;
+
+	if (link.ReadString(name) != B_OK)
+		return B_ERROR;
+
+	return B_OK;
 }
 
 

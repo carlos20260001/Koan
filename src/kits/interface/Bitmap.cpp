@@ -1,5 +1,6 @@
 /*
  * Copyright 2001-2009, Haiku Inc.
+ * Copyright 2026, Dario Casalinuovo.
  * Distributed under the terms of the MIT License.
  *
  * Authors:
@@ -7,6 +8,7 @@
  *		DarkWyrm <bpmagic@columbus.rr.com>
  *		Stephan Aßmus <superstippi@gmx.de>
  *		Axel Dörfler, axeld@pinc-software.de
+ *		Dario Casalinuovo
  */
 
 
@@ -35,7 +37,7 @@
 #include <ObjectList.h>
 #include <ServerMemoryAllocator.h>
 #include <ServerProtocol.h>
-#include <locks.h>
+#include <Autolock.h>
 
 #include "ColorConversion.h"
 #include "BitmapPrivate.h"
@@ -45,7 +47,7 @@ using namespace BPrivate;
 
 
 static BObjectList<BBitmap> sBitmapList;
-static mutex sBitmapListLock = MUTEX_INITIALIZER("BBitmap list");
+static BLocker sBitmapListLock("BBitmap list");
 
 
 // Keep optional icon information out of BBitmap's public ABI. The saved pixels
@@ -79,7 +81,7 @@ find_bitmap_icon(const BBitmap* bitmap)
 void
 reconnect_bitmaps_to_app_server()
 {
-	MutexLocker _(sBitmapListLock);
+	BAutolock _(sBitmapListLock);
 	for (int32 i = 0; i < sBitmapList.CountItems(); i++) {
 		BBitmap::Private bitmap(sBitmapList.ItemAt(i));
 		bitmap.ReconnectToAppServer();
@@ -91,6 +93,13 @@ BBitmap::Private::Private(BBitmap* bitmap)
 	:
 	fBitmap(bitmap)
 {
+}
+
+
+int32
+BBitmap::Private::ServerToken() const
+{
+	return fBitmap->_ServerToken();
 }
 
 
@@ -413,7 +422,7 @@ BBitmap::BBitmap(const BBitmap* source, bool acceptsViews, bool needsContiguous)
 			| (needsContiguous ? B_BITMAP_IS_CONTIGUOUS : 0);
 		_InitObject(source->Bounds(), source->ColorSpace(), flags,
 			source->BytesPerRow(), B_MAIN_SCREEN_ID);
-		if (InitCheck() == B_OK) {
+		if (IsValid()) {
 			memcpy(Bits(), source->Bits(), min_c(BitsLength(),
 				source->BitsLength()));
 			Private(this).CopyVectorIcon(source);
@@ -443,7 +452,7 @@ BBitmap::BBitmap(const BBitmap& source, uint32 flags)
 	_InitObject(source.Bounds(), source.ColorSpace(), flags,
 		source.BytesPerRow(), B_MAIN_SCREEN_ID);
 
-	if (InitCheck() == B_OK) {
+	if (IsValid()) {
 		memcpy(Bits(), source.Bits(), min_c(BitsLength(), source.BitsLength()));
 		Private(this).CopyVectorIcon(&source);
 	}
@@ -655,7 +664,10 @@ BBitmap::InitCheck() const
 bool
 BBitmap::IsValid() const
 {
-	return InitCheck() == B_OK;
+	// Trigger the lazy clone first so a failed clone is reflected in
+	// fInitError; otherwise we'd report valid while Bits() is NULL.
+	const_cast<BBitmap*>(this)->_AssertPointer();
+	return InitCheck() == B_OK && fBasePointer != NULL;
 }
 
 
@@ -837,6 +849,13 @@ BBitmap::SetBits(const void* data, int32 length, int32 offset,
 			// B_RGB32 could actually mean unpadded B_RGB24_BIG
 			colorSpace = B_RGB24_BIG;
 			inBPR = width * 3;
+		} else if (colorSpace == fColorSpace) {
+			int32 copyLength = fSize - offset;
+			if (length < copyLength)
+				copyLength = length;
+			if (copyLength > 0)
+				memcpy((uint8*)fBasePointer + offset, data, copyLength);
+			return;
 		} else if (colorSpace == B_CMAP8 && fColorSpace != B_CMAP8) {
 			// If in color space is B_CMAP8, but the bitmap's is another one,
 			// ignore source data row padding.
@@ -1166,7 +1185,7 @@ BBitmap::operator=(const BBitmap& source)
 
 	_InitObject(source.Bounds(), source.ColorSpace(), source.Flags(),
 		source.BytesPerRow(), B_MAIN_SCREEN_ID);
-	if (InitCheck() == B_OK) {
+	if (IsValid()) {
 		memcpy(Bits(), source.Bits(), min_c(BitsLength(), source.BitsLength()));
 		Private(this).CopyVectorIcon(&source);
 	}
@@ -1371,7 +1390,7 @@ BBitmap::_InitObject(BRect bounds, color_space colorSpace, uint32 flags,
 				// NOTE: why not "0" in case of error?
 				fFlags = flags;
 			} else {
-				MutexLocker _(sBitmapListLock);
+				BAutolock _(sBitmapListLock);
 				sBitmapList.AddItem(this);
 			}
 		}
@@ -1437,6 +1456,13 @@ BBitmap::_CleanUp()
 	if ((fFlags & B_BITMAP_NO_SERVER_LINK) != 0) {
 		free(fBasePointer);
 	} else if (fServerToken != -1) {
+		// During shutdown, app_server connection may be gone. Check be_app
+		// to detect shutdown and skip cleanup if needed.
+		if (be_app == NULL) {
+			// In shutdown - skip server communication, just leak the server-side bitmap.
+			// The app_server will clean up when the team exits anyway.
+			return;
+		}
 		BPrivate::AppServerLink link;
 		// AS_DELETE_BITMAP:
 		// Attached Data:
@@ -1456,7 +1482,7 @@ BBitmap::_CleanUp()
 		fServerToken = -1;
 		fAreaOffset = -1;
 
-		MutexLocker _(sBitmapListLock);
+		BAutolock _(sBitmapListLock);
 		sBitmapList.RemoveItem(this);
 	}
 	fBasePointer = NULL;
@@ -1472,6 +1498,12 @@ BBitmap::_AssertPointer()
 		// already has its data.
 		fArea = clone_area("shared bitmap area", (void**)&fBasePointer,
 			B_ANY_ADDRESS, B_READ_AREA | B_WRITE_AREA, fServerArea);
+		if (fArea < B_OK) {
+			// Clone failed: surface it through fInitError so IsValid()
+			// stops claiming readiness.
+			fBasePointer = NULL;
+			fInitError = fArea;
+		}
 	}
 }
 

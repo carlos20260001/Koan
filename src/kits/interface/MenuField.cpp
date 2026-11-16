@@ -59,6 +59,8 @@
 
 static const float kMinMenuBarWidth = 20.0f;
 	// found by experimenting on BeOS R5
+static const bigtime_t kMenuTaskLockTimeout = 500000;
+	// ~BMenuField waits for the menu task with the looper locked
 
 
 namespace {
@@ -464,6 +466,9 @@ BMenuField::AllAttached()
 void
 BMenuField::MouseDown(BPoint where)
 {
+	if (!IsEnabled())
+		return;
+
 	BRect bounds = fMenuBar->ConvertFromParent(Bounds());
 
 	fMenuBar->StartMenuBar(-1, false, true, &bounds);
@@ -1139,7 +1144,7 @@ BMenuField::_thread_entry(void* arg)
 int32
 BMenuField::_MenuTask()
 {
-	if (!LockLooper())
+	if (LockLooperWithTimeout(kMenuTaskLockTimeout) != B_OK)
 		return 0;
 
 	Invalidate();
@@ -1148,7 +1153,7 @@ BMenuField::_MenuTask()
 	bool tracking;
 	do {
 		snooze(20000);
-		if (!LockLooper())
+		if (LockLooperWithTimeout(kMenuTaskLockTimeout) != B_OK)
 			return 0;
 
 		tracking = fMenuBar->fTracking;
@@ -1156,7 +1161,7 @@ BMenuField::_MenuTask()
 		UnlockLooper();
 	} while (tracking);
 
-	if (LockLooper()) {
+	if (LockLooperWithTimeout(kMenuTaskLockTimeout) == B_OK) {
 		Invalidate();
 		UnlockLooper();
 	}
