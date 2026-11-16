@@ -13,6 +13,11 @@
 #include "KitSupport.h"
 
 
+// TODO(linux backend): air/OS's bluetooth_server drives Haiku's HCI stack.
+// On Linux bluetoothd (BlueZ) does, and the kit reaches it through
+// BlueZBackend; while no bluetooth_server runs this returns NULL and the
+// air/OS code paths that need the server (raw HCI requests, LE connection
+// control) fail cleanly.
 BMessenger*
 _RetrieveBluetoothMessenger(void)
 {

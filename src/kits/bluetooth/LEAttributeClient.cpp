@@ -71,6 +71,15 @@ status_t
 LEAttributeClient::Connect(const bdaddr_t& address)
 {
 	Disconnect();
+
+	// TODO(linux backend): this opens the ATT fixed channel with Haiku's
+	// L2CAP socket address. With BlueZ, GATT goes through
+	// org.bluez.GattService1/GattCharacteristic1 (bluetoothd owns the ATT
+	// channel of a connected device); Linux L2CAP sockets also use another
+	// address layout (sockaddr_l2). Until a GATT client over BlueZBackend
+	// exists, LE attribute access is not available.
+	return B_NOT_SUPPORTED;
+
 	fSocket = socket(AF_BLUETOOTH, SOCK_SEQPACKET, BLUETOOTH_PROTO_L2CAP);
 	if (fSocket < 0) {
 		status_t error = errno;

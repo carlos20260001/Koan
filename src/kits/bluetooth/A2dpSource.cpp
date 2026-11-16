@@ -166,6 +166,13 @@ address_string(const bdaddr_t& address, char buffer[18])
 static status_t
 open_l2cap(const bdaddr_t& address, uint16 psm, int& fd)
 {
+	// TODO(linux backend): air/OS runs AVDTP itself over Haiku's L2CAP
+	// sockets. On Linux BlueZ owns AVDTP; an A2DP source registers a media
+	// endpoint (org.bluez.Media1.RegisterEndpoint) and streams through the
+	// MediaTransport1 file descriptor, or leaves it to PipeWire.
+	fd = -1;
+	return B_NOT_SUPPORTED;
+
 	fd = socket(PF_BLUETOOTH, SOCK_SEQPACKET, BLUETOOTH_PROTO_L2CAP);
 	if (fd < 0)
 		return errno;

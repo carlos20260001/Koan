@@ -616,6 +616,13 @@ LEEncryptedLink::ConnectionAddress(uint8 address[6]) const
 static status_t
 OpenSMPChannel(const uint8 peerAddress[6], int& smpSocket)
 {
+	// TODO(linux backend): bluetoothd runs SMP and stores the keys itself;
+	// LE pairing goes through org.bluez.Device1.Pair() with the agent that
+	// BlueZBackend registers. This SMP channel uses Haiku's L2CAP socket
+	// address and has no Linux counterpart.
+	smpSocket = -1;
+	return B_NOT_SUPPORTED;
+
 	smpSocket = socket(AF_BLUETOOTH, SOCK_SEQPACKET, BLUETOOTH_PROTO_L2CAP);
 	if (smpSocket < 0)
 		return errno;
