@@ -57,8 +57,9 @@ Files: `CMakeLists.txt` (root), `configure`, `bake`, `build/*.cmake`,
 `data/debian/`, `vos.pc.in`, `src/CMakeLists.txt`, `src/tools` (buildtools:
 `rc`, `xres`, `resattr`), `.dockerignore`.
 - [x] Import the files above (snapshot, Author Numerio) — `a13fa8401a`; VitruvianOS's
-      `configure` lives as `vos-configure` (Haiku's Jam `configure` keeps its name and
-      execs it for the CMake options); run it from inside the build dir
+      `configure` lives as `vos-configure` (Haiku's Jam `configure` keeps its name);
+      always call `vos-configure` directly, from inside the build dir. The
+      dispatcher in Haiku's `configure` (`cc1673711d`) was reverted in `f1ac7fa3c6`
 - [x] `src/CMakeLists.txt` and `build/profiles/*.cmake` trimmed to directories
       that exist in this tree; `src/system/CMakeLists.txt` adds `kernel`,
       `libroot`, `libroot2` only — `94c1b676c4` (guards marked "ported subset")
@@ -175,11 +176,8 @@ scroll phases), so this is a three-way merge, not a copy.
       `private/input/keyboard_mouse_driver.h` redefines `KEY_*` as evdev codes; must
       come with the kits under `__VOS__`. Syntax check with `-D__VOS__` against
       VitruvianOS's headers: 0 errors in all 6 files
-- [ ] Jam build of the two add-ons still passes — not run (no cross tools here).
-      Evidence: `cpp`-equivalence of every merged file without `__VOS__` to the
-      air/OS original; Jamfiles untouched; `Keyboard.rdef` keeps
-      `x-vnd.Haiku-KeyboardInputServerDevice` (`25ceefa95a`'s tree-wide signature
-      rename is a separate decision; the VOS path launches `x-vnd.vos-Terminal`)
+- Jam build of the two add-ons — moot: their Jamfiles were retired in M6
+      (`c96ff2222f`). Signatures follow the tree-wide `x-vnd.vos-*` rename (M6)
 
 ### M6 - Retire Haiku-only code (decision 2026-11-16)
 - [x] Haiku kernel sources deleted (612 files), `src/system/kernel` keeps
@@ -190,6 +188,13 @@ scroll phases), so this is a three-way merge, not a copy.
       `libroot.so`, `ninja nexus` → `nexus-dkms_*.deb` (container)
 - Kept for now (CMake side not building yet): `src/bin/rc`, `src/build/*`,
   `src/tools/locale`, `src/kits/support` Jamfiles
+- [x] Call `./vos-configure` directly; Haiku `configure` dispatcher reverted — `f1ac7fa3c6`
+- [x] Adopt VitruvianOS `25ceefa95a`: every `x-vnd.Haiku`/`x-vnd.haiku` token →
+      `x-vnd.vos` in 5421 files, six `mime_db/application/x-vnd.haiku-*` types
+      renamed — `4385f4ca1b`. `x-vnd.Be-*` untouched; the two `.patch` files for
+      external trees left as they are; no length-based prefix checks found;
+      `libroot.so` still builds. No install migration (`vos-signature-migrate`
+      not ported: no existing installs)
 - [ ] D1: delete the other Haiku-kernel-only trees — `src/system/boot`,
       `src/system/runtime_loader`, `src/system/glue`, `src/system/ldscripts`,
       `src/add-ons/kernel` (drivers), Haiku libroot sources under
@@ -214,3 +219,4 @@ scroll phases), so this is a three-way merge, not a copy.
 | 2026-11-15 | `3a28f25a0b` | M4: libroot2 merged (`port/libroot2`); `libroot.so` links in the container |
 | 2026-11-15 | | Integrated check on the merged tree (`vitruvian_build` container, Koan buildtools mounted): `vos-configure` "Configured correctly!", `ninja root` → `libroot.so` (620680 bytes), `ninja nexus` → `nexus-dkms_0.3.0+git0.unknown_all.deb` |
 | 2026-11-16 | `c96ff2222f` | M6: Haiku kernel and the replaced Jamfiles deleted; root + nexus still build |
+| 2026-11-16 | `4385f4ca1b` | Dispatcher reverted (`vos-configure` only); signatures renamed to `x-vnd.vos-*` |
