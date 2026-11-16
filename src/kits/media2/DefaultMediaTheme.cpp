@@ -4,7 +4,7 @@
  * Distributed under the terms of the MIT License.
  */
 
-#include <private/media/DefaultMediaTheme.h>
+#include <private/media2/DefaultMediaTheme.h>
 
 #include <math.h>
 #include <stdio.h>

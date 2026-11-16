@@ -10,7 +10,7 @@
 
 #include <Entry.h>
 #include <FindDirectory.h>
-#include <MediaFiles.h>
+#include <media2/MediaFiles.h>
 #include <Path.h>
 
 #include <media2/PlaySound.h>

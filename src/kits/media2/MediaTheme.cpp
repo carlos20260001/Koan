@@ -19,7 +19,7 @@
 
 #include <media2/ParameterWeb.h>
 
-#include <private/media/DefaultMediaTheme.h>
+#include <private/media2/DefaultMediaTheme.h>
 
 
 namespace {

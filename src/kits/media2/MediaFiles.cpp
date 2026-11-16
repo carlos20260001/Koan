@@ -3,7 +3,7 @@
  * Distributed under the terms of the LGPL License.
  */
 
-#include <MediaFiles.h>
+#include <media2/MediaFiles.h>
 
 #include <new>
 #include <stdio.h>

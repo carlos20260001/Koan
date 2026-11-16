@@ -71,3 +71,11 @@ target_link_libraries(media2 PRIVATE
 	${GSTREAMER_LIBRARIES}
 	${FLUIDSYNTH_LIBRARIES}
 )
+
+# air/OS merge: air/OS keeps the classic Media Kit as libmedia, with the
+# same class names. Export media2's symbols under their own version node so
+# a process can load both libraries (src/kits/media/CMakeLists.txt).
+set_property(TARGET media2 APPEND PROPERTY LINK_DEPENDS
+	"${CMAKE_CURRENT_SOURCE_DIR}/media2.ver")
+target_link_options(media2 PRIVATE
+	"-Wl,--version-script=${CMAKE_CURRENT_SOURCE_DIR}/media2.ver")
