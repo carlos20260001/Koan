@@ -1,0 +1,16 @@
+HaikuGpuStaticLibrary(accelerantscommon
+	SOURCES
+		compute_display_timing.cpp
+		create_display_modes.cpp
+		ddc.c
+		decode_edid.c
+		dp.cpp
+		dump_edid.c
+		i2c.c
+		validate_display_mode.cpp
+		video_configuration.cpp
+	INCLUDES
+		${HAIKU_GPU_PRIVATE_HEADERS}/graphics
+		${HAIKU_GPU_PRIVATE_HEADERS}/graphics/radeon
+		${HAIKU_GPU_PRIVATE_HEADERS}/graphics/common
+)

@@ -1,0 +1,28 @@
+HaikuGpuAccelerant(radeon_hd.accelerant
+	SOURCES
+		accelerant.cpp
+		atom.cpp
+		bios.cpp
+		connector.cpp
+		create_display_modes.cpp
+		display.cpp
+		displayport.cpp
+		encoder.cpp
+		engine.cpp
+		gpu.cpp
+		hooks.cpp
+		mode.cpp
+		pll.cpp
+		ringqueue.cpp
+	SEARCH
+		${CMAKE_CURRENT_SOURCE_DIR}/../common
+		${CMAKE_CURRENT_SOURCE_DIR}/atombios
+	INCLUDES
+		${CMAKE_CURRENT_SOURCE_DIR}/atombios
+		${HAIKU_GPU_PRIVATE_HEADERS}/graphics
+		${HAIKU_GPU_PRIVATE_HEADERS}/graphics/radeon_hd
+		${HAIKU_GPU_PRIVATE_HEADERS}/graphics/radeon_hd/atombios
+		${HAIKU_GPU_PRIVATE_HEADERS}/graphics/common
+		${HAIKU_GPU_PRIVATE_HEADERS}/shared
+	LIBS be haiku_gpu_accelerantscommon
+)

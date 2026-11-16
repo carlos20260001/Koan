@@ -1,0 +1,25 @@
+# Haiku accelerants, built only with VOS_WITH_HAIKU_GPU_DRIVERS (see
+# ../HaikuGpu.cmake). Same list as the Jamfile had; skeleton was never
+# included there either. nvidia_rm has no build file.
+
+add_subdirectory(3dfx)
+add_subdirectory(amdgpu_kms)
+add_subdirectory(ati)
+add_subdirectory(common)
+add_subdirectory(et6x00)
+add_subdirectory(framebuffer)
+add_subdirectory(intel_810)
+add_subdirectory(intel_extreme)
+add_subdirectory(matrox)
+add_subdirectory(neomagic)
+add_subdirectory(nvidia)
+add_subdirectory(radeon)
+add_subdirectory(qcom_display)
+add_subdirectory(radeon_hd)
+add_subdirectory(rk3588_display)
+add_subdirectory(rpi_display)
+add_subdirectory(s3)
+add_subdirectory(sunxi_display)
+add_subdirectory(vesa)
+add_subdirectory(via)
+add_subdirectory(virtio)

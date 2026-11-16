@@ -1,0 +1,9 @@
+HaikuGpuKernelAddon(et6x00.driver
+	SOURCES
+		driver.c
+		setmode.c
+		bits.c
+		acl.c
+	INCLUDES
+		${HAIKU_GPU_PRIVATE_HEADERS}/graphics/et6x00
+)

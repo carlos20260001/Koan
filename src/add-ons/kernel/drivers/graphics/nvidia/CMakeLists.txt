@@ -1,0 +1,9 @@
+HaikuGpuKernelAddon(nvidia
+	SOURCES
+		driver.c
+	INCLUDES
+		${HAIKU_GPU_PRIVATE_HEADERS}/graphics
+		${HAIKU_GPU_SYSTEM_HEADERS}
+		${HAIKU_GPU_PRIVATE_HEADERS}/graphics/nvidia
+		${HAIKU_GPU_PRIVATE_HEADERS}/graphics/common
+)

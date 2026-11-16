@@ -1,0 +1,9 @@
+HaikuGpuKernelAddon(intel_810
+	SOURCES
+		driver.cpp
+	INCLUDES
+		${HAIKU_GPU_PRIVATE_HEADERS}/graphics/intel_810
+		${HAIKU_GPU_PRIVATE_HEADERS}/graphics/common
+		${HAIKU_GPU_PRIVATE_HEADERS}/graphics
+		${HAIKU_GPU_PRIVATE_HEADERS}/kernel
+)
