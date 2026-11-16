@@ -1,5 +1,16 @@
 # air/OS installer and ISO
 
+> **Note (2026-11-16, Linux port):** this page describes the air/OS
+> Installer on the Haiku kernel. On this tree (air/OS on Linux, see
+> `PORTING.md`, milestone M8) DriveSetup and the Installer are
+> VitruvianOS's: they plan partition changes in the storage kit
+> (`src/kits/storage/disk_device/PartitionPlanBuilder.cpp`) and apply
+> them, the copy and the GRUB bootloader through the root helper
+> `data/libexec/vos-install-helper` under polkit. The whole-disk UEFI
+> setup, BFS target, `haiku_loader.efi` copy and Jam ISO build below do
+> not apply here. The helper's behaviour is exercised by
+> `src/apps/installer/tests/sim/sim-install.sh`.
+
 air/OS installs onto a whole disk in a few clicks: the Installer erases the
 disk, sets it up to start with UEFI and installs. None of the manual steps of
 Haiku's [UEFI booting guide](https://www.haiku-os.org/guides/uefi_booting/)
