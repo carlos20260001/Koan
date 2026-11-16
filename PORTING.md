@@ -299,6 +299,43 @@ Merged in `b563cfb440` (`port/installer`).
   `src/kits/storage/Jamfile` lists deleted `disk_device` sources;
   `src/tests/apps/installer/Jamfile` was already broken
 
+### M9 - Whole tree on CMake, no Jamfile left (decision 2026-11-16)
+Every one of the 924 Jamfiles goes. Policy decided by the user:
+- **Directories both trees have (215: kits, servers, most apps/preferences):**
+  merge air/OS into VitruvianOS. VitruvianOS's Linux-hosted sources are the base;
+  air/OS's changes since the common Haiku ancestor are merged on top (features
+  kept, Linux mechanics from VitruvianOS). CMakeLists is VitruvianOS's, extended
+  for air/OS sources.
+- **Haiku-kernel-only air/OS directories:** deleted, except
+  `src/add-ons/accelerants` and `src/add-ons/kernel/drivers/graphics`, which get
+  CMakeLists behind an option that defaults to OFF (sources untouched).
+- **Other air/OS-only directories** (apps, add-ons, kits that are userland):
+  CMakeLists written new; ported to Linux.
+- **Tests:** port those that build on Linux (CTest); delete tests of deleted code;
+  record the rest.
+
+Merge method (per file in a shared directory): base = the Haiku revision the
+VitruvianOS file started from (blob match in this tree's Haiku history, else the
+closest), with the `x-vnd.vos` rename applied to the base; air/OS unchanged since
+base → VitruvianOS's file; VitruvianOS unchanged → air/OS's file; otherwise
+`git merge-file` and hand resolution. Merge commits carry the VitruvianOS
+author, list the air/OS commits kept, and both trailers.
+
+Waves (each on its own `port/*` branch, merged here when green):
+- [ ] W1-K1: `headers/os`, `headers/private`, `src/kits/{support,app,storage,bootstrap}`,
+      buildtools (`src/build`, `src/bin/{rc,resattr,xres}`, `src/tools/locale`);
+      `be` (partial) links; `vos-configure --build-buildtools` works
+- [ ] W1-C: cleanup — Haiku-only dirs deleted, GPU option, dead tests deleted
+- [ ] W2: `src/kits/{interface,locale,translation,shared,tracker,...}`, `localestub`;
+      `be`, `tracker`, `translation`, `shared`, `localestub` link
+- [ ] W3: `src/servers/app` (air/OS DisplayLayout, scaling, retrace on the
+      VitruvianOS DRM backend), registrar, input_server, the other servers
+- [ ] W4: `src/apps`, `src/preferences`, `src/add-ons`, `src/bin`, `src/libs`,
+      `src/data`, `data/`, remaining tests
+- [ ] W5: `Jamrules`, `Jamfile`, `build/jam`, Haiku `configure`, Haiku-only
+      `build/scripts` deleted; `git ls-files | grep -c Jamfile` = 0; full `ninja`,
+      `bake` ISO, QEMU boot to the desktop
+
 ### Not started (later milestones)
 - Kits (`libbe`) and `input_server` on CMake, needed before M5 can link
 - app_server on DRM, registrar, the rest of the VitruvianOS userland
