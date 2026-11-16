@@ -1,5 +1,6 @@
 /*
  * Copyright 2001-2015, Haiku, Inc.
+ * Copyright 2026, Dario Casalinuovo <b.vitruvio@gmail.com>.
  * Distributed under the terms of the MIT License.
  *
  * Authors:
@@ -9,6 +10,7 @@
  *		Michael Lotz <mmlr@mlotz.ch>
  *		Wim van der Meer <WPJvanderMeer@gmail.com>
  *		Joseph Groover <looncraz@looncraz.net>
+ *		Dario Casalinuovo
  */
 
 
@@ -74,38 +76,39 @@ menu_info *_menu_info_ptr_;
 extern "C" const char B_NOTIFICATION_SENDER[] = "be:sender";
 
 static const rgb_color _kDefaultColors[kColorWhichCount] = {
-	{216, 216, 216, 255},	// B_PANEL_BACKGROUND_COLOR
-	{216, 216, 216, 255},	// B_MENU_BACKGROUND_COLOR
-	{255, 203, 0, 255},		// B_WINDOW_TAB_COLOR
+	// Vitruvian Montreal scheme: ultra-clean, polished appearance with beveled tabs
+	{226, 226, 226, 255},	// B_PANEL_BACKGROUND_COLOR (very light for maximum shine)
+	{226, 226, 226, 255},	// B_MENU_BACKGROUND_COLOR
+	{235, 158, 32, 255},	// B_WINDOW_TAB_COLOR (vivid orange-amber for contrast)
 	{0, 0, 229, 255},		// B_KEYBOARD_NAVIGATION_COLOR
-	{51, 102, 152, 255},	// B_DESKTOP_COLOR
-	{153, 153, 153, 255},	// B_MENU_SELECTED_BACKGROUND_COLOR
+	{78, 125, 172, 255},	// B_DESKTOP_COLOR
+	{165, 155, 138, 255},	// B_MENU_SELECTED_BACKGROUND_COLOR (lighter warm selection)
 	{0, 0, 0, 255},			// B_MENU_ITEM_TEXT_COLOR
 	{0, 0, 0, 255},			// B_MENU_SELECTED_ITEM_TEXT_COLOR
 	{0, 0, 0, 255},			// B_MENU_SELECTED_BORDER_COLOR
 	{0, 0, 0, 255},			// B_PANEL_TEXT_COLOR
 	{255, 255, 255, 255},	// B_DOCUMENT_BACKGROUND_COLOR
 	{0, 0, 0, 255},			// B_DOCUMENT_TEXT_COLOR
-	{222, 222, 222, 255},	// B_CONTROL_BACKGROUND_COLOR
+	{230, 230, 230, 255},	// B_CONTROL_BACKGROUND_COLOR (very light for polished look)
 	{0, 0, 0, 255},			// B_CONTROL_TEXT_COLOR
-	{172, 172, 172, 255},	// B_CONTROL_BORDER_COLOR
+	{175, 175, 175, 255},	// B_CONTROL_BORDER_COLOR (neutral border)
 	{102, 152, 203, 255},	// B_CONTROL_HIGHLIGHT_COLOR
 	{0, 0, 0, 255},			// B_NAVIGATION_PULSE_COLOR
 	{255, 255, 255, 255},	// B_SHINE_COLOR
 	{0, 0, 0, 255},			// B_SHADOW_COLOR
-	{255, 255, 216, 255},	// B_TOOLTIP_BACKGROUND_COLOR
+	{255, 248, 216, 255},	// B_TOOLTIP_BACKGROUND_COLOR (warm tooltip)
 	{0, 0, 0, 255},			// B_TOOLTIP_TEXT_COLOR
 	{0, 0, 0, 255},			// B_WINDOW_TEXT_COLOR
-	{232, 232, 232, 255},	// B_WINDOW_INACTIVE_TAB_COLOR
+	{226, 223, 218, 255},	// B_WINDOW_INACTIVE_TAB_COLOR (warm inactive)
 	{80, 80, 80, 255},		// B_WINDOW_INACTIVE_TEXT_COLOR
-	{224, 224, 224, 255},	// B_WINDOW_BORDER_COLOR
-	{232, 232, 232, 255},	// B_WINDOW_INACTIVE_BORDER_COLOR
+	{218, 215, 210, 255},	// B_WINDOW_BORDER_COLOR (pearl border)
+	{226, 223, 218, 255},	// B_WINDOW_INACTIVE_BORDER_COLOR
 	{27, 82, 140, 255},     // B_CONTROL_MARK_COLOR
 	{255, 255, 255, 255},	// B_LIST_BACKGROUND_COLOR
 	{190, 190, 190, 255},	// B_LIST_SELECTED_BACKGROUND_COLOR
 	{0, 0, 0, 255},			// B_LIST_ITEM_TEXT_COLOR
 	{0, 0, 0, 255},			// B_LIST_SELECTED_ITEM_TEXT_COLOR
-	{216, 216, 216, 255},	// B_SCROLL_BAR_THUMB_COLOR
+	{216, 213, 208, 255},	// B_SCROLL_BAR_THUMB_COLOR (match panel)
 	{51, 102, 187, 255},	// B_LINK_TEXT_COLOR
 	{102, 152, 203, 255},	// B_LINK_HOVER_COLOR
 	{145, 112, 155, 255},	// B_LINK_VISITED_COLOR
@@ -128,7 +131,7 @@ static const rgb_color _kDefaultColorsDark[kColorWhichCount] = {
 	{53, 53, 53, 255},		// B_MENU_BACKGROUND_COLOR
 	{237, 199, 70, 255},	// B_WINDOW_TAB_COLOR
 	{96, 150, 255, 255},	// B_KEYBOARD_NAVIGATION_COLOR
-	{51, 102, 152, 255},	// B_DESKTOP_COLOR
+	{78, 125, 172, 255},	// B_DESKTOP_COLOR
 	{90, 90, 90, 255},		// B_MENU_SELECTED_BACKGROUND_COLOR
 	{216, 216, 216, 255},	// B_MENU_ITEM_TEXT_COLOR
 	{240, 240, 240, 255},	// B_MENU_SELECTED_ITEM_TEXT_COLOR
@@ -661,7 +664,7 @@ get_click_speed(const char* mouse_name, bigtime_t* speed)
 	if (err != B_OK)
 		return err;
 
-	if (reply.FindInt64("speed", speed) != B_OK)
+	if (reply.FindInt64("speed", speed) != B_OK || *speed <= 0)
 		*speed = 500000;
 
 	return B_OK;
@@ -1540,9 +1543,6 @@ _init_interface_kit_()
 	_init_global_fonts_();
 
 	BPrivate::gWidthBuffer = new BPrivate::WidthBuffer;
-	status = BPrivate::MenuPrivate::CreateBitmaps();
-	if (status != B_OK)
-		return status;
 
 	_menu_info_ptr_ = &BMenu::sMenuInfo;
 
@@ -1565,8 +1565,6 @@ _init_interface_kit_()
 extern "C" status_t
 _fini_interface_kit_()
 {
-	BPrivate::MenuPrivate::DeleteBitmaps();
-
 	delete BPrivate::gWidthBuffer;
 	BPrivate::gWidthBuffer = NULL;
 

@@ -44,7 +44,7 @@ using BPrivate::gSystemCatalog;
 
 #undef B_TRANSLATE
 #define B_TRANSLATE(str) \
-	gSystemCatalog.GetString(B_TRANSLATE_MARK(str), "Dragger")
+	gSystemCatalog->GetString(B_TRANSLATE_MARK(str), "Dragger")
 
 
 static const uint32 kMsgDragStarted = 'Drgs';
@@ -143,6 +143,8 @@ BDragger::BDragger(BView* target, uint32 flags)
 	fPopUp(NULL)
 {
 	_InitData();
+	// Without a frame the layout would give the bitmap no room.
+	SetExplicitSize(BSize(7, 7));
 }
 
 
