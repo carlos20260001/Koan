@@ -1,10 +1,13 @@
 /*
  * Copyright 2007-2008 Oliver Ruiz Dorantes, oliver.ruiz.dorantes_at_gmail.com
  * All rights reserved. Distributed under the terms of the MIT License.
+ *
+ * Ported from upstream, minus the CALLED()/<bluetooth/debug.h>
+ * tracing macros (that header is part of the HCI machinery this port
+ * deliberately does not bring in).
  */
 
 #include <bluetooth/DeviceClass.h>
-#include <bluetooth/debug.h>
 
 #include <Catalog.h>
 #include <Locale.h>
@@ -19,7 +22,6 @@ namespace Bluetooth {
 void
 DeviceClass::GetServiceClass(BString& serviceClass)
 {
-	CALLED();
 	static const char *services[] = {
 		B_TRANSLATE_MARK("Positioning"),
 		B_TRANSLATE_MARK("Networking"),
@@ -42,7 +44,7 @@ DeviceClass::GetServiceClass(BString& serviceClass)
 				} else {
 					serviceClass << ", " << services[s];
 				}
-					
+
 			}
 		}
 
@@ -54,7 +56,6 @@ DeviceClass::GetServiceClass(BString& serviceClass)
 void
 DeviceClass::GetMajorDeviceClass(BString& majorClass)
 {
-	CALLED();
 	static const char *major_devices[] = {
 		B_TRANSLATE_MARK("Miscellaneous"),
 		B_TRANSLATE_MARK("Computer"),
@@ -77,10 +78,9 @@ DeviceClass::GetMajorDeviceClass(BString& majorClass)
 void
 DeviceClass::GetMinorDeviceClass(BString& minorClass)
 {
-	CALLED();
 	uint major = MajorDeviceClass();
 	uint minor = MinorDeviceClass();
-	
+
 	switch (major) {
 		case 0:	/* misc */
 			minorClass << " -";
@@ -89,10 +89,10 @@ DeviceClass::GetMinorDeviceClass(BString& minorClass)
 			switch(minor) {
 				case 0:
 					minorClass << B_TRANSLATE("Uncategorized");
-					break;	
+					break;
 				case 1:
 					minorClass << B_TRANSLATE("Desktop workstation");
-					break;	
+					break;
 				case 2:
 					minorClass << B_TRANSLATE("Server");
 					break;
@@ -103,7 +103,7 @@ DeviceClass::GetMinorDeviceClass(BString& minorClass)
 					minorClass << B_TRANSLATE("Handheld");
 					break;
 				case 5:
-					minorClass << B_TRANSLATE_COMMENT("Palm", 
+					minorClass << B_TRANSLATE_COMMENT("Palm",
 						"A palm-held device");
 					break;
 				case 6:
@@ -227,7 +227,7 @@ DeviceClass::GetMinorDeviceClass(BString& minorClass)
 			}
 			break;
 		case 5:	/* peripheral */
-		{		
+		{
 			switch(minor & 48) {
 				case 16:
 					minorClass << B_TRANSLATE("Keyboard");
@@ -242,10 +242,10 @@ DeviceClass::GetMinorDeviceClass(BString& minorClass)
 				case 48:
 					minorClass << B_TRANSLATE("Combo keyboard/pointing device");
 					if (minor & 15)
-						minorClass << "/";							
+						minorClass << "/";
 					break;
 			}
-			
+
 			switch(minor & 15) {
 				case 0:
 					break;
@@ -307,7 +307,7 @@ DeviceClass::GetMinorDeviceClass(BString& minorClass)
 			switch(minor) {
 				case 1:
 					minorClass << B_TRANSLATE("Robot");
-					break;	
+					break;
 				case 2:
 					minorClass << B_TRANSLATE("Vehicle");
 					break;
@@ -335,7 +335,6 @@ DeviceClass::GetMinorDeviceClass(BString& minorClass)
 void
 DeviceClass::DumpDeviceClass(BString& string)
 {
-	CALLED();
 	string << B_TRANSLATE("Service classes: ");
 	GetServiceClass(string);
 	string << " | ";
@@ -351,14 +350,13 @@ DeviceClass::DumpDeviceClass(BString& string)
 void
 DeviceClass::Draw(BView* view, const BPoint& point)
 {
-	CALLED();
 	rgb_color	kBlack = { 0,0,0,0 };
 	rgb_color	kBlue = { 28,110,157,0 };
 	rgb_color	kWhite = { 255,255,255,0 };
 
 
 	view->SetHighColor(kBlue);
-	view->FillRoundRect(BRect(point.x + IconInsets, point.y + IconInsets, 
+	view->FillRoundRect(BRect(point.x + IconInsets, point.y + IconInsets,
 		point.x + IconInsets + PixelsForIcon, point.y + IconInsets + PixelsForIcon), 5, 5);
 
 	view->SetHighColor(kWhite);
@@ -375,15 +373,15 @@ DeviceClass::Draw(BView* view, const BPoint& point)
 				 point.x + IconInsets + uint(PixelsForIcon*3/4) - 4,
 			 	 point.y + IconInsets + uint(PixelsForIcon*3/4)));
 			view->StrokeLine(BPoint(point.x + IconInsets + uint(PixelsForIcon/4) + 4,
-				 point.y + IconInsets + PixelsForIcon - 6), 
+				 point.y + IconInsets + PixelsForIcon - 6),
 				 BPoint(point.x + IconInsets + uint(PixelsForIcon*3/4) - 4,
 				 point.y + IconInsets + PixelsForIcon - 6));
 			view->StrokeLine(BPoint(point.x + IconInsets + uint(PixelsForIcon/4) + 4,
-				 point.y + IconInsets + PixelsForIcon - 4), 
+				 point.y + IconInsets + PixelsForIcon - 4),
 				 BPoint(point.x + IconInsets + uint(PixelsForIcon*3/4) - 4,
 				 point.y + IconInsets + PixelsForIcon - 4));
 			view->StrokeLine(BPoint(point.x + IconInsets + uint(PixelsForIcon/4) + 4,
-				 point.y + IconInsets + 2), 
+				 point.y + IconInsets + 2),
 				 BPoint(point.x + IconInsets + uint(PixelsForIcon/4) + 4,
 				 point.y + IconInsets + 6));
 			break;
@@ -393,7 +391,7 @@ DeviceClass::Draw(BView* view, const BPoint& point)
 				BPoint(point.x + IconInsets + uint(PixelsForIcon*3/4),
 				 point.y + IconInsets + uint(PixelsForIcon*3/8)));
 			view->StrokeLine(BPoint(point.x + IconInsets + uint(PixelsForIcon*5/8),
-				 point.y + IconInsets + uint(PixelsForIcon/8)));			
+				 point.y + IconInsets + uint(PixelsForIcon/8)));
 			view->StrokeLine(BPoint(point.x + IconInsets + uint(PixelsForIcon*3/4),
 				 point.y + IconInsets + uint(PixelsForIcon*5/8)),
 				BPoint(point.x + IconInsets + uint(PixelsForIcon/4),
@@ -414,7 +412,7 @@ DeviceClass::Draw(BView* view, const BPoint& point)
 				 point.y + IconInsets + uint(PixelsForIcon*7/8)));
 			view->StrokeLine(BPoint(point.x + IconInsets + uint(PixelsForIcon*3/8),
 				 point.y + IconInsets + uint(PixelsForIcon*5/8)));
-			break;			
+			break;
 		default: // Bluetooth Logo
 			view->StrokeLine(BPoint(point.x + IconInsets + uint(PixelsForIcon/4),
 				 point.y + IconInsets + uint(PixelsForIcon*3/4)),
@@ -426,10 +424,10 @@ DeviceClass::Draw(BView* view, const BPoint& point)
 				 point.y + IconInsets + PixelsForIcon - 2));
 			view->StrokeLine(BPoint(point.x + IconInsets + uint(PixelsForIcon*3/4),
 				 point.y + IconInsets + uint(PixelsForIcon*3/4)));
-			view->StrokeLine(BPoint(point.x + IconInsets + uint(PixelsForIcon/4), 
+			view->StrokeLine(BPoint(point.x + IconInsets + uint(PixelsForIcon/4),
 				point.y + IconInsets + uint(PixelsForIcon/4)));
 			break;
-	}	
+	}
 	view->SetHighColor(kBlack);
 }
 
