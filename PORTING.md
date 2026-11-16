@@ -328,13 +328,58 @@ Waves (each on its own `port/*` branch, merged here when green):
 - [ ] W1-C: cleanup — Haiku-only dirs deleted, GPU option, dead tests deleted
 - [ ] W2: `src/kits/{interface,locale,translation,shared,tracker,...}`, `localestub`;
       `be`, `tracker`, `translation`, `shared`, `localestub` link
-- [ ] W3: `src/servers/app` (air/OS DisplayLayout, scaling, retrace on the
-      VitruvianOS DRM backend), registrar, input_server, the other servers
+- [ ] W3: `src/servers/app` on a new Linux display backend (design below),
+      registrar, input_server, the other servers
 - [ ] W4: `src/apps`, `src/preferences`, `src/add-ons`, `src/bin`, `src/libs`,
       `src/data`, `data/`, remaining tests
 - [ ] W5: `Jamrules`, `Jamfile`, `build/jam`, Haiku `configure`, Haiku-only
       `build/scripts` deleted; `git ls-files | grep -c Jamfile` = 0; full `ninja`,
       `bake` ISO, QEMU boot to the desktop
+
+### M9-W3 design - Linux display backend for app_server (decision 2026-11-16)
+VitruvianOS's display code (`drawing/interface/linux/{drm,fbdev}`) drives one
+screen, has no fractional scaling and no GPU acceleration. It is **not** the
+base for app_server's display side. air/OS's architecture is: `ScreenManager`,
+`VirtualScreen`, `DisplayLayout` (several monitors in one desktop, mirroring,
+hot-plug), one `HWInterface` per monitor, per-monitor `RenderScale` (100-250 %,
+scaling only at rasterisation, app_server/input_server logical; see
+`docs/airos/SCALING.md`), flushes at each output's vertical blank
+(`docs/airos/RETRACE.md`). A custom backend wires that to the Linux
+counterparts and Mesa:
+
+- [ ] **KMS device** (`drawing/interface/linux/kms/`, new): one per `/dev/dri/cardN`;
+      DRM master through the session (reuse VitruvianOS's VT/logind/seat handling);
+      atomic modesetting; enumerates connectors, CRTCs and planes; udev hot-plug
+      events feed `ScreenManager` add/remove the way air/OS's monitor hot-plug does
+- [ ] **KMS output = HWInterface** per connector: modes from the connector, EDID
+      through `decode_edid` into air/OS's monitor info; `SetRenderScale`;
+      `WaitForRetrace` and tear-free flushes from page-flip events; hardware cursor
+      on the cursor plane at the render scale; per-output gamma/brightness where KMS
+      offers it. Reuse VitruvianOS's `DrmBuffer`, `BufferAgeTracker`,
+      `DrmFlipPolicy` and Koan's `rework/scaling` work on `DrmHWInterface`
+      (render scale, cursor plane at render scale, refuse software scale) instead of
+      rewriting them
+- [ ] **Scan-out buffers:** GBM buffer objects (`libgbm`), dumb buffers as fallback;
+      fbdev stays only as a last-resort single-screen fallback
+- [ ] **GPU acceleration through Mesa** (EGL on GBM, GLES2/3):
+      - composition/flush: damaged regions of the CPU (`Painter`/AGG) back buffer
+        uploaded and drawn to the scan-out BO by GLES, which also does the
+        fractional-scale resample; CPU path kept when EGL is unavailable;
+      - accelerant-style 2D hooks (fill, blit, scaled blit) on GLES;
+      - OpenGL kit: `BGLView` renders with Mesa EGL on the render node
+        (`/dev/dri/renderD*`) into dmabuf-backed buffers that app_server imports
+        (texture or overlay plane), zero-copy, replacing VitruvianOS's
+        `mesa_surfaceless` read-back (kept as fallback); GPU choice through
+        VitruvianOS's `GlDeviceSelect`/hwaccel settings;
+      - VA-API video decode for air/OS's media add-ons belongs to W4
+- [ ] Build deps: `libgbm-dev`, `libegl-dev`, `libgles-dev`, `libdrm-dev` (container
+      and chroot); Mesa from Debian; all optional at configure time with the CPU
+      path as fallback
+- [ ] Tests: QEMU with two heads (`virtio-gpu-gl`/`virtio-vga-gl`, `max_outputs=2`,
+      virgl) and a llvmpipe/no-GPU run; scales 1.0/1.25/1.5/1.75 with hit-test and
+      seam checks (AGENTS.md); hot-plug add/remove; mirroring; VT switch and resume
+- Koan's Wayland server (`VOS_WITH_WLROOTS`) and the DRM display layout it needs
+  come after this, on the same KMS device
 
 ### Not started (later milestones)
 - Kits (`libbe`) and `input_server` on CMake, needed before M5 can link
