@@ -51,3 +51,9 @@ _get_thread_info(thread_id id, thread_info* info, size_t size)
 // {
 // 	return B_ERROR;
 // }
+
+status_t
+snooze_until(bigtime_t time, int timeBase)
+{
+	return B_ERROR;
+}

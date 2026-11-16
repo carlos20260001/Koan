@@ -35,9 +35,7 @@ extern "C" {
 #define _kern_remove_attr			_kernbuild_remove_attr
 #define _kern_rename_attr			_kernbuild_rename_attr
 #define _kern_read					_kernbuild_read
-#define _kern_readv					_kernbuild_readv
 #define _kern_write					_kernbuild_write
-#define _kern_writev				_kernbuild_writev
 #define _kern_read_dir				_kernbuild_read_dir
 #define _kern_rewind_dir			_kernbuild_rewind_dir
 #define _kern_read_stat				_kernbuild_read_stat
@@ -64,7 +62,7 @@ extern int			_kern_open_dir_entry_ref(dev_t device, ino_t inode,
 extern int			_kern_open_dir(int fd, const char *path);
 extern int			_kern_open_parent_dir(int fd, char *name,
 						size_t nameLength);
-extern status_t		_kern_fsync(int fd, bool dataOnly);
+extern status_t		_kern_fsync(int fd);
 extern off_t		_kern_seek(int fd, off_t pos, int seekType);
 extern status_t		_kern_create_dir_entry_ref(dev_t device, ino_t inode,
 						const char *name, int perms);
@@ -85,12 +83,8 @@ extern status_t		_kern_rename_attr(int fromFile, const char *fromName,
 // file descriptor functions
 extern ssize_t		_kern_read(int fd, off_t pos, void *buffer,
 						size_t bufferSize);
-extern ssize_t		_kern_readv(int fd, off_t pos, const struct iovec *vecs,
-						size_t count);
 extern ssize_t		_kern_write(int fd, off_t pos, const void *buffer,
 						size_t bufferSize);
-extern ssize_t		_kern_writev(int fd, off_t pos, const struct iovec *vecs,
-						size_t count);
 extern ssize_t		_kern_read_dir(int fd, struct dirent *buffer,
 						size_t bufferSize, uint32 maxCount);
 extern status_t		_kern_rewind_dir(int fd);

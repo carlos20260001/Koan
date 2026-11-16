@@ -38,6 +38,14 @@ node_ref::node_ref()
 }
 
 
+node_ref::node_ref(dev_t dev, ino_t ino)
+	:
+	device(dev),
+	node(ino)
+{
+}
+
+
 node_ref::node_ref(const node_ref& other)
 	:
 	device((dev_t)-1),
@@ -229,7 +237,7 @@ BNode::Unlock()
 status_t
 BNode::Sync()
 {
-	return (fCStatus != B_OK) ? B_FILE_ERROR : _kern_fsync(fFd, false);
+	return (fCStatus != B_OK) ? B_FILE_ERROR : _kern_fsync(fFd);
 }
 
 
@@ -631,7 +639,7 @@ status_t
 BNode::InitAttrDir()
 {
 	if (fCStatus == B_OK && fAttrFd < 0) {
-		fAttrFd = _kern_open_attr_dir(fFd, NULL);
+		fAttrFd = _kern_open_attr_dir(fFd, NULL, false);
 		if (fAttrFd < 0)
 			return fAttrFd;
 
