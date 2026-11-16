@@ -888,7 +888,7 @@ UndoItemRestore::Undo()
 	std::map<dev_t, BObjectList<entry_ref, true>*> lists;
 	for (int32 index = 0; index < fRestored.CountItems(); index++) {
 		entry_ref* ref = fRestored.ItemAt(index);
-		BObjectList<entry_ref, true>*& list = lists[ref->device];
+		BObjectList<entry_ref, true>*& list = lists[ref->device()];
 		if (list == NULL)
 			list = new BObjectList<entry_ref, true>(10);
 		list->AddItem(new entry_ref(*ref));
@@ -911,7 +911,7 @@ UndoItemRestore::Redo()
 	BObjectList<entry_ref, true>* list = new BObjectList<entry_ref, true>(10);
 	std::map<dev_t, bool> searched;
 	for (int32 index = 0; index < fRestored.CountItems(); index++) {
-		dev_t device = fRestored.ItemAt(index)->device;
+		dev_t device = fRestored.ItemAt(index)->device();
 		if (searched[device])
 			continue;
 		searched[device] = true;

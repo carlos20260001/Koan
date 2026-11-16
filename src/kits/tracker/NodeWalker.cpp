@@ -37,6 +37,7 @@ All rights reserved.
 
 
 #include <Debug.h>
+#include <stddef.h>
 #include <stdio.h>
 #include <string.h>
 #include <errno.h>

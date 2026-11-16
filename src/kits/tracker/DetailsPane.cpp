@@ -121,7 +121,7 @@ DetailsPane::DetailsPane()
 	fContent->AddView(fIconView);
 
 	layout->AddView(content);
-	fFolder.device = -1;
+	fFolder.unset();
 }
 
 
@@ -428,7 +428,7 @@ DetailsPane::_Rebuild(BPoseView* poseView)
 		B_SHORT_TIME_FORMAT);
 	_AddRow(B_TRANSLATE("Modified"), date.String());
 	date = "";
-	format.Format(date, st->st_crtime, B_MEDIUM_DATE_FORMAT,
+	format.Format(date, fModel->CreationTime(), B_MEDIUM_DATE_FORMAT,
 		B_SHORT_TIME_FORMAT);
 	_AddRow(B_TRANSLATE("Created"), date.String());
 

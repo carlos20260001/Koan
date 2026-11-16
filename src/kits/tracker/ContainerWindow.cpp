@@ -1618,7 +1618,7 @@ BContainerWindow::_UpdateExtraItems(BMenu* menu)
 			refs.AddItem(new entry_ref(
 				*selection->ItemAt(index)->TargetModel()->EntryRef()));
 		}
-		BVolume volume(TargetModel()->NodeRef()->device);
+		BVolume volume(TargetModel()->NodeRef()->device());
 		bool canTag = writable && volume.KnowsAttr();
 		BuildTagsMenu(tagsMenu, canTag ? refs
 			: BObjectList<entry_ref, true>(), PoseView());
@@ -2374,7 +2374,7 @@ BContainerWindow::MessageReceived(BMessage* message)
 			entry_ref ref;
 			for (int32 i = 0; message->FindRef("refs", i, &ref) == B_OK; i++) {
 				list->AddItem(new entry_ref(ref));
-				if (ref.device != destStat.st_dev)
+				if (ref.device() != destStat.st_dev)
 					sameVolume = false;
 			}
 			FSMoveToFolder(list, new BEntry(destination),
@@ -5254,7 +5254,7 @@ WindowStateNodeOpener::WindowStateNodeOpener(BContainerWindow* window,
 		}
 	} else if (window->TargetModel() != NULL) {
 		Model* model = window->TargetModel();
-		if (_SetToStore(model->EntryRef(), model->NodeRef()->device,
+		if (_SetToStore(model->EntryRef(), model->NodeRef()->device(),
 				forWriting)) {
 			return;
 		}
@@ -5322,7 +5322,7 @@ WindowStateNodeOpener::SetTo(Model* model, bool forWriting)
 	fStreamNode = NULL;
 	fModelOpener = NULL;
 	if (!model->IsRoot() && _SetToStore(model->EntryRef(),
-			model->NodeRef()->device, forWriting)) {
+			model->NodeRef()->device(), forWriting)) {
 		return;
 	}
 

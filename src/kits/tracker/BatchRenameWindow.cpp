@@ -384,7 +384,7 @@ BatchRenameWindow::_UpdatePreview()
 	for (int32 index = 0; index < fRefs.CountItems(); index++) {
 		entry_ref* ref = fRefs.ItemAt(index);
 		char key[B_FILE_NAME_LENGTH + 32];
-		snprintf(key, sizeof(key), "%" B_PRIdINO "/%s", ref->directory,
+		snprintf(key, sizeof(key), "%" B_PRIdINO "/%s", ref->directory(),
 			ref->name);
 		renamed.insert(key);
 	}
@@ -402,7 +402,7 @@ BatchRenameWindow::_UpdatePreview()
 		BString* newName = fNewNames.ItemAt(index);
 
 		char key[B_FILE_NAME_LENGTH + 32];
-		snprintf(key, sizeof(key), "%" B_PRIdINO "/%s", ref->directory,
+		snprintf(key, sizeof(key), "%" B_PRIdINO "/%s", ref->directory(),
 			newName->String());
 
 		bool clash = newName->Length() == 0

@@ -2932,9 +2932,8 @@ BPoseView::MessageReceived(BMessage* message)
 
 		case kFolderSizeReady:
 		{
-			node_ref node;
-			node.device = message->GetInt32("device", -1);
-			node.node = message->GetInt64("node", -1);
+			node_ref node(message->GetInt32("device", -1),
+				message->GetInt64("node", -1));
 
 			int32 index;
 			BPose* pose = CurrentPoseList()->FindPose(&node, &index);
@@ -4108,7 +4107,7 @@ BPoseView::GroupLabelOf(BPose* pose)
 		// newest first: today, yesterday, the last seven and thirty days,
 		// then by month
 		time_t when = groupBy == AttrHashString(kAttrStatModified, B_TIME_TYPE)
-			? model->StatBuf()->st_mtime : model->StatBuf()->st_crtime;
+			? model->StatBuf()->st_mtime : model->CreationTime();
 		int64 today = StartOfDay(time(NULL));
 		int64 day = 24 * 60 * 60;
 		if (when >= today + day) {
@@ -4231,7 +4230,7 @@ BPoseView::RequestFolderSizes(bigtime_t maxAge)
 			continue;
 		}
 
-		dev_t device = model->NodeRef()->device;
+		dev_t device = model->NodeRef()->device();
 		std::map<dev_t, bool>::iterator found = allowed.find(device);
 		if (found == allowed.end())
 			found = allowed.insert(std::make_pair(device,
@@ -7203,7 +7202,7 @@ BPoseView::AttributeChanged(const BMessage* message)
 		BPose* pose = fPoseList->FindPose(&itemNode);
 		if (pose != NULL && pose->TargetModel()->IsDirectory()
 			&& !pose->TargetModel()->IsSymLink()
-			&& CanCalculateFolderSizes(itemNode.device)) {
+			&& CanCalculateFolderSizes(itemNode.device())) {
 			ForgetFolderSize(itemNode);
 			RequestFolderSize(*pose->TargetModel()->EntryRef(), itemNode,
 				BMessenger(this), 0);
