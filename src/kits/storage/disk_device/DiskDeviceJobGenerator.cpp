@@ -27,6 +27,8 @@
 #include "MoveJob.h"
 #include "RepairJob.h"
 #include "ResizeJob.h"
+#include <DiskSystem.h>
+
 #include "SetStringJob.h"
 #include "UninitializeJob.h"
 
@@ -410,10 +412,9 @@ DiskDeviceJobGenerator::_GenerateRemainingJobs(BPartition* parent,
 		}
 
 		// parameters
-		if ((partition->Parameters() != NULL)
-			&& ((changeFlags & B_PARTITION_CHANGED_PARAMETERS) != 0
-				|| compare_string(partition->Parameters(),
-					partitionData->parameters))) {
+		if ((changeFlags & B_PARTITION_CHANGED_PARAMETERS)
+			|| compare_string(partition->Parameters(),
+				partitionData->parameters)) {
 			if (!parent)
 				return B_BAD_VALUE;
 
@@ -433,19 +434,25 @@ DiskDeviceJobGenerator::_GenerateRemainingJobs(BPartition* parent,
 			// partition not (re-)initialized, set content properties
 
 			// content name
-			if ((changeFlags & B_PARTITION_CHANGED_CONTENT_NAME)
-				|| compare_string(partition->RawContentName(),
-					partitionData->content_name)) {
+			// a partition map on a whole disk is not a filesystem
+			BDiskSystem contentDiskSystem;
+			bool contentIsFileSystem
+				= partition->GetDiskSystem(&contentDiskSystem) == B_OK
+					&& contentDiskSystem.IsFileSystem();
+
+			if (contentIsFileSystem
+				&& ((changeFlags & B_PARTITION_CHANGED_CONTENT_NAME)
+					|| compare_string(partition->ContentName(),
+						partitionData->content_name))) {
 				status_t error = _GenerateSetContentNameJob(partition);
 				if (error != B_OK)
 					return error;
 			}
 
 			// content parameters
-			if ((partition->ContentParameters() != NULL)
-				&& ((changeFlags & B_PARTITION_CHANGED_PARAMETERS) != 0
-					|| compare_string(partition->ContentParameters(),
-						partitionData->content_parameters))) {
+			if ((changeFlags & B_PARTITION_CHANGED_PARAMETERS)
+				|| compare_string(partition->ContentParameters(),
+					partitionData->content_parameters)) {
 				status_t error = _GenerateSetContentParametersJob(partition);
 				if (error != B_OK)
 					return error;
@@ -506,11 +513,19 @@ DiskDeviceJobGenerator::_GenerateInitializeJob(BPartition* partition)
 		return B_NO_MEMORY;
 
 	error = job->Init(partition->ContentType(),
-		partition->RawContentName(), partition->ContentParameters());
+		partition->ContentName(), partition->ContentParameters());
 	if (error != B_OK) {
 		delete job;
 		return error;
 	}
+
+	BString role;
+	BMessage options;
+	if (BMutablePartition* shadow = _GetMutablePartition(partition)) {
+		role = shadow->Role();
+		options = shadow->Options();
+	}
+	job->SetPlanMetadata(partition->IsDevice(), role.String(), options);
 
 	return _AddJob(job);
 }
@@ -550,7 +565,7 @@ DiskDeviceJobGenerator::_GenerateSetContentNameJob(BPartition* partition)
 	if (!job)
 		return B_NO_MEMORY;
 
-	error = job->Init(partition->RawContentName(),
+	error = job->Init(partition->ContentName(),
 		B_DISK_DEVICE_JOB_SET_CONTENT_NAME);
 	if (error != B_OK) {
 		delete job;
@@ -565,6 +580,13 @@ DiskDeviceJobGenerator::_GenerateSetContentNameJob(BPartition* partition)
 status_t
 DiskDeviceJobGenerator::_GenerateSetContentParametersJob(BPartition* partition)
 {
+	// content type alone is not "is a filesystem"; ask the disk system
+	BDiskSystem contentDiskSystem;
+	if (partition->GetDiskSystem(&contentDiskSystem) != B_OK
+		|| !contentDiskSystem.IsFileSystem()) {
+		return B_NOT_SUPPORTED;
+	}
+
 	PartitionReference* reference;
 	status_t error = _GetPartitionReference(partition, reference);
 	if (error != B_OK)
@@ -581,6 +603,8 @@ DiskDeviceJobGenerator::_GenerateSetContentParametersJob(BPartition* partition)
 		return error;
 	}
 
+	job->SetFileSystem(contentDiskSystem.Name());
+
 	return _AddJob(job);
 }
 
@@ -589,12 +613,24 @@ DiskDeviceJobGenerator::_GenerateSetContentParametersJob(BPartition* partition)
 status_t
 DiskDeviceJobGenerator::_GenerateDefragmentJob(BPartition* partition)
 {
+	BDiskSystem contentDiskSystem;
+	if (partition->GetDiskSystem(&contentDiskSystem) != B_OK
+		|| !contentDiskSystem.IsFileSystem()) {
+		return B_NOT_SUPPORTED;
+	}
+
 	PartitionReference* reference;
 	status_t error = _GetPartitionReference(partition, reference);
 	if (error != B_OK)
 		return error;
 
-	return _AddJob(new(nothrow) DefragmentJob(reference));
+	DefragmentJob* job = new(nothrow) DefragmentJob(reference);
+	if (!job)
+		return B_NO_MEMORY;
+
+	job->SetFileSystem(contentDiskSystem.Name());
+
+	return _AddJob(job);
 }
 
 
@@ -637,6 +673,9 @@ DiskDeviceJobGenerator::_GenerateCreateChildJob(BPartition* parent,
 		delete job;
 		return error;
 	}
+
+	if (BMutablePartition* shadow = _GetMutablePartition(partition))
+		job->SetRole(shadow->Role());
 
 	return _AddJob(job);
 }
