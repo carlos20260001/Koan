@@ -1,7 +1,9 @@
 #include <MidiStore.h>
 #include <MidiText.h>
 #include <Entry.h>
-#include <iostream.h>
+#include <iostream>
+
+using namespace std;
 
 int main(int argc, char * argv[]) {
 	if (argc < 2) {
