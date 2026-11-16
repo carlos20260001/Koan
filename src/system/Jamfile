@@ -2,6 +2,5 @@ SubDir HAIKU_TOP src system ;
 
 SubInclude HAIKU_TOP src system boot ;
 SubInclude HAIKU_TOP src system glue ;
-SubInclude HAIKU_TOP src system libroot ;
 SubInclude HAIKU_TOP src system libnetwork ;
 SubInclude HAIKU_TOP src system runtime_loader ;
