@@ -125,8 +125,3 @@ SubInclude HAIKU_TOP src kits package ;
 SubInclude HAIKU_TOP src kits print ;
 SubInclude HAIKU_TOP src kits neural ;
 SubInclude HAIKU_TOP src kits quicklook ;
-SubInclude HAIKU_TOP src kits screensaver ;
-SubInclude HAIKU_TOP src kits shared ;
-SubInclude HAIKU_TOP src kits textencoding ;
-SubInclude HAIKU_TOP src kits tracker ;
-SubInclude HAIKU_TOP src kits translation ;
