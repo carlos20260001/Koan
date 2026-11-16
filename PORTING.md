@@ -66,7 +66,7 @@ Files: `CMakeLists.txt` (root), `configure`, `bake`, `build/*.cmake`,
 - [x] `build/deps.cmake` keeps only the dependencies the ported subset needs
       (udev, blkid, zlib, evdev, libinput, xkbcommon); the rest stays behind
       the same `find_package` guards it has upstream
-- [ ] `./vos-configure --build-buildtools` builds `rc`/`xres`/`resattr` — FAIL:
+- [x] `./vos-configure --build-buildtools` builds `rc`/`xres`/`resattr` — fixed by M9 W1-K1; was FAIL:
       buildtools mode compiles 8 libroot2 files (M4), 26 `src/kits` files and 25
       shared files that differ from air/OS (`headers/build/*`, `src/bin/rc`,
       `src/build/lib{be,root}`, `src/tools/locale`); host also lacks bison/flex
@@ -141,7 +141,7 @@ headers libroot2 compiles against (`syscalls.h`, `VRefCache.h`,
       its `Test()` macro needs `be`)
 - [ ] Remaining libroot2 commits after the snapshot listed here as they are
       cherry-picked — none yet (snapshot is at `4d8c5ed719`)
-- [ ] Buildtools: `vos-configure --build-buildtools` still fails at
+- [x] Buildtools build since M9 W1-K1 (the `packages.cmake` posix-subset part is still open); was failing at
       `src/build/libbe/storage` (`src/kits/storage/sniffer/CharStream.cpp` missing);
       `packages.cmake` still installs all of `headers/` (needs the 7-file posix subset)
 
@@ -210,7 +210,7 @@ scroll phases), so this is a three-way merge, not a copy.
 - Known fallout (Jam only, nothing CMake builds): 73 userland files include
   kernel add-on sources/headers (BFS tools, disk systems, network bits). They
   are replaced when VitruvianOS's versions of those directories are ported.
-- Still open: the `#ifdef __VOS__` branches M4 added to shared headers
+- Resolved in M9 W1-K1: the `#ifdef __VOS__` branches M4 added to shared headers
   (`OS.h`, `Errors.h`, `SupportDefs.h`, ...) keep their Haiku halves. They can
   be resolved the same way once nothing builds the Haiku side
 
@@ -338,9 +338,26 @@ base → VitruvianOS's file; VitruvianOS unchanged → air/OS's file; otherwise
 author, list the air/OS commits kept, and both trailers.
 
 Waves (each on its own `port/*` branch, merged here when green):
-- [ ] W1-K1: `headers/os`, `headers/private`, `src/kits/{support,app,storage,bootstrap}`,
-      buildtools (`src/build`, `src/bin/{rc,resattr,xres}`, `src/tools/locale`);
-      `be` (partial) links; `vos-configure --build-buildtools` works
+- [x] W1-K1 — merged `3d55d7c27b` (`port/kits-core`): 280 headers in scope (76 imported,
+      124 air/OS, 56 VitruvianOS, 23 merged, incl. `OS.h`, `SupportDefs.h`,
+      `Screen.h`, `Window.h`, `Bitmap.h`, `InterfaceDefs.h`, `ServerProtocol.h`,
+      `PrivateScreen.h`, `syscalls.h`); the M4 `__VOS__` halves resolved (283 → 5
+      uses, all VitruvianOS's own). Display API kept air/OS's (`DeviceScale`,
+      `WaitForOutputRetrace`, scan timing; VitruvianOS rotation/temperature/connector
+      codes appended to `ServerProtocol.h`, no renumbering). support, app, storage
+      kits merged (`b8bc382c82`, `9177f8562f`, `23ebf4e18d`); real `be_bootstrap`;
+      buildtools merged (`73d3399c11`), attributes `user.beos.*` as libroot2/Nexus.
+      Integrated check on the merged tree (container): `./vos-configure
+      --build-buildtools` → this tree's `rc`/`xres`/`resattr`/`linkcatkeys`;
+      configure with them → "Configured correctly!"; `ninja root be` →
+      `libroot.so`, partial `libbe.so` (84 undefined symbols, all W2 interface/
+      locale/icon); `ninja nexus` → deb. TODO(air/OS merge) spots: `OS.h`
+      (`debug_printf`), `syscalls.h`, `PrivateScreen.h` (`BaseAddress`/`BytesPerRow`),
+      `cpu_type.h`, `LooperList.cpp` (no `__rw_lock_*` in libroot2),
+      `ServerMemoryAllocator.cpp` (no `_kern_unreserve_address_range`); air/OS's
+      `wait_for_thread_etc()` declared but not in libroot2. Not done: kit unit tests
+      (cppunit not in tree; standalone ones need W2). 65 differing headers left for
+      W2+ (media, midi, bluetooth, net, game, device, print, tracker, agg, cppunit)
 - [x] W1-C: cleanup — merged `c774b58282` (`port/cleanup`). **No userland deleted**
       (user rule); every candidate kept for a later wave with its Linux counterpart:
       `disk_systems` → blkid/libfdisk/mkfs via `PartitionPlanBuilder`;
@@ -436,3 +453,4 @@ counterparts and Mesa:
 | 2026-11-16 | `b563cfb440` | M8: VitruvianOS DriveSetup, Installer, backend and polkit agent merged; apps wait for the kits |
 | 2026-11-16 | `b92bdc0170` | M7: original splash on Linux (DRM/fbdev, initramfs, systemd stages) merged |
 | 2026-11-16 | `c774b58282` | M9 W1-C: GPU trees on CMake behind an OFF option; userland kept; kernel tests removed |
+| 2026-11-16 | `3d55d7c27b` | M9 W1-K1: headers, support/app/storage kits, buildtools merged; libbe (partial) links, buildtools from this tree |
