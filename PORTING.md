@@ -250,6 +250,30 @@ kernel's `boot_splash.cpp` (light one icon per stage); headers in
       fbdev) and on one real GPU; tests for the stage-to-icon mapping and the
       image decoding on the host
 
+### M8 - VitruvianOS partitioner (DriveSetup) and installer — in progress
+The air/OS DriveSetup/Installer drive Haiku's kernel disk device manager and
+install a package-based BFS system; neither exists on Linux. They are
+replaced by VitruvianOS's versions (`upstream/master` `4d8c5ed719`), which plan
+partition changes in the storage kit and apply them through root helpers.
+
+Layers, bottom up:
+- [ ] Backend (no libbe): `data/libexec/{vos-drivesetup-helper,vos-drivesetup-query,
+      vos-install-helper,vos-partition-lib.sh}`, `data/polkit-1/actions/org.vitruvian.{drivesetup,drivesetup-query,installer}.policy`,
+      `data/polkit-1/rules.d/49-vitruvian-installer.rules`, `data/etc/default/grub`,
+      `data/etc/grub.d/15_vos`, with their install rules
+- [ ] Simulated install harness `src/apps/installer/tests/sim/` (sparse-file disks,
+      no loop devices) runs green in the container
+- [x] libroot2 disk layer (`fs/disk_device.cpp`, `disk_monitor.cpp`) — already in M4
+- [ ] Storage kit `src/kits/storage/disk_device/` (+ `jobs/`, `PartitionPlanBuilder`)
+      replaced by VitruvianOS's version; headers it needs
+- [ ] `src/apps/drivesetup`, `src/apps/installer` replaced by VitruvianOS's
+      versions (CMakeLists, rdef, catalogs `data/catalogs/apps/{drivesetup,installer}`);
+      air/OS-only features dropped and listed here
+- [ ] polkit agent apps `src/apps/vos-polkit-agent`, `vos-polkit-grant-helper`
+      (the password prompt the helpers need)
+- [ ] Apps link: **blocked until the kits (`be`, `tracker`, `shared`, `translation`,
+      `localestub`) are on CMake**
+
 ### Not started (later milestones)
 - Kits (`libbe`) and `input_server` on CMake, needed before M5 can link
 - app_server on DRM, registrar, the rest of the VitruvianOS userland
