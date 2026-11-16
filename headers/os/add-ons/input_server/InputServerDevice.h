@@ -1,5 +1,6 @@
 /*
  * Copyright 2008, Haiku, Inc. All rights reserved.
+ * Copyright 2026, Dario Casalinuovo <b.vitruvio@gmail.com>.
  * Distributed under the terms of the MIT License.
  */
 #ifndef _INPUTSERVERDEVICE_H
@@ -33,6 +34,27 @@ enum {
 	B_CLICK_SPEED_CHANGED,
 	B_MOUSE_ACCELERATION_CHANGED,
 	B_SET_TOUCHPAD_SETTINGS,
+
+	// Control() query: hardware name (distinct from identity/settings key)
+	B_GET_DEVICE_DESCRIPTION,
+
+	// Screen mode changed; "screen_bounds" carries the new frame.
+	B_SCREEN_BOUNDS_CHANGED,
+
+	// Pointer confinement / relative mode; "flags" (1 = confined to
+	// "rect", 2 = relative mode about the "where" lock point).
+	B_POINTER_CONSTRAINT_CHANGED,
+};
+
+
+// "role" in a B_GET_DEVICE_DESCRIPTION reply: what the device is, as
+// classified by the system rather than guessed from its name.
+enum {
+	UDEV_ROLE_UNKNOWN	= 0,
+	UDEV_ROLE_KEYBOARD,
+	UDEV_ROLE_MOUSE,
+	UDEV_ROLE_TOUCHPAD,
+	UDEV_ROLE_TABLET
 };
 
 namespace BPrivate {

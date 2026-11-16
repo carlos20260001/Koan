@@ -39,6 +39,7 @@ class BBitmap::Private {
 public:
 								Private(BBitmap* bitmap);
 			void				ReconnectToAppServer();
+			int32				ServerToken() const;
 			status_t			SetVectorIcon(const uint8* data, size_t size);
 			status_t			SetVectorIcon(const BMessage& description);
 			status_t			GetVectorIcon(BMessage& description) const;

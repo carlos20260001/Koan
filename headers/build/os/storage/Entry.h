@@ -34,6 +34,13 @@ struct entry_ref {
 	bool operator!=(const entry_ref &ref) const;
 	entry_ref &operator=(const entry_ref &ref);
 
+	dev_t	dev() const { return device; }
+	ino_t	dir() const { return directory; }
+
+	// Host build has no vref layer: virtual identity == the plain fields.
+	dev_t	vdevice() const { return device; }
+	ino_t	vdirectory() const { return directory; }
+
 	dev_t	device;
 	ino_t	directory;
 	char	*name;

@@ -494,6 +494,9 @@
 	#define ENOEXEC HAIKU_ENOEXEC
 	#define EPIPE HAIKU_EPIPE
 	#define ENOATTR HAIKU_ENOATTR
+
+	//#undef errno
+	//#define errno (*_haiku_build_errno())
 #elif defined(HAIKU_HOST_PLATFORM_HAIKU)
 #	include_next <Errors.h>
 #endif	// ! BUILDING_HAIKU_ERROR_MAPPER

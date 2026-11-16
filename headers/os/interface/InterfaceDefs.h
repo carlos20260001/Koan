@@ -1,5 +1,6 @@
 /*
  * Copyright 2001-2015, Haiku, Inc. All rights reserved.
+ * Copyright 2026, Dario Casalinuovo <b.vitruvio@gmail.com>.
  * Distributed under the terms of the MIT License.
  */
 #ifndef	_INTERFACE_DEFS_H
@@ -86,6 +87,7 @@ enum {
 };
 
 enum {
+	// VOS: hybrid keycode space (≤0x7f = legacy Haiku, ≥0x80 = raw evdev)
 	B_F1_KEY			= 0x02,
 	B_F2_KEY			= 0x03,
 	B_F3_KEY			= 0x04,
@@ -98,6 +100,18 @@ enum {
 	B_F10_KEY			= 0x0b,
 	B_F11_KEY			= 0x0c,
 	B_F12_KEY			= 0x0d,
+	B_F13_KEY			= 0x6b,
+	B_F14_KEY			= 0x6c,
+	B_F15_KEY			= 0x6d,
+	B_F16_KEY			= 0x6e,
+	B_F17_KEY			= 0x6f,
+	B_F18_KEY			= 0x70,
+	B_F19_KEY			= 0x71,
+	B_F20_KEY			= 0x72,
+	B_F21_KEY			= 0x73,
+	B_F22_KEY			= 0x74,
+	B_F23_KEY			= 0x75,
+	B_F24_KEY			= 0x76,
 	B_PRINT_KEY			= 0x0e,
 	B_SCROLL_KEY		= 0x0f,
 	B_PAUSE_KEY			= 0x10,

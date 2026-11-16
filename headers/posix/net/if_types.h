@@ -19,5 +19,10 @@
 #define IFT_L2VLAN		0x87
 #define IFT_BRIDGE		0xd1
 
+// Vitruvian addition: not in upstream Haiku, IANA ifType values used by
+// NMBackend's device-type mapping.
+#define IFT_IEEE80211	0x47
+#define IFT_BLUETOOTH	0xa4
+
 
 #endif	/* _NET_IF_TYPES_H */

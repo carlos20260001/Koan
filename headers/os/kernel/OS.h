@@ -23,7 +23,9 @@ extern "C" {
 
 #define B_OS_NAME_LENGTH	32
 #define B_INFINITE_TIMEOUT	(0x7FFFFFFFFFFFFFFFLL)
+
 #define B_PAGE_SIZE			4096
+	/* glibc has no PAGESIZE in <limits.h> (air/OS uses it) */
 
 enum {
 	B_TIMEOUT						= 0x8,	/* relative timeout */
@@ -438,6 +440,8 @@ extern void			debugger(const char *message);
 extern int			disable_debugger(int state);
 
 /* TODO: Remove. Temporary debug helper. */
+/* TODO(air/OS merge): air/OS returns int from debug_printf()/debug_vprintf()
+   (Haiku b939b5a9f4); libroot2 still implements the void form. */
 extern void			debug_printf(const char *format, ...)
 						__attribute__ ((format (__printf__, 1, 2)));
 extern void			debug_vprintf(const char *format, va_list args);
@@ -451,7 +455,7 @@ extern void			ktrace_vprintf(const char *format, va_list args);
 typedef struct {
 	bigtime_t	active_time;	/* usec of doing useful work since boot */
 	bool		enabled;
-	uint64		current_frequency;
+	uint64		current_frequency;	/* current CPU frequency in Hz */
 } cpu_info;
 
 typedef struct {
@@ -579,8 +583,8 @@ typedef struct {
 extern status_t		get_system_info(system_info* info);
 extern status_t		_get_cpu_info_etc(uint32 firstCPU, uint32 cpuCount,
 						cpu_info* info, size_t size);
-extern status_t		get_cpu_info(uint32 firstCPU, uint32 cpuCount,
-						cpu_info* info);
+#define get_cpu_info(firstCPU, cpuCount, info) \
+	_get_cpu_info_etc((firstCPU), (cpuCount), (info), sizeof(*(info)))
 
 extern status_t		get_cpu_topology_info(cpu_topology_node_info* topologyInfos,
 						uint32* topologyInfoCount);

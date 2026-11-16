@@ -13,6 +13,11 @@
 #include <OS.h>
 
 // get_cpu_model_string, implemented per architecture
+// TODO(air/OS merge): VitruvianOS's single-file version also cuts
+// " processor" and doubled spaces in parse_intel(), names old Intel CPUs by
+// brand ID and names ARM cores from the MIDR libroot2 reports
+// (get_arm_model_string()). Move those into arch/*/arch_cpu_type.h when the
+// apps using this header (AboutSystem, sysinfo, Pulse) are ported.
 #if defined(__i386__) || defined(__x86_64__)
 #include <arch/x86/arch_cpu_type.h>
 #elif defined(__aarch64__)

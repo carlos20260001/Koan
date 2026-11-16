@@ -1,5 +1,6 @@
 /*
  * Copyright 2001-2016, Haiku.
+ * Copyright 2026, Dario Casalinuovo.
  * Distributed under the terms of the MIT License.
  *
  * Authors:
@@ -401,6 +402,36 @@ enum {
 	// app_server internal: to a ServerWindow, a capture of its window's
 	// content is waiting (Window::StartCapture())
 	AS_CAPTURE_WINDOW_CONTENT,
+	// Appended at the end: inserting mid-enum renumbers later codes.
+	AS_SCREEN_SET_ROTATION,
+	AS_SCREEN_GET_ROTATION,
+	AS_SCREEN_SET_REFLECTION,
+	AS_SCREEN_GET_REFLECTION,
+
+	AS_SCREEN_SET_TEMPERATURE,
+	AS_SCREEN_GET_TEMPERATURE,
+
+	// Appended at the end: inserting mid-enum renumbers later codes.
+	AS_SCREEN_GET_CONNECTOR_NAME,
+
+	// Unconfirmed display change: app_server holds the deadline and
+	// reverts on its own if the client never confirms.
+	AS_SCREEN_BEGIN_CHANGE,
+	AS_SCREEN_CONFIRM_CHANGE,
+	AS_SCREEN_CANCEL_CHANGE,
+
+	// Pointer and keyboard grabs (XGrabPointer/XGrabKeyboard semantics
+	// for the X server and for native games). Window-scoped: the calling
+	// team owns the grab and only it may release it.
+	AS_ACQUIRE_POINTER_GRAB,
+		// uint32 flags (B_POINTER_GRAB_*), BRect confineTo
+	AS_RELEASE_POINTER_GRAB,
+	AS_ACQUIRE_KEYBOARD_GRAB,
+		// uint32 flags
+	AS_RELEASE_KEYBOARD_GRAB,
+
+	// team_id (BSurface: team the window is listed under)
+	AS_SET_WINDOW_TEAM,
 
 	AS_LAST_CODE
 };

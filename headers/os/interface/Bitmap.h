@@ -9,6 +9,8 @@
 #include <Archivable.h>
 #include <InterfaceDefs.h>
 #include <Rect.h>
+#include <cstddef>
+
 
 
 class BView;

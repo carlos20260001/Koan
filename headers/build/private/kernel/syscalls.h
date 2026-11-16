@@ -16,7 +16,7 @@ extern "C" {
 
 
 /* Since libroot_build is also used on Haiku and linked against the real
- * libroot which also has the syscall functions, these must be shadowed. */
+ * libroot which also has the syscall functions, these must be shadowed. 
 #define _kern_entry_ref_to_path		_kernbuild_entry_ref_to_path
 #define _kern_open_entry_ref		_kernbuild_open_entry_ref
 #define _kern_open					_kernbuild_open
@@ -46,7 +46,7 @@ extern "C" {
 #define _kern_dup					_kernbuild_dup
 #define _kern_lock_node				_kernbuild_lock_node
 #define _kern_unlock_node			_kernbuild_unlock_node
-
+*/
 
 struct stat;
 struct dirent;
@@ -55,6 +55,8 @@ extern status_t		_kern_entry_ref_to_path(dev_t device, ino_t inode,
 						const char *leaf, char *userPath, size_t pathLength);
 extern int			_kern_open_entry_ref(dev_t device, ino_t inode,
 						const char *name, int openMode, int perms);
+extern status_t		_kern_fd_to_path(int fd, team_id team, char* buffer,
+						size_t bufferSize);
 extern int			_kern_open(int fd, const char *path, int openMode,
 						int perms);
 extern int			_kern_open_dir_entry_ref(dev_t device, ino_t inode,
@@ -74,7 +76,8 @@ extern status_t		_kern_create_symlink(int fd, const char *path,
 extern status_t		_kern_unlink(int fd, const char *path);
 extern status_t		_kern_rename(int oldDir, const char *oldpath, int newDir,
 						const char *newpath);
-extern int			_kern_open_attr_dir(int fd, const char *path);
+extern int			_kern_open_attr_dir(int fd, const char *path,
+						bool traverseLeafLink);
 extern status_t		_kern_remove_attr(int fd, const char *name);
 extern status_t		_kern_rename_attr(int fromFile, const char *fromName,
 						int toFile, const char *toName);

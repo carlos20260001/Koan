@@ -45,25 +45,15 @@ extern size_t	strnlen(const char* string, size_t length);
 #endif
 
 // BeOS only
-#if !defined(HAIKU_HOST_PLATFORM_HAIKU)
-extern ssize_t  read_pos(int fd, off_t pos, void* buffer, size_t count);
-extern ssize_t  write_pos(int fd, off_t pos, const void* buffer, size_t count);
-#endif
+//#if !defined(HAIKU_HOST_PLATFORM_HAIKU)
+//extern ssize_t  read_pos(int fd, off_t pos, void* buffer, size_t count);
+//extern ssize_t  write_pos(int fd, off_t pos, const void* buffer, size_t count);
+//extern ssize_t	readv_pos(int fd, off_t pos, const struct iovec* vec,
+//					int count);
+//extern ssize_t	writev_pos(int fd, off_t pos, const struct iovec* vec,
+//					int count);
+//#endif
 
-
-// There's no O_NOTRAVERSE under Linux and FreeBSD -- we replace it with a flag
-// that won't be used by our tools, preferrably a non-portable one; a fixed
-// constant could always lead to trouble on the host.
-// We can abuse this flag for our purposes as we filter it in libroot.
-#ifndef O_NOTRAVERSE
-#	ifdef O_NOCTTY
-#		define O_NOTRAVERSE	O_NOCTTY
-#	elif defined(O_RANDOM)
-#		define O_NOTRAVERSE O_RANDOM
-#	else
-#		error "Search for a proper replacement value for O_NOTRAVERSE"
-#	endif
-#endif
 
 #ifndef S_IUMSK
 #	define S_IUMSK ALLPERMS
@@ -111,9 +101,16 @@ int		_haiku_build_fchownat(int fd, const char* path, uid_t owner,
 			gid_t group, int flag);
 int		_haiku_build_mknodat(int fd, const char* name, mode_t mode, dev_t dev);
 int		_haiku_build_creat(const char* path, mode_t mode);
+//#ifndef _HAIKU_BUILD_DONT_REMAP_FD_FUNCTIONS
 int		_haiku_build_open(const char* path, int openMode, ...);
-int		_haiku_build_openat(int fd, const char* path, int openMode, ...);
-int		_haiku_build_fcntl(int fd, int op, ...);
+//int		_haiku_build_openat(int fd, const char* path, int openMode, ...);
+//int		_haiku_build_fcntl(int fd, int op, ...);
+//#else
+//int		_haiku_build_open(const char* path, int openMode, mode_t permissions);
+//int		_haiku_build_openat(int fd, const char* path, int openMode,
+//			mode_t permissions);
+//int		_haiku_build_fcntl(int fd, int op, int argument);
+//#endif
 int		_haiku_build_renameat(int fromFD, const char* from, int toFD,
 			const char* to);
 

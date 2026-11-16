@@ -429,12 +429,6 @@ typedef struct {
 #define STV_HIDDEN 2
 #define STV_PROTECTED 3
 
-/* symbol visibility */
-#define STV_DEFAULT 0
-#define STV_INTERNAL 1
-#define STV_HIDDEN 2
-#define STV_PROTECTED 3
-
 /* special symbol indices */
 #define STN_UNDEF 0
 

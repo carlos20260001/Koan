@@ -1,5 +1,3 @@
-/* VitruvianOS (Linux-hosted) keeps its own error table: the B_* POSIX
-   errors are the host errno values. */
 /*
  * Copyright 2026, Dario Casalinuovo. All rights reserved.
  * Copyright 2025-2026, The Vitruvian Project. All rights reserved.

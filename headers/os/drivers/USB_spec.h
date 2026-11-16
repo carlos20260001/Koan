@@ -174,5 +174,13 @@ typedef union usb_descriptor {
 	usb_string_descriptor			string;
 } usb_descriptor;
 
+/* Used to live in the kernel-only USB3.h; the kit header needs it and
+   stays on the public include path. */
+typedef struct {
+	int16						request_length;
+	int16						actual_length;
+	status_t					status;
+} usb_iso_packet_descriptor;
+
 
 #endif	/* _USB_SPEC_H */

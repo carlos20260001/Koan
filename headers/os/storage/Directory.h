@@ -35,6 +35,7 @@ class BDirectory : public BNode, public BEntryList {
 		status_t SetTo(const BDirectory *dir, const char *path);
 
 		status_t GetEntry(BEntry *entry) const;
+		status_t GetRef(entry_ref* ref) const;
 
 		bool IsRootDirectory() const;
 
@@ -44,7 +45,9 @@ class BDirectory : public BNode, public BEntryList {
 		bool Contains(const char *path, int32 nodeFlags = B_ANY_NODE) const;
 		bool Contains(const BEntry *entry, int32 nodeFlags = B_ANY_NODE) const;
 
-		status_t GetStatFor(const char *path, struct stat *st) const;
+		status_t GetStatFor(const char *path, struct stat *st) const
+			__attribute__((deprecated("use GetStatXFor")));
+		status_t GetStatXFor(const char *path, struct statx *stx) const;
 
 		virtual status_t GetNextEntry(BEntry *entry, bool traverse = false);
 		virtual status_t GetNextRef(entry_ref *ref);
@@ -65,6 +68,7 @@ class BDirectory : public BNode, public BEntryList {
 		friend class BNode;
 		friend class BEntry;
 		friend class BFile;
+		friend class BPath;
 
 		status_t _GetStatFor(const char *path, struct stat *st) const;
 		status_t _GetStatFor(const char *path, struct stat_beos *st) const;
@@ -81,8 +85,14 @@ class BDirectory : public BNode, public BEntryList {
 		int get_fd() const;
 
 	private:
-		uint32 _reservedData[7];
+		off_t fDentLastOffset;
+		uint32 _reservedData[5];
 		int fDirFd;
+		node_ref fDirRef;
+
+		char*	fDentBuffer;
+		ssize_t	fDentBytes;
+		size_t	fDentPos;
 };
 
 status_t create_directory(const char *path, mode_t mode);

@@ -33,7 +33,6 @@
 #define B_DEFINE_SYMBOL_VERSION(function, versionedSymbol)	\
 	__asm__(".symver " function "," versionedSymbol)
 
-
 #ifdef __cplusplus
 #	define B_DEFINE_WEAK_ALIAS(name, alias_name)	\
 		extern "C" __typeof(name) alias_name __attribute__((weak, alias(#name)))

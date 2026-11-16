@@ -50,6 +50,7 @@ extern "C" {
 
 status_t __get_system_info(system_info* info);
 status_t __get_cpu_info(uint32 firstCPU, uint32 cpuCount, cpu_info* info);
+	/* libroot2 (VitruvianOS) implements _get_cpu_info_etc() on top of it */
 status_t __get_cpu_topology_info(cpu_topology_node_info* topologyInfos,
 			uint32* topologyInfoCount);
 
