@@ -214,7 +214,7 @@ scroll phases), so this is a three-way merge, not a copy.
   (`OS.h`, `Errors.h`, `SupportDefs.h`, ...) keep their Haiku halves. They can
   be resolved the same way once nothing builds the Haiku side
 
-### M7 - air/OS boot splash on Linux (replaces Plymouth) — planned
+### M7 - air/OS boot splash on Linux (replaces Plymouth)
 Port the original Haiku splash code, not a Plymouth theme. VitruvianOS
 images install no Plymouth: GRUB passes `quiet splash` and nothing draws
 until app_server starts. This milestone fills that gap.
@@ -229,26 +229,36 @@ kernel's `boot_splash.cpp` (light one icon per stage); headers in
 `headers/private/kernel/boot/images-airos.h`). The Haiku logo images
 (`splash_logo*`, `images-tm*.h`) are Haiku trademarks and must never ship.
 
-- [ ] `vos-splash`: a small static userspace program built from the two
-      sources. Replace the boot loader framebuffer and `kernel_args` with a DRM
-      dumb buffer (`/dev/dri/card0`, the same technique as app_server's
-      `linux/drm/modeset.c`) with fbdev (`/dev/fb0`) as fallback; keep the
-      blitter and zlib image decoding as they are
-- [ ] Stage control: `vos-splash --stage N` (or a FIFO the daemon reads) maps
-      Haiku's seven `BOOT_SPLASH_STAGE_*` to Linux boot points: initramfs
-      start, root mounted, `sysinit.target`, udev settled, `basic.target`,
-      registrar up, app_server about to take the display
-- [ ] initramfs-tools hook + `init-top` script so the logo shows before the
-      root mount; systemd units (`vos-splash-stage@.service`) for the later stages
-- [ ] Handoff: the splash drops DRM master and exits when app_server starts
-      (app_server's DRM backend must succeed in `drmSetMaster` right after);
-      no flicker to the text console in between; `quiet splash` only, the
-      verbose/recovery GRUB entries keep the text console
-- [ ] Packaging: install in the image through `build/profiles` + `bake`; CMake
-      target under `src/system/boot_splash/CMakeLists.txt`
-- [ ] Verify in QEMU (`docker/run-qemu.sh`, virtio-gpu DRM and `nomodeset`
-      fbdev) and on one real GPU; tests for the stage-to-icon mapping and the
-      image decoding on the host
+Merged in `b92bdc0170` (`port/splash`).
+
+- [x] `vos-splash` — `389ac07399`: static binary (~860 KB, `ldd`: not dynamic), the
+      original placement, blitter and zlib decoding with their copyright headers;
+      platform layer = DRM dumb buffer through raw ioctls (no libdrm) with `DIRTYFB`
+      flushes, `/dev/fb0` fallback (8-32 bpp), clean exit 0 when neither exists.
+      Trademark guard: `VOS_SPLASH_IMAGES` defaults to `images-airos.h`; configure
+      stops on `images.h`, `images-tm*.h`, `images-sans-tm.h` (checked)
+- [x] Stage control — `196d2de0b1`: daemon on `/run/vos-splash.fifo`,
+      `--stage N`, `--quit`, `--lit N`; seven Linux boot points
+- [ ] initramfs-tools hook + `init-top`/`init-bottom` and systemd stage units —
+      `b407da8963`: files, drop-ins and install rules (`build/profiles/splash.cmake`)
+      in place; `systemd-analyze verify` and `sh -n` clean; not yet run under real
+      `mkinitramfs` and systemd
+- [ ] Handoff: shown in QEMU (`SET_MASTER` EBUSY before stage 7, succeeds after,
+      picture kept). The daemon keeps running across the root switch like plymouthd
+      (directory fds for `/dev` and `/run`), reopens when efifb/simpledrm is
+      replaced by the GPU driver, and a `vos-splash.service --lit 2` fallback covers
+      boots where the initramfs had no frame buffer. app_server side still to do:
+      after its first `drmModeSetCrtc` it runs `/usr/libexec/vos-splash --quit`
+      (W3). Flicker-free hand-off not checked on a real boot
+- [x] Packaging: install rules checked with `cmake --install` (runtime + data);
+      `bake` not run
+- [ ] Verify: host tests `vos_splash_test` 56 checks, 0 failed (`ctest` 1/1); manual
+      QEMU (KVM, OVMF, `virtio-vga` and `virtio-gpu-pci`, busybox initramfs,
+      `switch_root`) drew the splash and all seven stages. Not done: full image
+      boot via `docker/run-qemu.sh`, `nomodeset`, a real GPU
+- Known limits: first connected connector only, no HiDPI scaling, fbdev 32 bpp
+  assumes XRGB, no LUKS password prompt; the Debian initramfs has no GPU drivers,
+  so BIOS boots without a VESA mode show the splash only from the real root
 
 ### M8 - VitruvianOS partitioner (DriveSetup) and installer
 The air/OS DriveSetup/Installer drove Haiku's kernel disk device manager and
@@ -400,3 +410,4 @@ counterparts and Mesa:
 | 2026-11-16 | `4385f4ca1b` | Dispatcher reverted (`vos-configure` only); signatures renamed to `x-vnd.vos-*` |
 | 2026-11-16 | `252ff7be13` | D1: Haiku-kernel-only trees deleted (graphics drivers, accelerants kept); D2: Linux-only input add-ons; M7 splash planned |
 | 2026-11-16 | `b563cfb440` | M8: VitruvianOS DriveSetup, Installer, backend and polkit agent merged; apps wait for the kits |
+| 2026-11-16 | `b92bdc0170` | M7: original splash on Linux (DRM/fbdev, initramfs, systemd stages) merged |
