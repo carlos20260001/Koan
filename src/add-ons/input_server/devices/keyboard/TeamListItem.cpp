@@ -1,4 +1,3 @@
-#ifdef __VOS__
 /*
  * Copyright 2004-2008, Haiku.
  * Copyright 2026, The Vitruvian Project
@@ -20,23 +19,6 @@
 #include <FindDirectory.h>
 #include <LocaleRoster.h>
 #include <Mime.h>
-#else	// !__VOS__
-/*
- * Copyright 2004-2008, Haiku.
- * Distributed under the terms of the MIT License.
- *
- * Authors:
- *		Jérôme Duval
- */
-
-#include "TeamListItem.h"
-
-#include <string.h>
-
-#include <ControlLook.h>
-#include <FindDirectory.h>
-#include <LocaleRoster.h>
-#endif	// !__VOS__
 #include <NodeInfo.h>
 #include <Path.h>
 #include <View.h>
@@ -56,7 +38,6 @@ TeamListItem::TeamListItem(team_info &teamInfo)
 	fIsParent(false)
 {
 	int32 cookie = 0;
-#ifdef __VOS__
 	image_info imageInfo;
 	if (get_next_image_info(teamInfo.team, &cookie, &imageInfo) == B_OK) {
 		fPath = BPath(imageInfo.name);
@@ -110,23 +91,6 @@ TeamListItem::_FetchIcons()
 }
 
 
-#else	// !__VOS__
-	image_info info;
-	if (get_next_image_info(teamInfo.team, &cookie, &info) == B_OK) {
-		fPath = BPath(info.name);
-		BNode node(info.name);
-		BNodeInfo nodeInfo(&node);
-		nodeInfo.GetTrackerIcon(&fMiniIcon, (icon_size)-1);
-		nodeInfo.GetTrackerIcon(&fLargeIcon, (icon_size)-1);
-	}
-
-	fIsApplication = be_roster->GetRunningAppInfo(fTeamInfo.team, &fAppInfo) == B_OK;
-
-	CacheLocalizedName();
-}
-
-
-#endif	// !__VOS__
 TeamListItem::~TeamListItem()
 {
 }

@@ -1,4 +1,3 @@
-#ifdef __VOS__
 /*
  * Copyright 2004-2025, Haiku.
  * Copyright 2026, The Vitruvian Project
@@ -9,15 +8,6 @@
  *		Stefano Ceccherini
  *		Dario Casalinuovo
  */
-#else	// !__VOS__
-/*
- * Copyright 2004-2008, Haiku.
- * Distributed under the terms of the MIT License.
- *
- * Authors:
- *		Stefano Ceccherini
- */
-#endif	// !__VOS__
 #ifndef MOUSE_INPUT_DEVICE_H
 #define MOUSE_INPUT_DEVICE_H
 
@@ -25,7 +15,6 @@
 #include <InputServerDevice.h>
 #include <InterfaceDefs.h>
 #include <Locker.h>
-#ifdef __VOS__
 #include <Point.h>
 #include <Rect.h>
 
@@ -33,11 +22,6 @@
 
 #include <PointerControlCore.h>
 
-#else	// !__VOS__
-
-#include <ObjectList.h>
-
-#endif	// !__VOS__
 
 class MouseDevice;
 
@@ -60,7 +44,6 @@ private:
 	// find a better way...
 
 			status_t		_HandleMonitor(BMessage* message);
-#ifdef __VOS__
 			status_t		_UpdateScreenBounds(MouseDevice* device,
 								BMessage* message);
 			// Seat pointer constraint (confinement, relative mode)
@@ -112,17 +95,6 @@ public:
 private:
 			mutable BLocker	fConstraintLock;
 			pointer_constraint fConstraint;
-#else	// !__VOS__
-			void			_RecursiveScan(const char* directory);
-
-			MouseDevice*	_FindDevice(const char* path) const;
-			status_t		_AddDevice(const char* path);
-			status_t		_RemoveDevice(const char* path);
-
-private:
-			BObjectList<MouseDevice, true> fDevices;
-			BLocker			fDeviceListLock;
-#endif	// !__VOS__
 };
 
 extern "C" BInputServerDevice* instantiate_input_device();

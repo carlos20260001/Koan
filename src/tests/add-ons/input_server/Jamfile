@@ -11,21 +11,10 @@ SimpleTest TeamMonitorTest :
 	: be localestub shared
 	;
 
-SubDirHdrs $(HAIKU_TOP) src add-ons input_server devices mouse ;
-
-SimpleTest touchpad_scroll_test :
-	touchpad_scroll_test.cpp
-	movement_maker.cpp
-	: be [ TargetLibsupc++ ]
-	;
-
 SimpleTest wheel_log :
 	wheel_log.cpp
 	: be
 	;
-
-SEARCH on [ FGristFiles movement_maker.cpp ]
-	= [ FDirName $(HAIKU_TOP) src add-ons input_server devices mouse ] ;
 
 SEARCH on [ FGristFiles
 		TeamMonitorWindow.cpp TeamListItem.cpp

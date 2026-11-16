@@ -1,4 +1,3 @@
-#ifdef __VOS__
 /*
  * Copyright 2004-2025, Haiku.
  * Copyright 2026, The Vitruvian Project
@@ -29,30 +28,6 @@
 #include <unistd.h>
 
 #include <AppDefs.h>
-#else	// !__VOS__
-/*
- * Copyright 2004-2025, Haiku.
- * Distributed under the terms of the MIT License.
- *
- * Authors:
- *		Stefano Ceccherini (stefano.ceccherini@gmail.com)
- *		Jérôme Duval
- *		Axel Dörfler, axeld@pinc-software.de
- *		Clemens Zeidler, haiku@clemens-zeidler.de
- *		Stephan Aßmus, superstippi@gmx.de
- *		Samuel Rodríguez Pérez, samuelrp84@gmail.com
- */
-
-
-#include "MouseInputDevice.h"
-
-#include <errno.h>
-#include <new>
-#include <stdio.h>
-#include <stdlib.h>
-#include <unistd.h>
-
-#endif	// !__VOS__
 #include <Autolock.h>
 #include <Debug.h>
 #include <Directory.h>
@@ -61,7 +36,6 @@
 #include <FindDirectory.h>
 #include <NodeMonitor.h>
 #include <Path.h>
-#ifdef __VOS__
 #include <Screen.h>
 #include <String.h>
 #include <View.h>
@@ -89,35 +63,17 @@
 #ifndef REL_HWHEEL_HI_RES
 #define REL_HWHEEL_HI_RES	0x0c
 #endif
-#else	// !__VOS__
-#include <String.h>
-#include <View.h>
-
-#include <kb_mouse_settings.h>
-#include <keyboard_mouse_driver.h>
-#include <touchpad_settings.h>
-
-#include "movement_maker.h"
-#endif	// !__VOS__
 
 
 #undef TRACE
 //#define TRACE_MOUSE_DEVICE
 #ifdef TRACE_MOUSE_DEVICE
 
-#ifdef __VOS__
 	static int32 sFunctionDepth = -1;
 #	define CALLED(x...)	do { \
 		sFunctionDepth++; \
 		debug_printf("%p -> %s {\n", this, __PRETTY_FUNCTION__); \
 	} while (0)
-#else	// !__VOS__
-#include <private/shared/FunctionTracer.h>
-
-	static int32 sFunctionDepth = -1;
-#	define CALLED(x...)	FunctionTracer _ft(debug_printf, this, \
-								__PRETTY_FUNCTION__, sFunctionDepth)
-#endif	// !__VOS__
 #	define TRACE(x...)	do { BString _to; \
 							_to.Append(' ', (sFunctionDepth + 1) * 2); \
 							debug_printf("%p -> %s", this, _to.String()); \
@@ -133,7 +89,6 @@
 
 
 const static uint32 kMouseThreadPriority = B_FIRST_REAL_TIME_PRIORITY + 4;
-#ifdef __VOS__
 const static char* kMouseDevicesDirectory = "/dev/input";
 
 
@@ -266,12 +221,6 @@ _IsTouchpadDevice(int fd, const char* path)
 // MouseDevice class declaration (full, with libinput fields)
 // ---------------------------------------------------------------------------
 
-#else	// !__VOS__
-const static char* kMouseDevicesDirectory = "/dev/input/mouse";
-const static char* kTouchpadDevicesDirectory = "/dev/input/touchpad";
-
-
-#endif	// !__VOS__
 class MouseDevice {
 public:
 								MouseDevice(MouseInputDevice& target,
@@ -281,7 +230,6 @@ public:
 			status_t			Start();
 			void				Stop();
 
-#ifdef __VOS__
 			// Called once from _AddDevice(); Start() must not re-probe.
 			status_t			_Classify();
 
@@ -314,15 +262,6 @@ public:
 private:
 			friend class MouseInputDevice;
 
-#else	// !__VOS__
-			status_t			UpdateSettings();
-			status_t			UpdateTouchpadSettings(const BMessage* message);
-
-			const char*			Path() const { return fPath.String(); }
-			input_device_ref*	DeviceRef() { return &fDeviceRef; }
-
-private:
-#endif	// !__VOS__
 			char*				_BuildShortName() const;
 
 	static	status_t			_ControlThreadEntry(void* arg);
@@ -332,7 +271,6 @@ private:
 
 			status_t			_GetTouchpadSettingsPath(BPath& path);
 			status_t			_UpdateTouchpadSettings(BMessage* message);
-#ifdef __VOS__
 			status_t			_LoadTouchpadSettingsFile();
 			void				_ApplyLibinputConfig();
 			void				_MarkTouchpadName();
@@ -343,12 +281,6 @@ private:
 
 			BMessage*			_BuildMouseMessage(uint32 what,
 									uint64 when, uint32 buttons) const;
-#else	// !__VOS__
-
-			BMessage*			_BuildMouseMessage(uint32 what,
-									uint64 when, uint32 buttons,
-									int32 deltaX, int32 deltaY) const;
-#endif	// !__VOS__
 			void				_ComputeAcceleration(
 									const mouse_movement& movements,
 									int32& deltaX, int32& deltaY,
@@ -356,7 +288,6 @@ private:
 									float& historyDeltaY) const;
 			uint32				_RemapButtons(uint32 buttons) const;
 
-#ifdef __VOS__
 			// libinput event handling
 			void				_LibinputHandleEvent(struct libinput_event* ev);
 			// Relative motion is never rotated, as on other desktops: a
@@ -481,23 +412,6 @@ private:
 			// physical click; only one of them may report buttons.
 			BString				fPhysicalGroup;
 			bool				fMayReportButtons;
-#else	// !__VOS__
-private:
-			MouseInputDevice&	fTarget;
-			BString				fPath;
-			int					fDevice;
-
-			input_device_ref	fDeviceRef;
-			mouse_settings		fSettings;
-			bool				fDeviceRemapsButtons;
-
-			thread_id			fThread;
-	volatile bool				fActive;
-	volatile bool				fUpdateSettings;
-
-			bool				fIsTouchpad;
-			TouchpadMovement	fTouchpadMovementMaker;
-#endif	// !__VOS__
 			BMessage*			fTouchpadSettingsMessage;
 			BLocker				fTouchpadSettingsLock;
 };
@@ -510,12 +424,10 @@ instantiate_input_device()
 }
 
 
-#ifdef __VOS__
 // Monotonic; a heap address can be handed out twice (ABA).
 static int32 sNextMouseDeviceSerial = 0;
 
 
-#endif	// __VOS__
 //	#pragma mark -
 
 
@@ -524,7 +436,6 @@ MouseDevice::MouseDevice(MouseInputDevice& target, const char* driverPath)
 	fTarget(target),
 	fPath(driverPath),
 	fDevice(-1),
-#ifdef __VOS__
 	fEvdevHandle(NULL),
 	fEpollFd(-1),
 	fUseLibinput(false),
@@ -577,12 +488,6 @@ MouseDevice::MouseDevice(MouseInputDevice& target, const char* driverPath)
 	fActive(false),
 	fUpdateSettings(0),
 	fSeatCommand(0),
-#else	// !__VOS__
-	fDeviceRemapsButtons(false),
-	fThread(-1),
-	fActive(false),
-	fUpdateSettings(false),
-#endif	// !__VOS__
 	fIsTouchpad(false),
 	fTouchpadSettingsMessage(NULL),
 	fTouchpadSettingsLock("Touchpad settings lock")
@@ -593,7 +498,6 @@ MouseDevice::MouseDevice(MouseInputDevice& target, const char* driverPath)
 	fDeviceRef.type = B_POINTING_DEVICE;
 	fDeviceRef.cookie = this;
 
-#ifdef __VOS__
 	memset(&fSettings, 0, sizeof(fSettings));
 	fTouchpadSettings = kDefaultTouchpadSettings;
 	fMayReportButtons = true;
@@ -604,13 +508,6 @@ MouseDevice::MouseDevice(MouseInputDevice& target, const char* driverPath)
 	fSettings.accel.speed = 65536;
 	fSettings.click_speed = 500000;
 }
-#else	// !__VOS__
-#ifdef HAIKU_TARGET_PLATFORM_HAIKU
-	for (int i = 0; i < B_MAX_MOUSE_BUTTONS; i++)
-		fSettings.map.button[i] = B_MOUSE_BUTTON(i + 1);
-#endif
-};
-#endif	// !__VOS__
 
 
 MouseDevice::~MouseDevice()
@@ -618,20 +515,14 @@ MouseDevice::~MouseDevice()
 	CALLED();
 	TRACE("delete\n");
 
-#ifdef __VOS__
 	// _Classify() may have opened handles before Start() ever ran.
 	Stop();
-#else	// !__VOS__
-	if (fActive)
-		Stop();
-#endif	// !__VOS__
 
 	free(fDeviceRef.name);
 	delete fTouchpadSettingsMessage;
 }
 
 
-#ifdef __VOS__
 status_t
 MouseDevice::_Classify()
 {
@@ -801,15 +692,6 @@ MouseDevice::Start()
 		if (classifyStatus != B_OK)
 			return classifyStatus;
 	}
-#else	// !__VOS__
-status_t
-MouseDevice::Start()
-{
-	CALLED();
-
-	fDevice = open(fPath.String(), O_RDWR);
-		// let the control thread handle any error on opening the device
-#endif	// !__VOS__
 
 	char threadName[B_OS_NAME_LENGTH];
 	snprintf(threadName, B_OS_NAME_LENGTH, "%s watcher", fDeviceRef.name);
@@ -828,7 +710,6 @@ MouseDevice::Start()
 	if (status < B_OK) {
 		LOG_ERROR("%s: can't spawn/resume watching thread: %s\n",
 			fDeviceRef.name, strerror(status));
-#ifdef __VOS__
 		if (fDevice >= 0) {
 			close(fDevice);
 			fDevice = -1;
@@ -846,15 +727,6 @@ MouseDevice::Start()
 
 	// Return B_OK if we successfully set up either evdev or libinput
 	return (fDevice >= 0 || fUseLibinput) ? B_OK : B_ERROR;
-#else	// !__VOS__
-		if (fDevice >= 0)
-			close(fDevice);
-
-		return status;
-	}
-
-	return fDevice >= 0 ? B_OK : B_ERROR;
-#endif	// !__VOS__
 }
 
 
@@ -864,7 +736,6 @@ MouseDevice::Stop()
 	CALLED();
 
 	fActive = false;
-#ifdef __VOS__
 
 	if (fEpollFd >= 0) {
 		close(fEpollFd);
@@ -903,20 +774,6 @@ MouseDevice::Stop()
 			status_t dummy;
 			wait_for_thread(fThread, &dummy);
 		}
-#else	// !__VOS__
-		// this will stop the thread as soon as it reads the next packet
-
-	close(fDevice);
-	fDevice = -1;
-
-	if (fThread >= 0) {
-		// unblock the thread, which might wait on a semaphore.
-		suspend_thread(fThread);
-		resume_thread(fThread);
-
-		status_t dummy;
-		wait_for_thread(fThread, &dummy);
-#endif	// !__VOS__
 	}
 }
 
@@ -929,7 +786,6 @@ MouseDevice::UpdateSettings()
 	if (fThread < 0)
 		return B_ERROR;
 
-#ifdef __VOS__
 	atomic_set(&fUpdateSettings, 1);
 
 	return B_OK;
@@ -943,15 +799,6 @@ MouseDevice::HandleSeatMessage(uint32 what)
 }
 
 
-#else	// !__VOS__
-	// trigger updating the settings in the control thread
-	fUpdateSettings = true;
-
-	return B_OK;
-}
-
-
-#endif	// !__VOS__
 status_t
 MouseDevice::UpdateTouchpadSettings(const BMessage* message)
 {
@@ -962,12 +809,7 @@ MouseDevice::UpdateTouchpadSettings(const BMessage* message)
 
 	BAutolock _(fTouchpadSettingsLock);
 
-#ifdef __VOS__
 	atomic_set(&fUpdateSettings, 1);
-#else	// !__VOS__
-	// trigger updating the settings in the control thread
-	fUpdateSettings = true;
-#endif	// !__VOS__
 
 	delete fTouchpadSettingsMessage;
 	fTouchpadSettingsMessage = new BMessage(*message);
@@ -978,7 +820,6 @@ MouseDevice::UpdateTouchpadSettings(const BMessage* message)
 }
 
 
-#ifdef __VOS__
 void
 MouseDevice::UpdateScreenBounds(BRect frame, int32 orientation,
 	int32 reflection)
@@ -1040,27 +881,13 @@ device_index_from_name(const BString& name)
 char*
 MouseDevice::_BuildShortName() const
 {
-#else	// !__VOS__
-char*
-MouseDevice::_BuildShortName() const
-{
-	// TODO It would be simpler and better to use B_GET_DEVICE_NAME, but...
-	// - This is currently called before the device is open
-	// - We need to implement that in our input drivers first
-#endif	// !__VOS__
 	BString string(fPath);
 	BString deviceName;
 	BString name;
 
 	int32 slash = string.FindLast("/");
 	string.CopyInto(deviceName, slash + 1, string.Length() - slash);
-#ifdef __VOS__
 	int32 index = device_index_from_name(deviceName) + 1;
-#else	// !__VOS__
-	// FIXME the device name may be more than just a number (for example
-	// ibm_trackpoint_0)
-	int32 index = atoi(deviceName.String()) + 1;
-#endif	// !__VOS__
 
 	int32 previousSlash = string.FindLast("/", slash);
 	string.CopyInto(name, previousSlash + 1, slash - previousSlash - 1);
@@ -1073,19 +900,9 @@ MouseDevice::_BuildShortName() const
 	else
 		name.Capitalize();
 
-#ifdef __VOS__
 	if (string.FindFirst("touchpad") >= 0) {
 		name << " Touchpad ";
 	} else if (deviceName.FindFirst("trackpoint") >= 0) {
-#else	// !__VOS__
-	// Check the whole string for "touchpad" because it's a different directory
-	// FIXME use MS_IS_TOUCHPAD ioctl instead (or fIsTouchpad which caches its
-	// result) but this can only be done after the control thread is running
-	if (string.FindFirst("touchpad") >= 0) {
-		name << " Touchpad ";
-	} else if (deviceName.FindFirst("trackpoint") >= 0) {
-		// That's always PS/2, so don't keep the bus name
-#endif	// !__VOS__
 		name = "Trackpoint ";
 	} else {
 		if (deviceName.FindFirst("intelli") >= 0)
@@ -1116,7 +933,6 @@ MouseDevice::_ControlThread()
 {
 	CALLED();
 
-#ifdef __VOS__
 	// Initialize screen size and sync cursor position
 	{
 		BScreen screen;
@@ -1583,199 +1399,6 @@ MouseDevice::_ControlThread()
 				}
 			}
 		}
-#else	// !__VOS__
-	if (fDevice < 0) {
-		_ControlThreadCleanup();
-		// TOAST!
-		return;
-	}
-
-	// touchpad settings
-	touchpad_specs touchpadSpecs;
-	if (ioctl(fDevice, MS_IS_TOUCHPAD, &touchpadSpecs, sizeof(touchpadSpecs)) == B_OK) {
-		TRACE("is touchpad %s\n", fPath.String());
-		fIsTouchpad = true;
-
-		touchpad_settings settings;
-		settings = kDefaultTouchpadSettings;
-
-		BPath path;
-		status_t status = _GetTouchpadSettingsPath(path);
-		BFile settingsFile(path.Path(), B_READ_ONLY);
-
-		BMessage settingsMsg;
-		status = settingsMsg.Unflatten(&settingsFile);
-		if (status != B_OK) {
-			off_t size;
-			settingsFile.Seek(0, SEEK_SET);
-			if (settingsFile.GetSize(&size) == B_OK && size == 28) {
-				if (settingsFile.Read(&settings, 20) != 20)
-					TRACE("failed to load old settings\n");
-			} else
-				TRACE("failed to load settings\n");
-			fTouchpadMovementMaker.SetSettings(settings);
-		} else
-			_UpdateTouchpadSettings(&settingsMsg);
-
-		fTouchpadMovementMaker.SetSpecs(touchpadSpecs);
-	}
-
-	_UpdateSettings();
-
-	uint32 lastButtons = 0;
-	float historyDeltaX = 0.0;
-	float historyDeltaY = 0.0;
-
-	static const bigtime_t kTransferDelay = 1000000 / 125;
-		// 125 transfers per second should be more than enough
-#define USE_REGULAR_INTERVAL 1
-#if USE_REGULAR_INTERVAL
-	bigtime_t nextTransferTime = system_time() + kTransferDelay;
-#endif
-
-	// touchpads only
-	touchpad_movement lastTouchpadMovement;
-	bigtime_t touchpadEventTimeout = B_INFINITE_TIMEOUT;
-
-	while (fActive) {
-		mouse_movement movements;
-		scroll_movement scroll = { 0, 0, B_WHEEL_PHASE_NONE };
-
-#if USE_REGULAR_INTERVAL
-		snooze_until(nextTransferTime, B_SYSTEM_TIMEBASE);
-		nextTransferTime += kTransferDelay;
-#endif
-
-		if (!fIsTouchpad) {
-			if (ioctl(fDevice, MS_READ, &movements, sizeof(movements)) != B_OK) {
-				if (errno == B_INTERRUPTED)
-					continue;
-
-				LOG_ERROR("Mouse device exiting, %s\n", strerror(errno));
-				_ControlThreadCleanup();
-				// TOAST!
-				return;
-			}
-		} else {
-			touchpad_read read;
-			read.timeout = touchpadEventTimeout;
-
-			status_t status = ioctl(fDevice, MS_READ_TOUCHPAD, &read, sizeof(read));
-			if (status < 0)
-				status = errno;
-			if (status == B_TIMED_OUT || status == B_WOULD_BLOCK || status == B_BAD_DATA) {
-				read.event = MS_READ_TOUCHPAD;
-				read.u.touchpad = lastTouchpadMovement;
-			} else if (status != B_OK && status != B_INTERRUPTED) {
-				LOG_ERROR("Mouse (touchpad) device exiting, %s\n", strerror(errno));
-				_ControlThreadCleanup();
-				// TOAST!
-				return;
-			}
-
-			if (read.event == MS_READ_TOUCHPAD) {
-				status = fTouchpadMovementMaker.EventToMovement(&read.u.touchpad,
-					&movements, touchpadEventTimeout, &scroll);
-				if (status == B_OK)
-					lastTouchpadMovement = read.u.touchpad;
-			} else if (read.event == MS_READ) {
-				movements = read.u.mouse;
-				touchpadEventTimeout = -1;
-			}
-
-			if (status != B_OK)
-				continue;
-		}
-
-		// take care of updating the settings first, if necessary
-		if (fUpdateSettings) {
-			fUpdateSettings = false;
-			if (fIsTouchpad) {
-				BAutolock _(fTouchpadSettingsLock);
-				if (fTouchpadSettingsMessage != NULL) {
-					_UpdateTouchpadSettings(fTouchpadSettingsMessage);
-					delete fTouchpadSettingsMessage;
-					fTouchpadSettingsMessage = NULL;
-				}
-			}
-			_UpdateSettings();
-		}
-
-		uint32 buttons = lastButtons ^ movements.buttons;
-
-		uint32 remappedButtons = _RemapButtons(movements.buttons);
-		int32 deltaX, deltaY;
-		_ComputeAcceleration(movements, deltaX, deltaY, historyDeltaX,
-			historyDeltaY);
-
-		LOG_EVENT("%s: buttons: 0x%" B_PRIx32 ", x: %" B_PRId32 ", y: %" B_PRId32
-			", clicks:%" B_PRId32 ", wheel_x:%" B_PRId32 ", wheel_y:%" B_PRId32 "\n",
-			fDeviceRef.name, movements.buttons,
-			movements.xdelta, movements.ydelta, movements.clicks,
-			movements.wheel_xdelta, movements.wheel_ydelta);
-		LOG_EVENT("%s: x: %" B_PRId32 ", y: %" B_PRId32 " (%.4f, %.4f)\n", fDeviceRef.name,
-			deltaX, deltaY, historyDeltaX, historyDeltaY);
-
-		// Send single messages for each event
-
-		if (buttons != 0) {
-			bool pressedButton = (buttons & movements.buttons) > 0;
-			BMessage* message = _BuildMouseMessage(
-				pressedButton ? B_MOUSE_DOWN : B_MOUSE_UP,
-				movements.timestamp, remappedButtons, deltaX, deltaY);
-			if (message != NULL) {
-				if (pressedButton) {
-					message->AddInt32("clicks", movements.clicks);
-					LOG_EVENT("B_MOUSE_DOWN\n");
-				} else
-					LOG_EVENT("B_MOUSE_UP\n");
-
-				fTarget.EnqueueMessage(message);
-				lastButtons = movements.buttons;
-			}
-		}
-
-		if (movements.xdelta != 0 || movements.ydelta != 0) {
-			BMessage* message = _BuildMouseMessage(B_MOUSE_MOVED,
-				movements.timestamp, remappedButtons, deltaX, deltaY);
-			if (message != NULL)
-				fTarget.EnqueueMessage(message);
-		}
-
-		// A touchpad also reports the scrolling between whole wheel steps
-		// (be:wheel_delta_* stay whole steps, which existing programs expect)
-		// and where the gesture is: began, changed, ended.
-		if (movements.wheel_ydelta != 0 || movements.wheel_xdelta != 0
-			|| scroll.phase != B_WHEEL_PHASE_NONE) {
-			BMessage* message = new BMessage(B_MOUSE_WHEEL_CHANGED);
-			if (message == NULL)
-				continue;
-
-			if (message->AddInt64("when", movements.timestamp) == B_OK
-				&& message->AddFloat("be:wheel_delta_x",
-					movements.wheel_xdelta) == B_OK
-				&& message->AddFloat("be:wheel_delta_y",
-					movements.wheel_ydelta) == B_OK
-				&& message->AddInt32("be:device_subtype",
-					fIsTouchpad
-						? B_TOUCHPAD_POINTING_DEVICE
-						: B_MOUSE_POINTING_DEVICE) == B_OK
-				&& (scroll.phase == B_WHEEL_PHASE_NONE
-					|| (message->AddFloat("be:wheel_precise_delta_x",
-							scroll.x) == B_OK
-						&& message->AddFloat("be:wheel_precise_delta_y",
-							scroll.y) == B_OK
-						&& message->AddInt32("be:wheel_phase",
-							scroll.phase) == B_OK)))
-				fTarget.EnqueueMessage(message);
-			else
-				delete message;
-		}
-
-#if !USE_REGULAR_INTERVAL
-		snooze(kTransferDelay);
-#endif
-#endif	// !__VOS__
 	}
 }
 
@@ -1783,7 +1406,6 @@ MouseDevice::_ControlThread()
 void
 MouseDevice::_ControlThreadCleanup()
 {
-#ifdef __VOS__
 	// Withdraw our bits first: unplugging a device mid-click would
 	// otherwise leave a button stuck down for everyone else.
 	if (fSharedButtons != 0 && fTarget.fCursorLock.Lock()) {
@@ -1805,20 +1427,6 @@ MouseDevice::_ControlThreadCleanup()
 		// a replacement.
 		int32 serial = fSerial;
 		fTarget._RemoveDevice(path.String(), serial);
-#else	// !__VOS__
-	// NOTE: Only executed when the control thread detected an error
-	// and from within the control thread!
-
-	if (fActive) {
-		fThread = -1;
-		fTarget._RemoveDevice(fPath.String());
-	} else {
-		// In case active is already false, another thread
-		// waits for this thread to quit, and may already hold
-		// locks that _RemoveDevice() wants to acquire. In other
-		// words, the device is already being removed, so we simply
-		// quit here.
-#endif	// !__VOS__
 	}
 }
 
@@ -1827,7 +1435,6 @@ void
 MouseDevice::_UpdateSettings()
 {
 	CALLED();
-#ifdef __VOS__
 
 	if (get_mouse_map(fDeviceRef.name, &fSettings.map) != B_OK)
 		LOG_ERROR("error when get_mouse_map\n");
@@ -1838,35 +1445,16 @@ MouseDevice::_UpdateSettings()
 	if (get_click_speed(fDeviceRef.name, &fSettings.click_speed) == B_OK) {
 		if (fDevice >= 0)
 			ioctl(fDevice, MS_SET_CLICKSPEED, &fSettings.click_speed);
-#else	// !__VOS__
-	// retrieve current values
-
-	if (get_mouse_map(fDeviceRef.name, &fSettings.map) != B_OK)
-		LOG_ERROR("error when get_mouse_map\n");
-	else
-		fDeviceRemapsButtons = ioctl(fDevice, MS_SET_MAP, &fSettings.map) == B_OK;
-
-	if (get_click_speed(fDeviceRef.name, &fSettings.click_speed) == B_OK) {
-		if (fIsTouchpad)
-			fTouchpadMovementMaker.click_speed = fSettings.click_speed;
-		ioctl(fDevice, MS_SET_CLICKSPEED, &fSettings.click_speed);
-#endif	// !__VOS__
 	} else
 		LOG_ERROR("error when get_click_speed\n");
 
 	if (get_mouse_speed(fDeviceRef.name, &fSettings.accel.speed) != B_OK)
 		LOG_ERROR("error when get_mouse_speed\n");
 	else {
-#ifdef __VOS__
 		if (get_mouse_acceleration(fDeviceRef.name,
 				&fSettings.accel.accel_factor) != B_OK)
 			LOG_ERROR("error when get_mouse_acceleration\n");
 		else if (fDevice >= 0) {
-#else	// !__VOS__
-		if (get_mouse_acceleration(fDeviceRef.name, &fSettings.accel.accel_factor) != B_OK)
-			LOG_ERROR("error when get_mouse_acceleration\n");
-		else {
-#endif	// !__VOS__
 			mouse_accel accel;
 			ioctl(fDevice, MS_GET_ACCEL, &accel);
 			accel.speed = fSettings.accel.speed;
@@ -1877,7 +1465,6 @@ MouseDevice::_UpdateSettings()
 
 	if (get_mouse_type(fDeviceRef.name, &fSettings.type) != B_OK)
 		LOG_ERROR("error when get_mouse_type\n");
-#ifdef __VOS__
 	else if (fDevice >= 0)
 		ioctl(fDevice, MS_SET_TYPE, &fSettings.type);
 
@@ -1892,10 +1479,6 @@ MouseDevice::_UpdateSettings()
 		} else if (fUseLibinput)
 			_ApplyLibinputConfig();
 	}
-#else	// !__VOS__
-	else
-		ioctl(fDevice, MS_SET_TYPE, &fSettings.type);
-#endif	// !__VOS__
 }
 
 
@@ -1909,7 +1492,6 @@ MouseDevice::_GetTouchpadSettingsPath(BPath& path)
 }
 
 
-#ifdef __VOS__
 status_t
 MouseDevice::_LoadTouchpadSettingsFile()
 {
@@ -1930,7 +1512,6 @@ MouseDevice::_LoadTouchpadSettingsFile()
 }
 
 
-#endif	// __VOS__
 status_t
 MouseDevice::_UpdateTouchpadSettings(BMessage* message)
 {
@@ -1941,23 +1522,11 @@ MouseDevice::_UpdateTouchpadSettings(BMessage* message)
 	message->FindBool("scroll_twofinger", &settings.scroll_twofinger);
 	message->FindBool("scroll_twofinger_horizontal",
 		&settings.scroll_twofinger_horizontal);
-#ifdef __VOS__
 	message->FindFloat("scroll_rightrange", &settings.scroll_rightrange);
 	message->FindFloat("scroll_bottomrange", &settings.scroll_bottomrange);
 
 	message->FindInt16("scroll_xstepsize", (int16*)&settings.scroll_xstepsize);
 	message->FindInt16("scroll_ystepsize", (int16*)&settings.scroll_ystepsize);
-#else	// !__VOS__
-	message->FindFloat("scroll_rightrange",
-		&settings.scroll_rightrange);
-	message->FindFloat("scroll_bottomrange",
-		&settings.scroll_bottomrange);
-
-	message->FindInt16("scroll_xstepsize",
-		(int16*)&settings.scroll_xstepsize);
-	message->FindInt16("scroll_ystepsize",
-		(int16*)&settings.scroll_ystepsize);
-#endif	// !__VOS__
 	message->FindInt8("scroll_acceleration",
 		(int8*)&settings.scroll_acceleration);
 	message->FindInt8("tapgesture_sensibility",
@@ -1965,7 +1534,6 @@ MouseDevice::_UpdateTouchpadSettings(BMessage* message)
 
 	message->FindBool("scroll_twofinger_natural_scrolling",
 		&settings.scroll_twofinger_natural_scrolling);
-#ifdef __VOS__
 	message->FindInt8("edge_motion", (int8*)&settings.edge_motion);
 	message->FindBool("finger_click", &settings.finger_click);
 	message->FindBool("software_button_areas", &settings.software_button_areas);
@@ -2166,40 +1734,6 @@ MouseDevice::_BuildMouseMessage(uint32 what, uint64 when,
 			xv_axis_normalize(fLastAbsY, fAbsMinY, fAbsMaxY));
 	}
 
-#else	// !__VOS__
-	message->FindInt8("edge_motion",
-		(int8*)&settings.edge_motion);
-	message->FindBool("finger_click",
-		&settings.finger_click);
-	message->FindBool("software_button_areas",
-		&settings.software_button_areas);
-
-	if (fIsTouchpad)
-		fTouchpadMovementMaker.SetSettings(settings);
-
-	return B_OK;
-}
-
-
-BMessage*
-MouseDevice::_BuildMouseMessage(uint32 what, uint64 when, uint32 buttons,
-	int32 deltaX, int32 deltaY) const
-{
-	BMessage* message = new BMessage(what);
-	if (message == NULL)
-		return NULL;
-
-	if (message->AddInt64("when", when) < B_OK
-		|| message->AddInt32("buttons", buttons) < B_OK
-		|| message->AddInt32("x", deltaX) < B_OK
-		|| message->AddInt32("y", deltaY) < B_OK
-		|| message->AddInt32("be:device_subtype",
-			fIsTouchpad ? B_TOUCHPAD_POINTING_DEVICE : B_MOUSE_POINTING_DEVICE) < B_OK) {
-		delete message;
-		return NULL;
-	}
-
-#endif	// !__VOS__
 	return message;
 }
 
@@ -2209,21 +1743,11 @@ MouseDevice::_ComputeAcceleration(const mouse_movement& movements,
 	int32& _deltaX, int32& _deltaY, float& historyDeltaX,
 	float& historyDeltaY) const
 {
-#ifdef __VOS__
 	float deltaX = (float)movements.xdelta * fSettings.accel.speed / 65536.0
 		+ historyDeltaX;
 	float deltaY = (float)movements.ydelta * fSettings.accel.speed / 65536.0
 		+ historyDeltaY;
 
-#else	// !__VOS__
-	// basic mouse speed
-	float deltaX = (float)movements.xdelta * fSettings.accel.speed / 65536.0
-		+ historyDeltaX;
-	float deltaY = (float)movements.ydelta * fSettings.accel.speed / 65536.0
-		+ historyDeltaY;
-
-	// acceleration
-#endif	// !__VOS__
 	double acceleration = 1;
 	if (fSettings.accel.accel_factor) {
 		acceleration = 1 + sqrt(deltaX * deltaX + deltaY * deltaY)
@@ -2256,23 +1780,8 @@ MouseDevice::_RemapButtons(uint32 buttons) const
 
 	uint32 newButtons = 0;
 	for (int32 i = 0; buttons; i++) {
-#ifdef __VOS__
 		if (buttons & 0x1)
 			newButtons |= fSettings.map.button[i];
-#else	// !__VOS__
-		if (buttons & 0x1) {
-#if defined(HAIKU_TARGET_PLATFORM_HAIKU) || defined(HAIKU_TARGET_PLATFORM_DANO)
-			newButtons |= fSettings.map.button[i];
-#else
-			if (i == 0)
-				newButtons |= fSettings.map.left;
-			if (i == 1)
-				newButtons |= fSettings.map.right;
-			if (i == 2)
-				newButtons |= fSettings.map.middle;
-#endif
-		}
-#endif	// !__VOS__
 		buttons >>= 1;
 	}
 
@@ -2280,7 +1789,6 @@ MouseDevice::_RemapButtons(uint32 buttons) const
 }
 
 
-#ifdef __VOS__
 // #pragma mark - libinput event handling
 
 
@@ -2852,14 +2360,12 @@ MouseDevice::_LibinputHandleEvent(struct libinput_event* event)
 }
 
 
-#endif	// __VOS__
 //	#pragma mark -
 
 
 MouseInputDevice::MouseInputDevice()
 	:
 	fDevices(2),
-#ifdef __VOS__
 	fDeviceListLock("MouseInputDevice list"),
 	fCursorPosition(-1, -1),
 	fCursorLock("cursor position lock"),
@@ -2874,16 +2380,6 @@ MouseInputDevice::MouseInputDevice()
 
 	StartMonitoringDevice(kMouseDevicesDirectory);
 	_RecursiveScan(kMouseDevicesDirectory);
-#else	// !__VOS__
-	fDeviceListLock("MouseInputDevice list")
-{
-	CALLED();
-
-	StartMonitoringDevice(kMouseDevicesDirectory);
-	StartMonitoringDevice(kTouchpadDevicesDirectory);
-	_RecursiveScan(kMouseDevicesDirectory);
-	_RecursiveScan(kTouchpadDevicesDirectory);
-#endif	// !__VOS__
 }
 
 
@@ -2891,7 +2387,6 @@ MouseInputDevice::~MouseInputDevice()
 {
 	CALLED();
 
-#ifdef __VOS__
 	StopMonitoringDevice(kMouseDevicesDirectory);
 
 	// Detach every device under the lock, then delete them outside it:
@@ -2919,11 +2414,6 @@ MouseInputDevice::~MouseInputDevice()
 
 		delete device;
 	}
-#else	// !__VOS__
-	StopMonitoringDevice(kTouchpadDevicesDirectory);
-	StopMonitoringDevice(kMouseDevicesDirectory);
-	fDevices.MakeEmpty();
-#endif	// !__VOS__
 }
 
 
@@ -2953,11 +2443,9 @@ MouseInputDevice::Stop(const char* name, void* cookie)
 	TRACE("%s(%s)\n", __PRETTY_FUNCTION__, name);
 
 	MouseDevice* device = (MouseDevice*)cookie;
-#ifdef __VOS__
 	if (device == NULL)
 		return B_BAD_VALUE;
 
-#endif	// __VOS__
 	device->Stop();
 
 	return B_OK;
@@ -2978,7 +2466,6 @@ MouseInputDevice::Control(const char* name, void* cookie,
 	if (command == B_SET_TOUCHPAD_SETTINGS)
 		return device->UpdateTouchpadSettings(message);
 
-#ifdef __VOS__
 	if (command == B_GET_DEVICE_DESCRIPTION)
 		return device->GetDescription(message);
 
@@ -3001,7 +2488,6 @@ MouseInputDevice::Control(const char* name, void* cookie,
 		return B_OK;
 	}
 
-#endif	// __VOS__
 	if (command >= B_MOUSE_TYPE_CHANGED
 		&& command <= B_MOUSE_ACCELERATION_CHANGED)
 		return device->UpdateSettings();
@@ -3010,7 +2496,6 @@ MouseInputDevice::Control(const char* name, void* cookie,
 }
 
 
-#ifdef __VOS__
 status_t
 MouseInputDevice::_UpdateScreenBounds(MouseDevice* device, BMessage* message)
 {
@@ -3094,7 +2579,6 @@ MouseInputDevice::GetPointerConstraint(pointer_constraint* out) const
 }
 
 
-#endif	// __VOS__
 status_t
 MouseInputDevice::_HandleMonitor(BMessage* message)
 {
@@ -3130,7 +2614,6 @@ MouseInputDevice::_RecursiveScan(const char* directory)
 		BPath path;
 		entry.GetPath(&path);
 
-#ifdef __VOS__
 		// Only open evdev event nodes; skip subdirs (by-id, by-path, etc.)
 		if (entry.IsDirectory())
 			continue;
@@ -3191,17 +2674,6 @@ MouseInputDevice::_RescanDevices()
 		struct stat st;
 		if (stat(devicePath->String(), &st) != 0)
 			_RemoveDevice(devicePath->String());
-#else	// !__VOS__
-		if (!strcmp(path.Leaf(), "serial")) {
-			// skip serial
-			continue;
-		}
-
-		if (entry.IsDirectory())
-			_RecursiveScan(path.Path());
-		else
-			_AddDevice(path.Path());
-#endif	// !__VOS__
 	}
 }
 
@@ -3226,7 +2698,6 @@ MouseInputDevice::_AddDevice(const char* path)
 {
 	CALLED();
 
-#ifdef __VOS__
 	// The node monitor hands us any entry under /dev/input, not just
 	// device nodes.
 	struct stat st;
@@ -3249,11 +2720,6 @@ MouseInputDevice::_AddDevice(const char* path)
 	// Rescan and node monitor race; a duplicate would never be started.
 	if (_FindDevice(path) != NULL)
 		return B_OK;
-#else	// !__VOS__
-	BAutolock _(fDeviceListLock);
-
-	_RemoveDevice(path);
-#endif	// !__VOS__
 
 	MouseDevice* device = new(std::nothrow) MouseDevice(*this, path);
 	if (device == NULL) {
@@ -3261,7 +2727,6 @@ MouseInputDevice::_AddDevice(const char* path)
 		return B_NO_MEMORY;
 	}
 
-#ifdef __VOS__
 	// Classify before registering, so non-pointing devices never
 	// reach Input preferences.
 	status_t classifyStatus = device->_Classify();
@@ -3270,7 +2735,6 @@ MouseInputDevice::_AddDevice(const char* path)
 		return classifyStatus;
 	}
 
-#endif	// __VOS__
 	if (!fDevices.AddItem(device)) {
 		TRACE("No memory in list\n");
 		delete device;
@@ -3287,7 +2751,6 @@ MouseInputDevice::_AddDevice(const char* path)
 }
 
 
-#ifdef __VOS__
 MouseDevice*
 MouseInputDevice::_DetachDevice(const char* path, const int32* serial)
 {
@@ -3332,21 +2795,6 @@ MouseInputDevice::_DetachDevice(const char* path, const int32* serial)
 	if (device->IsTouchpad() && device->UseLibinput())
 		_ReleaseButtonOwnership(device->PhysicalGroup());
 
-#else	// !__VOS__
-status_t
-MouseInputDevice::_RemoveDevice(const char* path)
-{
-	CALLED();
-
-	BAutolock _(fDeviceListLock);
-
-	MouseDevice* device = _FindDevice(path);
-	if (device == NULL) {
-		TRACE("%s not found\n", path);
-		return B_ENTRY_NOT_FOUND;
-	}
-
-#endif	// !__VOS__
 	input_device_ref* devices[2];
 	devices[0] = device->DeviceRef();
 	devices[1] = NULL;
@@ -3355,7 +2803,6 @@ MouseInputDevice::_RemoveDevice(const char* path)
 
 	UnregisterDevices(devices);
 
-#ifdef __VOS__
 	return device;
 }
 
@@ -3413,9 +2860,5 @@ MouseInputDevice::_RemoveDevice(const char* path, int32 serial)
 		return B_ENTRY_NOT_FOUND;
 
 	delete device;
-#else	// !__VOS__
-	fDevices.RemoveItem(device);
-
-#endif	// !__VOS__
 	return B_OK;
 }

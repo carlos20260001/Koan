@@ -1,4 +1,3 @@
-#ifdef __VOS__
 /*
  * Copyright 2004-2020, Haiku.
  * Copyright 2026, The Vitruvian Project
@@ -10,17 +9,6 @@
  *		Pawan Yerramilli, me@pawanyerramilli.com
  *		Dario Casalinuovo
  */
-#else	// !__VOS__
-/*
- * Copyright 2004-2020, Haiku.
- * Distributed under the terms of the MIT License.
- *
- * Authors:
- *		Jérôme Duval
- *		Axel Doerfler, axeld@pinc-software.de
- *		Pawan Yerramilli, me@pawanyerramilli.com
- */
-#endif	// !__VOS__
 
 //!	Keyboard input server addon
 
@@ -39,9 +27,7 @@
 #include <Message.h>
 #include <MessageRunner.h>
 #include <Roster.h>
-#ifdef __VOS__
 #include <RosterPrivate.h>
-#endif	// __VOS__
 #include <ScrollView.h>
 #include <Screen.h>
 #include <SpaceLayoutItem.h>
@@ -57,7 +43,6 @@
 #include "TeamListItem.h"
 
 
-#ifdef __VOS__
 // PF_KTHREAD lives in field 9 of /proc/<pid>/stat. The comm field can hold
 // spaces and parens, so anchor on the trailing ')' before tokenising.
 static bool
@@ -94,7 +79,6 @@ is_kernel_thread(pid_t pid)
 }
 
 
-#endif	// __VOS__
 #undef B_TRANSLATION_CONTEXT
 #define B_TRANSLATION_CONTEXT "Team monitor"
 
@@ -333,21 +317,12 @@ TeamMonitorWindow::MessageReceived(BMessage* msg)
 			break;
 
 		case kMsgLaunchTerminal:
-#ifdef __VOS__
 			be_roster->Launch("application/x-vnd.vos-Terminal");
 			PostMessage(B_QUIT_REQUESTED);
 			break;
 
 		case TM_FORCE_REBOOT:
 			BRoster::Private().ShutDown(true, false, false);
-#else	// !__VOS__
-			be_roster->Launch("application/x-vnd.vos-Terminal");
-			PostMessage(B_QUIT_REQUESTED);
-			break;
-
-		case TM_FORCE_REBOOT:
-			_kern_shutdown(true);
-#endif	// !__VOS__
 			break;
 
 		case TM_KILL_APPLICATION:
@@ -585,12 +560,8 @@ TeamMonitorWindow::_UpdateList()
 	int32 cookie = 0;
 	team_info info;
 	while (get_next_team_info(&cookie, &info) == B_OK) {
-#ifdef __VOS__
 		// Hide init and kernel threads — Haiku exposes only kernel_team.
 		if (info.team <= 1 || is_kernel_thread(info.team))
-#else	// !__VOS__
-		if (info.team <=16)
-#endif	// !__VOS__
 			continue;
 
 		app_info ai;

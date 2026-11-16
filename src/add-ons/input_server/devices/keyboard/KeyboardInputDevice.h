@@ -1,4 +1,3 @@
-#ifdef __VOS__
 /*
  * Copyright 2004-2006, Jérôme Duval. All rights reserved.
  * Copyright 2005-2010, Axel Dörfler, axeld@pinc-software.de.
@@ -8,15 +7,6 @@
  * Distributed under the terms of the GPL License.
  */
 
-#else	// !__VOS__
-/*
- * Copyright 2004-2008, Jérôme Duval. All rights reserved.
- * Copyright 2005-2010, Axel Dörfler, axeld@pinc-software.de.
- * Copyright 2008, Stephan Aßmus, superstippi@gmx.de.
- *
- * Distributed under the terms of the MIT License.
- */
-#endif	// !__VOS__
 #ifndef KEYBOARD_INPUT_DEVICE_H
 #define KEYBOARD_INPUT_DEVICE_H
 
@@ -24,14 +14,12 @@
 #include <Handler.h>
 #include <InputServerDevice.h>
 #include <Locker.h>
-#ifdef __VOS__
 #include <String.h>
 
 struct libevdev;
 struct xkb_context;
 struct xkb_keymap;
 struct xkb_state;
-#endif	// __VOS__
 
 #include <InputServerTypes.h>
 #include <ObjectList.h>
@@ -54,7 +42,6 @@ public:
 			void				Stop();
 
 			status_t			UpdateSettings(uint32 opcode = 0);
-#ifdef __VOS__
 			void				HandleSeatMessage(uint32 what);
 
 			const char*			Path() const { return fPath; }
@@ -83,18 +70,6 @@ public:
 									bool menuKeyDown);
 			uint32				_PublishModifiers(uint32 newModifiers);
 			void				_WithdrawSeatModifiers();
-#else	// !__VOS__
-
-			const char*			Path() const { return fPath; }
-			input_device_ref*	DeviceRef() { return &fDeviceRef; }
-
-private:
-	static	int32				_ControlThreadEntry(void* arg);
-			int32				_ControlThread();
-			void				_ControlThreadCleanup();
-			void				_UpdateSettings(uint32 opcode);
-			void				_UpdateLEDs();
-#endif	// !__VOS__
 			status_t			_EnqueueInlineInputMethod(int32 opcode,
 									const char* string = NULL,
 									bool confirmed = false,
@@ -105,7 +80,6 @@ private:
 			input_device_ref	fDeviceRef;
 			char				fPath[B_PATH_NAME_LENGTH];
 			int					fFD;
-#ifdef __VOS__
 			int32				fSerial;
 			BString				fDescription;
 			struct libevdev*	fInputHandle;
@@ -115,7 +89,6 @@ private:
 			struct xkb_state*	fXkbState;
 			struct xkb_compose_table*	fXkbComposeTable;
 			struct xkb_compose_state*	fXkbComposeState;
-#endif	// __VOS__
 			thread_id			fThread;
 			kb_settings			fSettings;
 	volatile bool				fActive;
@@ -125,7 +98,6 @@ private:
 			uint32				fControlKey;
 			uint16				fKeyboardID;
 
-#ifdef __VOS__
 			// Claimed with atomic_get_and_set(), so int32 and not
 			// volatile: the atomic supplies the ordering, and a
 			// volatile-qualified uint32 only type-checks under
@@ -135,10 +107,6 @@ private:
 			// Pending B_SEAT_DISABLED, B_SEAT_ENABLED or B_SYSTEM_RESUMED, 0 = none. A single command,
 			// not a bitmask like fSettingsCommand, since these are mutually exclusive.
 			int32				fSeatCommand;
-#else	// !__VOS__
-	volatile bool				fUpdateSettings;
-	volatile uint32				fSettingsCommand;
-#endif	// !__VOS__
 
 			Keymap				fKeymap;
 			BLocker				fKeymapLock;
@@ -171,7 +139,6 @@ private:
 			KeyboardDevice*		_FindDevice(const char* path) const;
 			status_t			_AddDevice(const char* path);
 			status_t			_RemoveDevice(const char* path);
-#ifdef __VOS__
 			status_t			_RemoveDevice(const char* path, int32 serial);
 			// Finds, ABA-checks (if serial != NULL) and detaches the
 			// device from fDevices, all under one lock acquisition, but
@@ -192,12 +159,6 @@ private:
 	// False after B_SEAT_DISABLED; gates idle seeding so a VT-switch release
 	// is not undone.
 	volatile bool			fSeatEnabled;
-#else	// !__VOS__
-
-			BObjectList<KeyboardDevice, true> fDevices;
-			BLocker				fDeviceListLock;
-			TeamMonitorWindow*	fTeamMonitorWindow;
-#endif	// !__VOS__
 };
 
 extern "C" BInputServerDevice* instantiate_input_device();

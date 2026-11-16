@@ -1,4 +1,3 @@
-#ifdef __VOS__
 /*
  * Copyright 2004-2008, Haiku.
  * Copyright 2026, The Vitruvian Project
@@ -9,16 +8,6 @@
  *		Axel Doerfler, axeld@pinc-software.de#
  *		Dario Casalinuovo
  */
-#else	// !__VOS__
-/*
- * Copyright 2004-2008, Haiku.
- * Distributed under the terms of the MIT License.
- *
- * Authors:
- *		Jérôme Duval
- *		Axel Doerfler, axeld@pinc-software.de
- */
-#endif	// !__VOS__
 #ifndef TEAM_MONITOR_WINDOW_H
 #define TEAM_MONITOR_WINDOW_H
 

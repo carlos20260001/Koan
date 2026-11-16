@@ -1,4 +1,3 @@
-#ifdef __VOS__
 /*
  * Copyright 2004-2006, Jérôme Duval. All rights reserved.
  * Copyright 2005-2010, Axel Dörfler, axeld@pinc-software.de.
@@ -19,23 +18,6 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
-#else	// !__VOS__
-/*
- * Copyright 2004-2006, Jérôme Duval. All rights reserved.
- * Copyright 2005-2010, Axel Dörfler, axeld@pinc-software.de.
- * Copyright 2008-2009, Stephan Aßmus, superstippi@gmx.de.
- *
- * Distributed under the terms of the MIT License.
- */
-
-
-#include "KeyboardInputDevice.h"
-
-#include <errno.h>
-#include <new>
-#include <stdio.h>
-#include <stdlib.h>
-#endif	// !__VOS__
 #include <unistd.h>
 
 #include <Application.h>
@@ -44,7 +26,6 @@
 #include <Directory.h>
 #include <Entry.h>
 #include <NodeMonitor.h>
-#ifdef __VOS__
 #include <FindDirectory.h>
 #include <Path.h>
 #include <String.h>
@@ -66,13 +47,6 @@
 #define SETTING_BIT(opcode)	((uint32)1 << (opcode))
 #define SETTING_ALL			SETTING_BIT(0)
 
-#else	// !__VOS__
-#include <Path.h>
-#include <String.h>
-
-#include <keyboard_mouse_driver.h>
-
-#endif	// !__VOS__
 
 #undef TRACE
 
@@ -100,15 +74,10 @@ static	int32		sFunctionDepth = -1;
 #endif
 
 
-#ifdef __VOS__
 	const static uint32 kKeyboardThreadPriority = B_FIRST_REAL_TIME_PRIORITY + 4;
  const static char* kKeyboardDevicesDirectory = "/dev/input";
 
 static int32 sNextKeyboardDeviceSerial = 0;
-#else	// !__VOS__
-const static uint32 kKeyboardThreadPriority = B_FIRST_REAL_TIME_PRIORITY + 4;
-const static char* kKeyboardDevicesDirectory = "/dev/input/keyboard";
-#endif	// !__VOS__
 
 
 extern "C" BInputServerDevice*
@@ -118,7 +87,6 @@ instantiate_input_device()
 }
 
 
-#ifdef __VOS__
 static int32
 device_index_from_name(const BString& name)
 {
@@ -129,7 +97,6 @@ device_index_from_name(const BString& name)
 }
 
 
-#endif	// __VOS__
 static char*
 get_short_name(const char* longName)
 {
@@ -138,21 +105,12 @@ get_short_name(const char* longName)
 
 	int32 slash = string.FindLast("/");
 	string.CopyInto(name, slash + 1, string.Length() - slash);
-#ifdef __VOS__
 	int32 index = device_index_from_name(name) + 1;
 
 	int32 previousSlash = string.FindLast("/", slash);
 	string.CopyInto(name, previousSlash + 1, slash - previousSlash - 1);
 
 	// Format: "USB" instead of "usb"
-#else	// !__VOS__
-	int32 index = atoi(name.String()) + 1;
-
-	int32 previousSlash = string.FindLast("/", slash);
-	string.CopyInto(name, previousSlash + 1, slash - previousSlash - 1);
-
-	// some special handling so that we get "USB" and "AT" instead of "usb"/"at"
-#endif	// !__VOS__
 	if (name.Length() < 4)
 		name.ToUpper();
 	else
@@ -172,7 +130,6 @@ KeyboardDevice::KeyboardDevice(KeyboardInputDevice* owner, const char* path)
 	BHandler("keyboard device"),
 	fOwner(owner),
 	fFD(-1),
-#ifdef __VOS__
 	fSerial(atomic_add(&sNextKeyboardDeviceSerial, 1)),
 	fInputHandle(NULL),
 	fEpollFd(-1),
@@ -190,14 +147,6 @@ KeyboardDevice::KeyboardDevice(KeyboardInputDevice* owner, const char* path)
 	fKeyboardID(0),
 	fSettingsCommand(0),
 	fSeatCommand(0),
-#else	// !__VOS__
-	fThread(-1),
-	fActive(false),
-	fInputMethodStarted(false),
-	fKeyboardID(0),
-	fUpdateSettings(false),
-	fSettingsCommand(0),
-#endif	// !__VOS__
 	fKeymapLock("keymap lock")
 {
 	CALLED();
@@ -224,13 +173,11 @@ KeyboardDevice::~KeyboardDevice()
 
 	free(fDeviceRef.name);
 
-#ifdef __VOS__
 	if (fXkbComposeState != NULL) {
 		xkb_compose_state_unref(fXkbComposeState);
 		fXkbComposeState = NULL;
 	}
 
-#endif	// __VOS__
 	if (be_app->Lock()) {
 		be_app->RemoveHandler(this);
 		be_app->Unlock();
@@ -243,7 +190,6 @@ KeyboardDevice::MessageReceived(BMessage* message)
 {
 	CALLED();
 
-#ifdef __VOS__
 	switch (message->what) {
 		case B_SEAT_ENABLED:
 			_SyncLocksFromLEDs();
@@ -265,19 +211,6 @@ KeyboardDevice::MessageReceived(BMessage* message)
 			BHandler::MessageReceived(message);
 			break;
 	}
-#else	// !__VOS__
-	if (message->what != B_INPUT_METHOD_EVENT) {
-		BHandler::MessageReceived(message);
-		return;
-	}
-
-	int32 opcode;
-	if (message->FindInt32("be:opcode", &opcode) != B_OK)
-		return;
-
-	if (opcode == B_INPUT_METHOD_STOPPED)
-		fInputMethodStarted = false;
-#endif	// !__VOS__
 }
 
 
@@ -287,7 +220,6 @@ KeyboardDevice::Start()
 	CALLED();
 	TRACE("name: %s\n", fDeviceRef.name);
 
-#ifdef __VOS__
 	fFD = open(fPath, O_RDWR | O_NONBLOCK);
 	if (fFD >= 0) {
 		if (libevdev_new_from_fd(fFD, &fInputHandle) < 0) {
@@ -302,12 +234,6 @@ KeyboardDevice::Start()
 	if (fFD < 0) {
 		// Control thread handles device open errors
 		fFD = errno > 0 ? -errno : -1;
-#else	// !__VOS__
-	fFD = open(fPath, O_RDWR);
-	if (fFD < 0) {
-		// let the control thread handle any error on opening the device
-		fFD = errno;
-#endif	// !__VOS__
 	}
 
 	char threadName[B_OS_NAME_LENGTH];
@@ -333,7 +259,6 @@ KeyboardDevice::Stop()
 
 	fActive = false;
 
-#ifdef __VOS__
 	// Release any modifiers this node was holding before tearing xkb down,
 	// so a re-open or unplug cannot leave Shift latched in apps.
 	_WithdrawSeatModifiers();
@@ -375,16 +300,6 @@ KeyboardDevice::Stop()
 			status_t dummy;
 			wait_for_thread(fThread, &dummy);
 		}
-#else	// !__VOS__
-	close(fFD);
-	fFD = -1;
-
-	if (fThread >= 0) {
-		suspend_thread(fThread);
-		resume_thread(fThread);
-		status_t dummy;
-		wait_for_thread(fThread, &dummy);
-#endif	// !__VOS__
 	}
 }
 
@@ -397,7 +312,6 @@ KeyboardDevice::UpdateSettings(uint32 opcode)
 	if (fThread < 0)
 		return B_ERROR;
 
-#ifdef __VOS__
 	atomic_set(&fSettingsCommand, (int32)opcode);
 
 	return B_OK;
@@ -430,11 +344,6 @@ KeyboardDevice::GetDescription(BMessage* message) const
 	if (!model.IsEmpty())
 		message->AddString("short_description", model);
 	message->AddInt32("role", role);
-#else	// !__VOS__
-	// schedule updating the settings from within the control thread
-	fSettingsCommand = opcode;
-	fUpdateSettings = true;
-#endif	// !__VOS__
 
 	return B_OK;
 }
@@ -443,7 +352,6 @@ KeyboardDevice::GetDescription(BMessage* message) const
 // #pragma mark - control thread
 
 
-#ifdef __VOS__
 // KEY_POWER is below 0x80, where key codes are legacy ones; report it
 // above that range so it cannot collide.
 static const uint32 kPowerKeyCode = KEY_POWER + 0x100;
@@ -516,7 +424,6 @@ static const EvdevHaikuChar kSpecialKeys[] = {
 };
 
 
-#endif	// __VOS__
 /*static*/ int32
 KeyboardDevice::_ControlThreadEntry(void* arg)
 {
@@ -539,7 +446,6 @@ KeyboardDevice::_ControlThread()
 		return B_ERROR;
 	}
 
-#ifdef __VOS__
 	if (fXkbState == NULL)
 		return B_ERROR;
 
@@ -597,12 +503,6 @@ KeyboardDevice::_ControlThread()
 	uint32 vtSwallowKey = 0;
 
 	raw_key_info keyInfo;
-#else	// !__VOS__
-	_UpdateSettings(0);
-
-	raw_key_info keyInfo;
-	uint8 activeDeadKey = 0;
-#endif	// !__VOS__
 	uint32 lastKeyCode = 0;
 	uint32 repeatCount = 1;
 	uint8 states[16];
@@ -610,7 +510,6 @@ KeyboardDevice::_ControlThread()
 
 	memset(states, 0, sizeof(states));
 
-#ifdef __VOS__
 	// Roles come from keymap, not fixed keys; ctrl-mode swaps them
 
 	// A re-opened node learns held keys on the first idle pass; keep this
@@ -824,44 +723,6 @@ KeyboardDevice::_ControlThread()
 		// owns them, which holds only while this device is not grabbed.
 		if ((ev.code == KEY_POWER || ev.code == KEY_RESTART) && ev.value == 2)
 			continue;
-#else	// !__VOS__
-	if (fKeyboardID == 0) {
-		if (ioctl(fFD, KB_GET_KEYBOARD_ID, &fKeyboardID,
-				sizeof(fKeyboardID)) == 0) {
-			BMessage message(IS_SET_KEYBOARD_ID);
-			message.AddInt16("id", fKeyboardID);
-			be_app->PostMessage(&message);
-		}
-	}
-
-	while (fActive) {
-		status_t status = ioctl(fFD, KB_READ, &keyInfo, sizeof(keyInfo));
-		if (status < 0)
-			status = errno;
-
-		if (status == B_INTERRUPTED)
-			continue;
-		if (status == B_BUSY) {
-			// probably the debugger is listening to key events, wait and try
-			// again
-			snooze(100000);
-			continue;
-		}
-		if (status != B_OK) {
-			_ControlThreadCleanup();
-			// TOAST!
-			return 0;
-		}
-
-		// Update the settings from this thread if necessary
-		if (fUpdateSettings) {
-			_UpdateSettings(fSettingsCommand);
-			fUpdateSettings = false;
-		}
-
-		uint32 keycode = keyInfo.keycode;
-		bool isKeyDown = keyInfo.is_keydown;
-#endif	// !__VOS__
 
 		LOG_EVENT("KB_READ: %" B_PRIdBIGTIME ", %02x, %02" B_PRIx32 "\n",
 			keyInfo.timestamp, isKeyDown, keycode);
@@ -869,11 +730,7 @@ KeyboardDevice::_ControlThread()
 		if (keycode == 0)
 			continue;
 
-#ifdef __VOS__
 		if (isKeyDown && keycode == 139 /* KEY_MENU */) {
-#else	// !__VOS__
-		if (isKeyDown && keycode == 0x68) {
-#endif	// !__VOS__
 			// MENU KEY for Tracker
 			bool noOtherKeyPressed = true;
 			for (int32 i = 0; i < 16; i++) {
@@ -890,7 +747,6 @@ KeyboardDevice::_ControlThread()
 			}
 		}
 
-#ifdef __VOS__
 		uint32 haikuKey = linux_to_haiku_keycode(keycode);
 
 		// Repair: ev.value==1 is first press (not repeat); if key already down, we missed UP event
@@ -907,16 +763,6 @@ KeyboardDevice::_ControlThread()
 		}
 
 		if (isKeyDown && keycode == 111 /* KEY_DELETE */
-#else	// !__VOS__
-		if (keycode < 256) {
-			if (isKeyDown)
-				states[(keycode) >> 3] |= (1 << (7 - (keycode & 0x7)));
-			else
-				states[(keycode) >> 3] &= (~(1 << (7 - (keycode & 0x7))));
-		}
-
-		if (isKeyDown && keycode == 0x34 // DELETE KEY
-#endif	// !__VOS__
 			&& (states[fCommandKey >> 3] & (1 << (7 - (fCommandKey & 0x7))))
 			&& (states[fControlKey >> 3] & (1 << (7 - (fControlKey & 0x7))))) {
 			LOG_EVENT("TeamMonitor called\n");
@@ -938,7 +784,6 @@ KeyboardDevice::_ControlThread()
 				fOwner->fTeamMonitorWindow->PostMessage(&message);
 			}
 
-#ifdef __VOS__
 #define _CADBIT(c) ((states[(c) >> 3] & (1 << (7 - ((c) & 7)))) != 0)
 			bool delHeld = _CADBIT(linux_to_haiku_keycode(111));
 			bool ctrlHeld = _CADBIT(fControlKey);
@@ -1088,73 +933,6 @@ KeyboardDevice::_ControlThread()
 				numBytes = 1;
 			}
 		}
-#else	// !__VOS__
-			if (!isKeyDown)
-				ctrlAltDelPressed = false;
-		}
-
-		BAutolock lock(fKeymapLock);
-
-		uint32 modifiers = fKeymap.Modifier(keycode);
-		bool isLock
-			= (modifiers & (B_CAPS_LOCK | B_NUM_LOCK | B_SCROLL_LOCK)) != 0;
-		if (modifiers != 0 && (!isLock || isKeyDown)) {
-			uint32 oldModifiers = fModifiers;
-
-			if ((isKeyDown && !isLock)
-				|| (isKeyDown && !(fModifiers & modifiers)))
-				fModifiers |= modifiers;
-			else {
-				fModifiers &= ~modifiers;
-
-				// ensure that we don't clear a combined B_*_KEY when still
-				// one of the individual B_{LEFT|RIGHT}_*_KEY is pressed
-				if (fModifiers & (B_LEFT_SHIFT_KEY | B_RIGHT_SHIFT_KEY))
-					fModifiers |= B_SHIFT_KEY;
-				if (fModifiers & (B_LEFT_COMMAND_KEY | B_RIGHT_COMMAND_KEY))
-					fModifiers |= B_COMMAND_KEY;
-				if (fModifiers & (B_LEFT_CONTROL_KEY | B_RIGHT_CONTROL_KEY))
-					fModifiers |= B_CONTROL_KEY;
-				if (fModifiers & (B_LEFT_OPTION_KEY | B_RIGHT_OPTION_KEY))
-					fModifiers |= B_OPTION_KEY;
-			}
-
-			if (fModifiers != oldModifiers) {
-				BMessage* message = new BMessage(B_MODIFIERS_CHANGED);
-				if (message == NULL)
-					continue;
-
-				message->AddInt64("when", keyInfo.timestamp);
-				message->AddInt32("be:old_modifiers", oldModifiers);
-				message->AddInt32("modifiers", fModifiers);
-				message->AddData("states", B_UINT8_TYPE, states, 16);
-
-				if (fOwner->EnqueueMessage(message) != B_OK)
-					delete message;
-
-				if (isLock)
-					_UpdateLEDs();
-			}
-		}
-
-		uint8 newDeadKey = 0;
-		if (activeDeadKey == 0 || !isKeyDown)
-			newDeadKey = fKeymap.ActiveDeadKey(keycode, fModifiers);
-
-		char* string = NULL;
-		char* rawString = NULL;
-		int32 numBytes = 0, rawNumBytes = 0;
-
-		ArrayDeleter<char> stringDeleter;
-		if (newDeadKey == 0) {
-			fKeymap.GetChars(keycode, fModifiers, activeDeadKey, &string,
-				&numBytes);
-			stringDeleter.SetTo(string);
-		}
-
-		fKeymap.GetChars(keycode, 0, 0, &rawString, &rawNumBytes);
-		ArrayDeleter<char> rawStringDeleter(rawString);
-#endif	// !__VOS__
 
 		BMessage* msg = new BMessage;
 		if (msg == NULL)
@@ -1165,7 +943,6 @@ KeyboardDevice::_ControlThread()
 		else
 			msg->what = isKeyDown ? B_UNMAPPED_KEY_DOWN : B_UNMAPPED_KEY_UP;
 
-#ifdef __VOS__
 		uint32 msgKey = (haikuKey != 0) ? haikuKey
 			: (keycode >= 0x80 ? keycode : 0);
 		if (keycode == KEY_POWER)
@@ -1202,21 +979,6 @@ KeyboardDevice::_ControlThread()
 			if (rawChar == 0x0d)
 				rawChar = B_ENTER;
 			msg->AddInt32("raw_char", (int32)rawChar);
-#else	// !__VOS__
-		msg->AddInt64("when", keyInfo.timestamp);
-		msg->AddInt32("key", keycode);
-		msg->AddInt32("modifiers", fModifiers);
-		msg->AddData("states", B_UINT8_TYPE, states, 16);
-		if (numBytes > 0) {
-			for (int i = 0; i < numBytes; i++)
-				msg->AddInt8("byte", (int8)string[i]);
-			msg->AddData("bytes", B_STRING_TYPE, string, numBytes + 1);
-
-			if (rawNumBytes <= 0) {
-				rawNumBytes = 1;
-				rawString = string;
-			}
-#endif	// !__VOS__
 
 			if (isKeyDown && lastKeyCode == keycode) {
 				repeatCount++;
@@ -1225,38 +987,6 @@ KeyboardDevice::_ControlThread()
 				repeatCount = 1;
 		}
 
-#ifndef __VOS__
-		if (rawNumBytes > 0)
-			msg->AddInt32("raw_char", (uint32)((uint8)rawString[0] & 0x7f));
-
-		if (newDeadKey == 0) {
-			if (isKeyDown && !modifiers && activeDeadKey != 0) {
-				// a dead key was completed
-				activeDeadKey = 0;
-				if (fInputMethodStarted) {
-					_EnqueueInlineInputMethod(B_INPUT_METHOD_CHANGED,
-						string, true, msg);
-					_EnqueueInlineInputMethod(B_INPUT_METHOD_STOPPED);
-					fInputMethodStarted = false;
-					msg = NULL;
-				}
-			}
-		} else if (isKeyDown
-			&& _EnqueueInlineInputMethod(B_INPUT_METHOD_STARTED) == B_OK) {
-			// start of a dead key
-			char* string = NULL;
-			int32 numBytes = 0;
-			fKeymap.GetChars(keycode, fModifiers, 0, &string, &numBytes);
-
-			if (_EnqueueInlineInputMethod(B_INPUT_METHOD_CHANGED, string)
-					== B_OK)
-				fInputMethodStarted = true;
-
-			activeDeadKey = newDeadKey;
-			delete[] string;
-		}
-
-#endif	// !__VOS__
 		if (msg != NULL && fOwner->EnqueueMessage(msg) != B_OK)
 			delete msg;
 
@@ -1270,7 +1000,6 @@ KeyboardDevice::_ControlThread()
 void
 KeyboardDevice::_ControlThreadCleanup()
 {
-#ifdef __VOS__
 	// Called from control thread on error only.
 	//
 	// Do NOT pre-clear fThread here: Stop() (invoked from the delete this
@@ -1717,55 +1446,6 @@ KeyboardDevice::_UpdateSettings(uint32 pending)
 			// updated settings file so subsequent key events use the new layout.
 			_RebuildXkb();
 		}
-#else	// !__VOS__
-	// NOTE: Only executed when the control thread detected an error
-	// and from within the control thread!
-
-	if (fActive) {
-		fThread = -1;
-		fOwner->_RemoveDevice(fPath);
-	} else {
-		// In case active is already false, another thread
-		// waits for this thread to quit, and may already hold
-		// locks that _RemoveDevice() wants to acquire. In another
-		// words, the device is already being removed, so we simply
-		// quit here.
-	}
-}
-
-
-void
-KeyboardDevice::_UpdateSettings(uint32 opcode)
-{
-	CALLED();
-
-	if (opcode == 0 || opcode == B_KEY_REPEAT_RATE_CHANGED) {
-		if (get_key_repeat_rate(&fSettings.key_repeat_rate) != B_OK) {
-			LOG_ERR("error when get_key_repeat_rate\n");
-		} else if (ioctl(fFD, KB_SET_KEY_REPEAT_RATE,
-				&fSettings.key_repeat_rate, sizeof(int32)) != B_OK) {
-			LOG_ERR("error when KB_SET_KEY_REPEAT_RATE, fd:%d\n", fFD);
-		}
-	}
-
-	if (opcode == 0 || opcode == B_KEY_REPEAT_DELAY_CHANGED) {
-		if (get_key_repeat_delay(&fSettings.key_repeat_delay) != B_OK) {
-			LOG_ERR("error when get_key_repeat_delay\n");
-		} else if (ioctl(fFD, KB_SET_KEY_REPEAT_DELAY,
-				&fSettings.key_repeat_delay, sizeof(bigtime_t)) != B_OK) {
-			LOG_ERR("error when KB_SET_KEY_REPEAT_DELAY, fd:%d\n", fFD);
-		}
-	}
-
-	if (opcode == 0 || opcode == B_KEY_MAP_CHANGED
-		|| opcode == B_KEY_LOCKS_CHANGED) {
-		BAutolock lock(fKeymapLock);
-		fKeymap.RetrieveCurrent();
-		fModifiers = fKeymap.Map().lock_settings;
-		_UpdateLEDs();
-		fControlKey = fKeymap.KeyForModifier(B_LEFT_CONTROL_KEY);
-		fCommandKey = fKeymap.KeyForModifier(B_LEFT_COMMAND_KEY);
-#endif	// !__VOS__
 	}
 }
 
@@ -1776,7 +1456,6 @@ KeyboardDevice::_UpdateLEDs()
 	if (fFD < 0)
 		return;
 
-#ifdef __VOS__
 	struct input_event leds[3] = {};
 	leds[0].type = EV_LED; leds[0].code = LED_NUML;
 	leds[0].value = (fModifiers & B_NUM_LOCK)    ? 1 : 0;
@@ -1785,18 +1464,6 @@ KeyboardDevice::_UpdateLEDs()
 	leds[2].type = EV_LED; leds[2].code = LED_SCROLLL;
 	leds[2].value = (fModifiers & B_SCROLL_LOCK) ? 1 : 0;
 	write(fFD, leds, sizeof(leds));
-#else	// !__VOS__
-	char lockIO[3] = {0, 0, 0};
-
-	if ((fModifiers & B_NUM_LOCK) != 0)
-		lockIO[0] = 1;
-	if ((fModifiers & B_CAPS_LOCK) != 0)
-		lockIO[1] = 1;
-	if ((fModifiers & B_SCROLL_LOCK) != 0)
-		lockIO[2] = 1;
-
-	ioctl(fFD, KB_SET_LEDS, &lockIO, sizeof(lockIO));
-#endif	// !__VOS__
 }
 
 
@@ -1835,14 +1502,10 @@ KeyboardInputDevice::KeyboardInputDevice()
 	:
 	fDevices(2),
 	fDeviceListLock("KeyboardInputDevice list"),
-#ifdef __VOS__
 	fTeamMonitorWindow(NULL),
 	fSeatModifiers(0),
 	fSeatModifierLock("keyboard seat modifiers"),
 	fSeatEnabled(true)
-#else	// !__VOS__
-	fTeamMonitorWindow(NULL)
-#endif	// !__VOS__
 {
 	CALLED();
 
@@ -1861,7 +1524,6 @@ KeyboardInputDevice::~KeyboardInputDevice()
 	}
 
 	StopMonitoringDevice(kKeyboardDevicesDirectory);
-#ifdef __VOS__
 
 	// Detach every device under the lock, then delete them outside it:
 	// ~KeyboardDevice() may join a control thread via Stop(), and joining
@@ -1888,9 +1550,6 @@ KeyboardInputDevice::~KeyboardInputDevice()
 
 		delete device;
 	}
-#else	// !__VOS__
-	fDevices.MakeEmpty();
-#endif	// !__VOS__
 }
 
 
@@ -1947,7 +1606,6 @@ KeyboardInputDevice::Control(const char* name, void* cookie,
 		command);
 
 	if (command == B_NODE_MONITOR)
-#ifdef __VOS__
 		return _HandleMonitor(message);
 	else if (command >= B_KEY_MAP_CHANGED
 		&& command <= B_KEY_REPEAT_RATE_CHANGED) {
@@ -1963,13 +1621,6 @@ KeyboardInputDevice::Control(const char* name, void* cookie,
 		if (device == NULL)
 			return B_OK;
 		device->HandleSeatMessage(command);
-#else	// !__VOS__
-		_HandleMonitor(message);
-	else if (command >= B_KEY_MAP_CHANGED
-		&& command <= B_KEY_REPEAT_RATE_CHANGED) {
-		KeyboardDevice* device = (KeyboardDevice*)cookie;
-		device->UpdateSettings(command);
-#endif	// !__VOS__
 	}
 	return B_OK;
 }
@@ -2018,7 +1669,6 @@ KeyboardInputDevice::_AddDevice(const char* path)
 	CALLED();
 	TRACE("path: %s\n", path);
 
-#ifdef __VOS__
 	// The node monitor hands us any entry under /dev/input, not just
 	// device nodes.
 	struct stat st;
@@ -2068,16 +1718,6 @@ KeyboardInputDevice::_AddDevice(const char* path)
 
 	device->SetDescription(description.String());
 
-#else	// !__VOS__
-	BAutolock _(fDeviceListLock);
-
-	_RemoveDevice(path);
-
-	KeyboardDevice* device = new(std::nothrow) KeyboardDevice(this, path);
-	if (device == NULL)
-		return B_NO_MEMORY;
-
-#endif	// !__VOS__
 	input_device_ref* devices[2];
 	devices[0] = device->DeviceRef();
 	devices[1] = NULL;
@@ -2088,7 +1728,6 @@ KeyboardInputDevice::_AddDevice(const char* path)
 }
 
 
-#ifdef __VOS__
 KeyboardDevice*
 KeyboardInputDevice::_DetachDevice(const char* path, const int32* serial)
 {
@@ -2129,27 +1768,12 @@ KeyboardInputDevice::_DetachDevice(const char* path, const int32* serial)
 	// so acquiring it under fDeviceListLock inverts the established
 	// order. The device is off the list but still alive here, so a
 	// callback arriving with the cookie in this window is safe.
-#else	// !__VOS__
-status_t
-KeyboardInputDevice::_RemoveDevice(const char* path)
-{
-	BAutolock _(fDeviceListLock);
-
-	KeyboardDevice* device = _FindDevice(path);
-	if (device == NULL)
-		return B_ENTRY_NOT_FOUND;
-
-	CALLED();
-	TRACE("path: %s\n", path);
-
-#endif	// !__VOS__
 	input_device_ref* devices[2];
 	devices[0] = device->DeviceRef();
 	devices[1] = NULL;
 
 	UnregisterDevices(devices);
 
-#ifdef __VOS__
 	return device;
 }
 
@@ -2174,10 +1798,6 @@ KeyboardInputDevice::_RemoveDevice(const char* path, int32 serial)
 		return B_ENTRY_NOT_FOUND;
 
 	delete device;
-#else	// !__VOS__
-	fDevices.RemoveItem(device);
-
-#endif	// !__VOS__
 	return B_OK;
 }
 
@@ -2193,7 +1813,6 @@ KeyboardInputDevice::_RecursiveScan(const char* directory)
 	while (dir.GetNextEntry(&entry) == B_OK) {
 		BPath path;
 		entry.GetPath(&path);
-#ifdef __VOS__
 		if (entry.IsDirectory()) {
 			// Skip symlink-alias subdirs that cause duplicate registrations
 			const char* name = path.Leaf();
@@ -2201,10 +1820,6 @@ KeyboardInputDevice::_RecursiveScan(const char* directory)
 				continue;
 			_RecursiveScan(path.Path());
 		}
-#else	// !__VOS__
-		if (entry.IsDirectory())
-			_RecursiveScan(path.Path());
-#endif	// !__VOS__
 		else
 			_AddDevice(path.Path());
 	}
