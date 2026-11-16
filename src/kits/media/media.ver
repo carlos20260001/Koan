@@ -1,0 +1,6 @@
+/* libmedia (air/OS Media Kit) exports every symbol under its own version
+   node, so a process that also loads libmedia2 binds each reference to the
+   library it was linked against. See CMakeLists.txt. */
+MEDIA_1 {
+	global: *;
+};

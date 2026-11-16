@@ -242,8 +242,8 @@ public:
 
 	xfer_entry_ref& operator=(const entry_ref& ref)
 	{
-		device = ref.device;
-		directory = ref.directory;
+		device = ref.device();
+		directory = ref.directory();
 		if (ref.name == NULL)
 			name[0] = 0;
 		else if (strlen(ref.name) > B_FILE_NAME_LENGTH) {
