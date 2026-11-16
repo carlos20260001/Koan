@@ -1,8 +1,0 @@
-SubDir HAIKU_TOP src add-ons kernel drivers network ether bcm_genet ;
-
-UsePrivateKernelHeaders ;
-UsePrivateHeaders drivers net ;
-
-KernelAddon bcm_genet :
-	bcm_genet.cpp
-;

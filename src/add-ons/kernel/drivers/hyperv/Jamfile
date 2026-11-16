@@ -1,3 +1,0 @@
-SubDir HAIKU_TOP src add-ons kernel drivers hyperv ;
-
-SubInclude HAIKU_TOP src add-ons kernel drivers hyperv hyperv_ic ;

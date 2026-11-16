@@ -1,8 +1,0 @@
-SubDir HAIKU_TOP src add-ons kernel drivers video ; 
-
-SubInclude HAIKU_TOP src add-ons kernel drivers video usb_vision ;
-SubInclude HAIKU_TOP src add-ons kernel drivers video rk3588_vpu ;
-
-if $(TARGET_ARCH) = arm64 {
-	SubInclude HAIKU_TOP src add-ons kernel drivers video qcom_iris ;
-}

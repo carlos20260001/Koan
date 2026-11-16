@@ -1,8 +1,0 @@
-SubDir HAIKU_TOP src add-ons kernel drivers network ether dwc_eqos ;
-
-UsePrivateKernelHeaders ;
-UsePrivateHeaders drivers net ;
-
-KernelAddon dwc_eqos :
-	dwc_eqos.cpp
-;

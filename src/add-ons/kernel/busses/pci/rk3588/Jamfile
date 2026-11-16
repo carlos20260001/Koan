@@ -1,8 +1,0 @@
-SubDir HAIKU_TOP src add-ons kernel busses pci rk3588 ;
-
-SubDirC++Flags -fno-rtti ;
-UsePrivateKernelHeaders ;
-
-KernelAddon <pci>rk3588_firmware :
-	rk3588_firmware.cpp
-;

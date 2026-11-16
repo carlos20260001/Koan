@@ -1,8 +1,0 @@
-SubDir HAIKU_TOP src add-ons kernel drivers network ether rp1_gem ;
-
-UsePrivateKernelHeaders ;
-UsePrivateHeaders drivers net ;
-
-KernelAddon rp1_gem :
-	rp1_gem.cpp
-;

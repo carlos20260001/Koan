@@ -1,8 +1,0 @@
-SubDir HAIKU_TOP src add-ons kernel drivers audio bcm2835 ;
-
-UsePrivateHeaders audio drivers ;
-UsePrivateKernelHeaders ;
-
-KernelAddon bcm2835_audio :
-	bcm2835_audio.cpp
-;

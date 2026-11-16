@@ -1,5 +1,0 @@
-SubDir HAIKU_TOP src add-ons kernel drivers npu rk3588_npu ;
-
-UsePrivateKernelHeaders ;
-
-KernelAddon rk3588_npu : driver.cpp ;

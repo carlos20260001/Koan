@@ -1,8 +1,0 @@
-SubDir HAIKU_TOP src add-ons kernel drivers power rpi_thermal ;
-
-UsePrivateKernelHeaders ;
-UsePrivateHeaders drivers ;
-
-KernelAddon <driver>rpi_thermal :
-	rpi_thermal.cpp
-	;

@@ -1,3 +1,0 @@
-SubDir HAIKU_TOP src add-ons kernel drivers bluetooth h4 ;
-
-SubInclude HAIKU_TOP src add-ons kernel drivers bluetooth h4 h4bcm ;

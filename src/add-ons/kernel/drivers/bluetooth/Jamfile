@@ -1,7 +1,0 @@
-SubDir HAIKU_TOP src add-ons kernel drivers bluetooth ; 
-
-SubInclude HAIKU_TOP src add-ons kernel drivers bluetooth h2 ;
-
-if $(TARGET_ARCH) = arm64 {
-	SubInclude HAIKU_TOP src add-ons kernel drivers bluetooth h4 ;
-}

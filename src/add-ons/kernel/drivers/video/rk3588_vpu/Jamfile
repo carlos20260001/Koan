@@ -1,5 +1,0 @@
-SubDir HAIKU_TOP src add-ons kernel drivers video rk3588_vpu ;
-
-UsePrivateKernelHeaders ;
-
-KernelAddon rk3588_vpu : driver.cpp ;

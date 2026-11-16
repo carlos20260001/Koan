@@ -1,8 +1,0 @@
-SubDir HAIKU_TOP src add-ons kernel debugger kdl_capture ;
-
-UsePrivateHeaders kernel ;
-UsePrivateSystemHeaders ;
-
-KernelAddon <kdebug>kdl_capture :
-	kdl_capture.cpp
-	;

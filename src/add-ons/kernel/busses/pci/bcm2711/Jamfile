@@ -1,9 +1,0 @@
-SubDir HAIKU_TOP src add-ons kernel busses pci bcm2711 ;
-
-SubDirC++Flags -fno-rtti ;
-
-UsePrivateKernelHeaders ;
-
-KernelAddon <pci>bcm2711 :
-	bcm2711_pcie.cpp
-;
