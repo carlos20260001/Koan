@@ -1,0 +1,11 @@
+#!/bin/sh
+# Boot splash stage 2: the real root is mounted; init switches to it next.
+PREREQ=""
+prereqs() { echo "$PREREQ"; }
+case "$1" in
+	prereqs) prereqs; exit 0 ;;
+esac
+
+[ -x /bin/vos-splash ] || exit 0
+/bin/vos-splash --stage 2 || true
+exit 0

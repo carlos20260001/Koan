@@ -323,3 +323,6 @@ add_custom_target(templates_attrs ALL
 )
 
 install(FILES "${_TPL_TAR}" DESTINATION /usr/share/vos COMPONENT data)
+
+# Boot splash (vos-splash) and its boot integration.
+include(${CMAKE_CURRENT_LIST_DIR}/splash.cmake)

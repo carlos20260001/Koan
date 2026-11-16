@@ -1,0 +1,26 @@
+#!/bin/sh
+# Boot splash stage 1: start the daemon, once udev has brought up the
+# firmware frame buffer. Only on `splash` boots: the Safe Mode, Recovery and
+# SSH Debug entries keep the text console.
+PREREQ="udev"
+prereqs() { echo "$PREREQ"; }
+case "$1" in
+	prereqs) prereqs; exit 0 ;;
+esac
+
+[ -x /bin/vos-splash ] || exit 0
+
+_splash=
+for _arg in $(cat /proc/cmdline); do
+	case "$_arg" in
+		splash) _splash=y ;;
+		nosplash) _splash= ;;
+	esac
+done
+[ -n "$_splash" ] || exit 0
+
+# Returns once the splash is on screen, or at once without a display. The
+# daemon outlives run-init, like plymouthd; /run moves to the real root
+# with its FIFO.
+/bin/vos-splash --daemon --lit 1 || true
+exit 0

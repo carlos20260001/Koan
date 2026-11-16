@@ -1,0 +1,18 @@
+# The air/OS boot splash on the real root. Normally the daemon started in
+# the initramfs is still running (it survives the switch to the real root)
+# and this exits at once. If it is not (an initramfs built without the
+# hook, or no frame buffer before the GPU driver loaded), this starts one
+# that redraws the splash with the stages the boot already passed lit.
+[Unit]
+Description=air/OS boot splash
+DefaultDependencies=no
+ConditionKernelCommandLine=splash
+ConditionKernelCommandLine=!nosplash
+After=systemd-udev-trigger.service local-fs.target
+Before=shutdown.target
+Conflicts=shutdown.target
+
+[Service]
+Type=forking
+ExecStart=/usr/libexec/vos-splash --daemon --lit 2
+RemainAfterExit=yes
