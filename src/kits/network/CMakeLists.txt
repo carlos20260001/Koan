@@ -1,3 +1,16 @@
+# ported subset: the plain build container has no libnm-dev (the bake
+# chroot installs it from build/deps.cmake). Without it the kit is left out
+# of be, with a warning, so configure stays usable; upstream requires it.
+find_package(PkgConfig)
+if(PKG_CONFIG_FOUND)
+	pkg_check_modules(LIBNM libnm)
+endif()
+if(NOT LIBNM_FOUND)
+	message(WARNING "network kit: libnm not found (libnm-dev); the network "
+		"kit is left out of be")
+	return()
+endif()
+
 target_sources(be PRIVATE
 	libnetapi/AbstractSocket.cpp
 	libnetapi/Certificate.cpp
@@ -12,6 +25,7 @@ target_sources(be PRIVATE
 	libnetapi/NetworkDevice.cpp
 	libnetapi/NetworkInterface.cpp
 	libnetapi/NetworkRoster.cpp
+	libnetapi/NetworkRoute.cpp
 	libnetapi/NMBackend.cpp
 	libnetapi/ModemManagerBackend.cpp
 	libnetapi/NetworkSettings.cpp
@@ -43,8 +57,8 @@ target_sources(be PRIVATE
 	libnetservices/UrlResult.cpp
 	libnetservices/UrlSynchronousRequest.cpp
 
-	# libnetservices2 (BHttpSession et al.) has zero consumers anywhere in
-	# the tree, unlike libnetservices (used by Geolocation.cpp) -- disabled.
+	# libnetservices2 (BHttpSession et al.) is the netservices2 static
+	# library below, not part of be.
 )
 
 target_compile_definitions(be PRIVATE OPENSSL_ENABLED)
@@ -71,3 +85,30 @@ if(PKG_CONFIG_FOUND)
 		target_compile_options(be PRIVATE ${LIBNM_CFLAGS_OTHER})
 	endif()
 endif()
+
+# air/OS: libnetservices2 (BHttpSession) stays a static library of its own,
+# as in Haiku, so its HttpRequest.h/HttpResult.h/HttpTime.h never meet
+# libnetservices' headers of the same names on be's include path. Its
+# consumers are the netservices2 tests.
+AddOn(
+	netservices2
+	STATIC
+
+	SOURCES
+	libnetservices2/ErrorsExt.cpp
+	libnetservices2/HttpBuffer.cpp
+	libnetservices2/HttpFields.cpp
+	libnetservices2/HttpParser.cpp
+	libnetservices2/HttpRequest.cpp
+	libnetservices2/HttpResult.cpp
+	libnetservices2/HttpSerializer.cpp
+	libnetservices2/HttpSession.cpp
+	libnetservices2/HttpTime.cpp
+	libnetservices2/NetServicesMisc.cpp
+)
+
+target_include_directories(netservices2 PRIVATE
+	${CMAKE_SOURCE_DIR}/headers/private/netservices2
+)
+UsePrivateHeaders(netservices2 net shared support)
+target_compile_options(netservices2 PRIVATE -std=c++17)
