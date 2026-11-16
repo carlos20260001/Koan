@@ -18,7 +18,7 @@ Application Shortcuts :
 
 
 DoCatalogs Shortcuts :
-	x-vnd.Haiku-Shortcuts
+	x-vnd.vos-Shortcuts
 	:
 	ShortcutsApp.cpp
 	ShortcutsWindow.cpp

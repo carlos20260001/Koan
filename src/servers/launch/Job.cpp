@@ -656,7 +656,7 @@ Job::_CreateAndTransferPorts()
 
 		iterator->second.SetInt32("port", port);
 
-		if (name == "x-vnd.haiku-registrar:auth") {
+		if (name == "x-vnd.vos-registrar:auth") {
 			// Allow the launch_daemon to access the registrar authentication
 			BPrivate::set_registrar_authentication_port(port);
 		}

@@ -16,7 +16,7 @@ Application desklink :
 ;
 
 DoCatalogs desklink :
-	x-vnd.Haiku-desklink
+	x-vnd.vos-desklink
 	:
 	DeskButton.cpp
 	MediaReplicant.cpp

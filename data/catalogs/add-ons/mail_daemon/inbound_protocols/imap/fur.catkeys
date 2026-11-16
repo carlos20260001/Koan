@@ -1,4 +1,4 @@
-1	friulian	x-vnd.Haiku-IMAP	1343128980
+1	friulian	x-vnd.vos-IMAP	1343128980
 Could not connect to server \"%server%\":\n%error%	IMAPFolderConfig		Impussibil conetisi al servidôr \"%server%\":\n%error%
 Updating subscriptions to IMAP folders, please be patient…	IMAPFolderConfig		Inzornament sotscrizions aes cartelis IMAP, puarte pazience…
 Failed to fetch available storage.	IMAPFolderConfig		No si è rivâts a tirâ dongje memorie disponibile.

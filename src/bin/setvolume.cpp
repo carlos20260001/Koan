@@ -64,7 +64,7 @@ showVolume(BContinuousParameter *gain, BParameter *muteParameter)
 int
 main(int argc, char **argv)
 {
-	BApplication app("application/x-vnd.haiku.setvolume");
+	BApplication app("application/x-vnd.vos.setvolume");
 
 	BMediaRoster *roster = BMediaRoster::Roster();
 	if (roster == NULL) {

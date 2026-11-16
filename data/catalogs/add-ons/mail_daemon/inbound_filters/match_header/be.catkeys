@@ -1,4 +1,4 @@
-1	belarusian	x-vnd.Haiku-MatchHeader	2024597924
+1	belarusian	x-vnd.vos-MatchHeader	2024597924
 Delete message	ConfigView		Выдаліць паведамленне
 Match \"%attribute\" against \"%regex\"	RuleFilter		Супадае \"%attribute\" з \"%regex\"
 Match header	RuleFilter		Супадаючы загаловак

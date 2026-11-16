@@ -1104,8 +1104,8 @@ TermView::_NotificationIcon(const TermNotification& notification)
 		{ "question", "dialog-idea", NULL },
 		{ "help", "dialog-idea", NULL },
 		{ "file-manager", NULL, "application/x-vnd.Be-TRAK" },
-		{ "system-monitor", NULL, "application/x-vnd.Haiku-ActivityMonitor" },
-		{ "text-editor", NULL, "application/x-vnd.Haiku-StyledEdit" }
+		{ "system-monitor", NULL, "application/x-vnd.vos-ActivityMonitor" },
+		{ "text-editor", NULL, "application/x-vnd.vos-StyledEdit" }
 	};
 
 	BRect bounds(BPoint(0, 0), be_control_look->ComposeIconSize(32));

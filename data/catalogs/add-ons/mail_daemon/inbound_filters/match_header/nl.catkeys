@@ -1,4 +1,4 @@
-1	dutch; flemish	x-vnd.Haiku-MatchHeader	1946584206
+1	dutch; flemish	x-vnd.vos-MatchHeader	1946584206
 Delete message	ConfigView		Bericht verwijderen
 Match \"%attribute\" against \"%regex\"	RuleFilter		Match \"%attribute\" tegen \"%regex\"
 Match header	RuleFilter		Header matchen

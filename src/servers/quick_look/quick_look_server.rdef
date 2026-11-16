@@ -1,4 +1,4 @@
-resource app_signature "application/x-vnd.Haiku-quick_look_server";
+resource app_signature "application/x-vnd.vos-quick_look_server";
 
 resource app_flags B_EXCLUSIVE_LAUNCH | B_BACKGROUND_APP;
 

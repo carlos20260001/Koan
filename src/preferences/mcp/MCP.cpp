@@ -138,7 +138,7 @@ private:
 
 class MCPApplication : public BApplication {
 public:
-	MCPApplication() : BApplication("application/x-vnd.Haiku-MCP"), fWindow(NULL) {}
+	MCPApplication() : BApplication("application/x-vnd.vos-MCP"), fWindow(NULL) {}
 	virtual void ReadyToRun()
 	{
 		fWindow = new MCPWindow;

@@ -2,7 +2,7 @@
  * IMAP.rdef
  */
 
-resource app_signature "application/x-vnd.Haiku-IMAP";
+resource app_signature "application/x-vnd.vos-IMAP";
 
 resource app_version {
 	major  = 1,

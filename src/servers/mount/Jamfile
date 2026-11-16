@@ -14,7 +14,7 @@ Application mount_server
 ;
 
 DoCatalogs mount_server :
-	x-vnd.Haiku-mount_server
+	x-vnd.vos-mount_server
 	:
 	AutoMounter.cpp
 	NetworkShares.cpp

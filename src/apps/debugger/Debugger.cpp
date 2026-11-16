@@ -46,7 +46,7 @@ extern const char* __progname;
 const char* kProgramName = __progname;
 
 static const char* const kDebuggerSignature
-	= "application/x-vnd.Haiku-Debugger";
+	= "application/x-vnd.vos-Debugger";
 
 
 static const char* const kUsage =

@@ -1,4 +1,4 @@
-1	french	x-vnd.Haiku-Mail	2750130554
+1	french	x-vnd.vos-Mail	2750130554
 Account settings	AutoConfigWindow		Réglages du compte
 \t\t· Outgoing	Config Window		\t\tEn partance
 An error occurred while creating the config view: %error.	Config Views		Une erreur est survenue durant la création de la vue de configuration : %error.

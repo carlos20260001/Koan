@@ -100,7 +100,7 @@ int
 main(int argc, char** argv)
 {
 	setvbuf(stdout, NULL, _IOLBF, 0);
-	BApplication app("application/x-vnd.Haiku-direct-window-burst-test");
+	BApplication app("application/x-vnd.vos-direct-window-burst-test");
 	sCount = argc > 1 ? atoi(argv[1]) : 8;
 	sSlow = argc > 2 && strcmp(argv[2], "slow") == 0;
 

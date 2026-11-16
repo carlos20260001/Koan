@@ -522,7 +522,7 @@ ShouldGenerateThumbnail(const char* type)
 	BString string(type);
 	if (string.Length() == 0 || string == B_FILE_MIME_TYPE
 		|| string.IStartsWith("application/x-vnd.be")
-		|| string.IStartsWith("application/x-vnd.haiku")
+		|| string.IStartsWith("application/x-vnd.vos")
 		|| string == "application/x-vnd.Be-elfexecutable") {
 		// executables, folders, queries, people files: their icons say more
 		return false;

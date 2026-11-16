@@ -70,7 +70,7 @@ public:
 int
 main(int argc, char** argv)
 {
-	BApplication app("application/x-vnd.Haiku-wheel-log");
+	BApplication app("application/x-vnd.vos-wheel-log");
 	bigtime_t duration = (argc > 1 ? atoi(argv[1]) : 30) * 1000000LL;
 
 	BRect frame(100, 100, 1100, 800);

@@ -10,10 +10,10 @@
 	/var/tmp/url-catcher.log, and quits. Registering it needs a
 	writable MIME database (not a live CD):
 
-		addattr -t mime BEOS:APP_SIG application/x-vnd.Haiku-URLCatcher \
+		addattr -t mime BEOS:APP_SIG application/x-vnd.vos-URLCatcher \
 			URLCatcher
 		setmime -set application/x-vnd.Be.URL.https \
-			-preferredAppSig application/x-vnd.Haiku-URLCatcher
+			-preferredAppSig application/x-vnd.vos-URLCatcher
 */
 
 
@@ -27,7 +27,7 @@ class URLCatcher : public BApplication {
 public:
 	URLCatcher()
 		:
-		BApplication("application/x-vnd.Haiku-URLCatcher")
+		BApplication("application/x-vnd.vos-URLCatcher")
 	{
 	}
 

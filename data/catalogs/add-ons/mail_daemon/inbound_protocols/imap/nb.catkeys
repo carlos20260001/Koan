@@ -1,4 +1,4 @@
-1	bokmål, norwegian; norwegian bokmål	x-vnd.Haiku-IMAP	1343128980
+1	bokmål, norwegian; norwegian bokmål	x-vnd.vos-IMAP	1343128980
 Could not connect to server \"%server%\":\n%error%	IMAPFolderConfig		Kunne ikke koble til serveren \"%server%\":\n%error%
 Updating subscriptions to IMAP folders, please be patient…	IMAPFolderConfig		Oppdaterer abonnementer på IMAP-mapper, vær tålmodig…
 Failed to fetch available storage.	IMAPFolderConfig		Kunne ikke innhente tilgjengelig lagringsplass.

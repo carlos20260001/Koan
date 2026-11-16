@@ -1,4 +1,4 @@
-1	english	x-vnd.Haiku-SMTP	815985329
+1	english	x-vnd.vos-SMTP	815985329
 POP3 authentication failed. The server said:\n	smtp		POP3認證失敗。伺服器返回:\n
 Destination:	ConfigView		訊息儲存至:
 Error while logging in to %serv	smtp		在登入至 %serv 時發生錯誤

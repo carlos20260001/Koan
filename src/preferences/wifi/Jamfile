@@ -16,7 +16,7 @@ Application WiFi :
 ;
 
 DoCatalogs WiFi :
-	x-vnd.Haiku-WiFi
+	x-vnd.vos-WiFi
 	:
 	WiFi.cpp
 	WiFiWindow.cpp

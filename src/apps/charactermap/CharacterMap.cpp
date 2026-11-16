@@ -16,7 +16,7 @@
 #undef B_TRANSLATION_CONTEXT
 #define B_TRANSLATION_CONTEXT "CharacterMap"
 
-const char* kSignature = "application/x-vnd.Haiku-CharacterMap";
+const char* kSignature = "application/x-vnd.vos-CharacterMap";
 
 
 CharacterMap::CharacterMap()

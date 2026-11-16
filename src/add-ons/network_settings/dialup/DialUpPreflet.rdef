@@ -1,4 +1,4 @@
-resource app_signature "application/x-vnd.Haiku-DialUpInterface";
+resource app_signature "application/x-vnd.vos-DialUpInterface";
 
 resource app_version {
 	major  = 1,

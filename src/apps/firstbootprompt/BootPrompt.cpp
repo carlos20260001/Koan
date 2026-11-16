@@ -31,7 +31,7 @@ main(int, char **)
 // #pragma mark -
 
 
-const char* kAppSignature = "application/x-vnd.Haiku-FirstBootPrompt";
+const char* kAppSignature = "application/x-vnd.vos-FirstBootPrompt";
 const char* kDeskbarSignature = "application/x-vnd.Be-TSKB";
 
 

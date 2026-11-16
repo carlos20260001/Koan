@@ -9,7 +9,7 @@
 /*!	The protocol between a client (Tracker) and the quick_look server. */
 
 
-#define B_QUICK_LOOK_SIGNATURE "application/x-vnd.Haiku-quick_look_server"
+#define B_QUICK_LOOK_SIGNATURE "application/x-vnd.vos-quick_look_server"
 
 
 enum {

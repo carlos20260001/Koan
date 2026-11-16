@@ -326,7 +326,7 @@ record_once(const media_node& mixer, bigtime_t duration, bool tone,
 int
 main(int argc, char** argv)
 {
-	BApplication app("application/x-vnd.Haiku-mixer-monitor-test");
+	BApplication app("application/x-vnd.vos-mixer-monitor-test");
 	BMediaRoster* roster = BMediaRoster::Roster();
 	media_node mixer;
 	status_t status = roster->GetAudioMixer(&mixer);

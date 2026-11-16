@@ -83,7 +83,7 @@ PackageIconDefaultRepository::_InitDefaultVectorIcon()
 
 	fVectorDataSize = 0;
 
-	BMimeType mimeType("application/x-vnd.haiku-package");
+	BMimeType mimeType("application/x-vnd.vos-package");
 	status_t status = mimeType.InitCheck();
 
 	if (status != B_OK)

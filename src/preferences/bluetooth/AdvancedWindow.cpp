@@ -49,7 +49,7 @@ OpenLELog()
 	// The log has no file type; open it in the text editor directly.
 	BMessage refs(B_REFS_RECEIVED);
 	refs.AddRef("refs", &ref);
-	if (be_roster->Launch("application/x-vnd.Haiku-StyledEdit", &refs)
+	if (be_roster->Launch("application/x-vnd.vos-StyledEdit", &refs)
 			!= B_OK)
 		be_roster->Launch(&ref);
 }

@@ -1,4 +1,4 @@
-1	romanian	x-vnd.Haiku-SMTP	815985329
+1	romanian	x-vnd.vos-SMTP	815985329
 POP3 authentication failed. The server said:\n	smtp		Autentificarea POP3 a eșuat. Serverul a spus:\n
 Destination:	ConfigView		Destinație:
 Error while logging in to %serv	smtp		Eroare în timpul autentificării la %serv

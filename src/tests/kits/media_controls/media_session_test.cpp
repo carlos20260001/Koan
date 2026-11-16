@@ -217,7 +217,7 @@ send_action(int32 action, int64 session = -1, bigtime_t position = -1)
 static int
 run_child()
 {
-	BApplication app("application/x-vnd.Haiku-media_session_test-child");
+	BApplication app("application/x-vnd.vos-media_session_test-child");
 	BLooper* looper = new BLooper("child receiver");
 	Receiver* receiver = new Receiver("child");
 	looper->AddHandler(receiver);
@@ -243,7 +243,7 @@ main(int argc, char** argv)
 	if (argc > 1 && strcmp(argv[1], "child") == 0)
 		return run_child();
 
-	BApplication app("application/x-vnd.Haiku-media_session_test");
+	BApplication app("application/x-vnd.vos-media_session_test");
 	team_id team = app.Team();
 
 	BMessage state;

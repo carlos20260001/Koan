@@ -289,7 +289,7 @@ int main(int argc, char** argv)
 {
 	if (argc < 2)
 		return 2;
-	BApplication app("application/x-vnd.haiku-fractionalscale-test");
+	BApplication app("application/x-vnd.vos-fractionalscale-test");
 	TestWindow* window = new TestWindow(argc > 3 ? atof(argv[3]) : 1);
 	window->Show();
 	snooze(1000000);

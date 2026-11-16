@@ -801,7 +801,7 @@ main(int argc, char** argv)
 		Usage();
 		return 1;
 	}
-	BApplication application("application/x-vnd.Haiku-bt_le");
+	BApplication application("application/x-vnd.vos-bt_le");
 	const char* command = argv[1];
 	if (strcmp(command, "scan") == 0)
 		return Scan(argc > 2 ? atoi(argv[2]) : 10);

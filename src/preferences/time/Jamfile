@@ -32,7 +32,7 @@ Application Time
 	;
 
 DoCatalogs Time :
-	x-vnd.Haiku-Time
+	x-vnd.vos-Time
 	:
 	ClockView.cpp
 	DateTimeView.cpp

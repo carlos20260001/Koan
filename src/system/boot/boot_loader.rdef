@@ -1,4 +1,4 @@
-resource app_signature "application/x-vnd.Haiku-BootLoader";
+resource app_signature "application/x-vnd.vos-BootLoader";
 
 resource app_version {
 	major  = 1,

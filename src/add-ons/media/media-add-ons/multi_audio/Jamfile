@@ -26,7 +26,7 @@ for architectureObject in [ MultiArchSubDirSetup ] {
 
 DoCatalogs hmulti_audio.media_addon
 	:
-	x-vnd.Haiku-hmulti_audio.media_addon
+	x-vnd.vos-hmulti_audio.media_addon
 	:
 	MultiAudioNode.cpp
 	;

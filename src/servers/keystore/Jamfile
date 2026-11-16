@@ -13,7 +13,7 @@ Application keystore_server :
 ;
 
 DoCatalogs keystore_server :
-    x-vnd.Haiku-keystore_server
+    x-vnd.vos-keystore_server
     :
 	AppAccessRequestWindow.cpp
 	KeyRequestWindow.cpp

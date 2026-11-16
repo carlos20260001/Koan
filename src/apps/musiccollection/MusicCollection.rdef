@@ -1,7 +1,7 @@
 
-resource app_signature "application/x-vnd.Haiku-MusicCollection";
+resource app_signature "application/x-vnd.vos-MusicCollection";
 
-resource app_name_catalog_entry "x-vnd.Haiku-MusicCollection:System name:MusicCollection";
+resource app_name_catalog_entry "x-vnd.vos-MusicCollection:System name:MusicCollection";
 
 resource app_version {
 	major      = 1,

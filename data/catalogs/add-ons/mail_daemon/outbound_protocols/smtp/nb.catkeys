@@ -1,4 +1,4 @@
-1	bokmål, norwegian; norwegian bokmål	x-vnd.Haiku-SMTP	815985329
+1	bokmål, norwegian; norwegian bokmål	x-vnd.vos-SMTP	815985329
 POP3 authentication failed. The server said:\n	smtp		POP3 autentifisering feilet. Serveren sa:\n
 Destination:	ConfigView		Destinasjon:
 Error while logging in to %serv	smtp		Feil ved innlogging til %serv

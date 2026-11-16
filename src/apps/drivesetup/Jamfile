@@ -22,7 +22,7 @@ Application DriveSetup :
 ;
 
 DoCatalogs DriveSetup :
-	x-vnd.Haiku-DriveSetup
+	x-vnd.vos-DriveSetup
 	:
 	AbstractParametersPanel.cpp
 	ChangeParametersPanel.cpp

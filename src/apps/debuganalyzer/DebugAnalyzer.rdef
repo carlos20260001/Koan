@@ -1,7 +1,7 @@
 
-resource(1, "BEOS:APP_SIG") #'MIMS' "application/x-vnd.Haiku-DebugAnalyzer";
+resource(1, "BEOS:APP_SIG") #'MIMS' "application/x-vnd.vos-DebugAnalyzer";
 
-resource app_name_catalog_entry "x-vnd.Haiku-DebugAnalyzer:System name:DebugAnalyzer";
+resource app_name_catalog_entry "x-vnd.vos-DebugAnalyzer:System name:DebugAnalyzer";
 
 resource app_version {
 	major  = 1,

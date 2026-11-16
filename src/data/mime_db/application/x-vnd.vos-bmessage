@@ -1,7 +1,7 @@
 
 resource(0, "BEOS:TYPE") #'MIMS' "application/x-vnd.Be-meta-mime";
 
-resource(1, "META:TYPE") "application/x-vnd.Haiku-BMessage";
+resource(1, "META:TYPE") "application/x-vnd.vos-BMessage";
 
 resource(2, "META:SNIFF_RULE") "0.40 (\"HMF1\")";
 

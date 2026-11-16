@@ -36,7 +36,7 @@ main(int argc, char** argv)
 	int32 height = argc > 3 ? atoi(argv[3]) : 2056;
 	int32 frames = argc > 4 ? atoi(argv[4]) : 2000;
 
-	BApplication app("application/x-vnd.Haiku-TerminalGLStressTest");
+	BApplication app("application/x-vnd.vos-TerminalGLStressTest");
 
 	image_id addOn = load_add_on(argv[1]);
 	create_terminal_renderer_func create;

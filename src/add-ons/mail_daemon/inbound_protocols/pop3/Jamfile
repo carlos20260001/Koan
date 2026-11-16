@@ -18,7 +18,7 @@ Addon POP3 :
 ;
 
 DoCatalogs POP3 :
-	x-vnd.Haiku-POP3
+	x-vnd.vos-POP3
 	:
 	ConfigView.cpp
 	POP3.cpp

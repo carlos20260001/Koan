@@ -40,7 +40,7 @@ public:
 int main(int argc, char** argv)
 {
 	int mode = argc > 1 ? atoi(argv[1]) : 0;
-	BApplication app("application/x-vnd.Haiku-direct_window_fork_test");
+	BApplication app("application/x-vnd.vos-direct_window_fork_test");
 	sConnected = create_sem(0, "connected");
 	Window* window = new Window;
 	window->Show();

@@ -34,7 +34,7 @@ for architectureObject in [ MultiArchSubDirSetup ] {
 }
 
 DoCatalogs PNGTranslator :
-	x-vnd.Haiku-PNGTranslator
+	x-vnd.vos-PNGTranslator
 	:
 	PNGMain.cpp
 	PNGTranslator.cpp

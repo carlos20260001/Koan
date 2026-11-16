@@ -13,12 +13,12 @@
 
 
 #define B_ACCESSIBILITY_SERVER_SIGNATURE \
-	"application/x-vnd.Haiku-accessibility_server"
-#define B_SCREEN_READER_SIGNATURE "application/x-vnd.Haiku-ScreenReader"
+	"application/x-vnd.vos-accessibility_server"
+#define B_SCREEN_READER_SIGNATURE "application/x-vnd.vos-ScreenReader"
 
 // Proposed speech service of haiku#52 (text to speech). The screen reader
 // uses it when it runs, and falls back to an engine command, then captions.
-#define B_SPEECH_SERVER_SIGNATURE "application/x-vnd.Haiku-speech_server"
+#define B_SPEECH_SERVER_SIGNATURE "application/x-vnd.vos-speech_server"
 
 
 enum {

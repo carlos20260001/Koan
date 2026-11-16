@@ -1,4 +1,4 @@
-1	esperanto	x-vnd.Haiku-SMTP	815985329
+1	esperanto	x-vnd.vos-SMTP	815985329
 POP3 authentication failed. The server said:\n	smtp		Fiaskis POP3 aŭtentikigo. La servilo diris:\n
 Destination:	ConfigView		Ricevloko:
 Error while logging in to %serv	smtp		Eraris dum aŭtentikigo je %serv

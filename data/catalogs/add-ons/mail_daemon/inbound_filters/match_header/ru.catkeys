@@ -1,4 +1,4 @@
-1	russian	x-vnd.Haiku-MatchHeader	1946584206
+1	russian	x-vnd.vos-MatchHeader	1946584206
 Delete message	ConfigView		Удалить сообщение
 Match \"%attribute\" against \"%regex\"	RuleFilter		Совпадает \"%attribute\" с\"%regex\"
 Match header	RuleFilter		Совпадающий заголовок

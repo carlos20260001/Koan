@@ -13,7 +13,7 @@ Application quick_look_server :
 ;
 
 DoCatalogs quick_look_server :
-	x-vnd.Haiku-quick_look_server
+	x-vnd.vos-quick_look_server
 	:
 	GenericPreview.cpp
 	PreviewWindow.cpp

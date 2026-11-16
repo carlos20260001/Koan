@@ -29,7 +29,7 @@ Application FileTypes :
 	;
 
 DoCatalogs FileTypes :
-	x-vnd.Haiku-FileTypes
+	x-vnd.vos-FileTypes
 	:
 	ApplicationTypeWindow.cpp
 	ApplicationTypesWindow.cpp

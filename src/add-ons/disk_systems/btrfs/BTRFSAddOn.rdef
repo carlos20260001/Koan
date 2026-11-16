@@ -1,4 +1,4 @@
-resource app_signature "application/x-vnd.Haiku-BTRFSDiskAddOn";
+resource app_signature "application/x-vnd.vos-BTRFSDiskAddOn";
 
 resource app_version {
 	major  = 1,

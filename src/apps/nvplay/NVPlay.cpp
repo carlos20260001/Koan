@@ -780,7 +780,7 @@ class PlayerApplication : public BApplication {
 public:
 	PlayerApplication()
 		:
-		BApplication("application/x-vnd.Haiku-NVPlay"),
+		BApplication("application/x-vnd.vos-NVPlay"),
 		fOpened(false)
 	{
 	}

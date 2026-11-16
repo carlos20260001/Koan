@@ -60,7 +60,7 @@ for architectureObject in [ MultiArchSubDirSetup ] {
 }
 
 DoCatalogs libbluetooth.so :
-	x-vnd.Haiku-Bluetooth
+	x-vnd.vos-Bluetooth
 	:
 	DeviceClass.cpp
 	RemoteDevice.cpp

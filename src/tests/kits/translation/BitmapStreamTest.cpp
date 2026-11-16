@@ -45,7 +45,7 @@ class BitmapStreamTest : public CppUnit::TestFixture {
 public:
 	void Default_Constructor_InitializesToZero()
 	{
-		BApplication app("application/x-vnd.Haiku-translationkit_bitmapstreamtest");
+		BApplication app("application/x-vnd.vos-translationkit_bitmapstreamtest");
 
 		BBitmapStream streamEmpty;
 		BBitmap* pbits = NULL;
@@ -57,7 +57,7 @@ public:
 
 	void Bitmap_Constructor_InitializesWithBitmap()
 	{
-		BApplication app("application/x-vnd.Haiku-translationkit_bitmapstreamtest");
+		BApplication app("application/x-vnd.vos-translationkit_bitmapstreamtest");
 
 		BBitmap* pbits = new BBitmap(BRect(0, 0, 5, 5), B_RGB32);
 		CPPUNIT_ASSERT(pbits);
@@ -80,7 +80,7 @@ public:
 
 	void TranslatedFile_DetachBitmap_Succeeds()
 	{
-		BApplication app("application/x-vnd.Haiku-translationkit_bitmapstreamtest");
+		BApplication app("application/x-vnd.vos-translationkit_bitmapstreamtest");
 
 		BFile file("resources/kits/translation/image.jpg", B_READ_ONLY);
 		CPPUNIT_ASSERT_EQUAL(B_OK, file.InitCheck());
@@ -99,7 +99,7 @@ public:
 
 	void Null_DetachBitmap_ReturnsBadValue()
 	{
-		BApplication app("application/x-vnd.Haiku-translationkit_bitmapstreamtest");
+		BApplication app("application/x-vnd.vos-translationkit_bitmapstreamtest");
 
 		BBitmapStream* pstream = new BBitmapStream;
 		CPPUNIT_ASSERT_EQUAL(B_BAD_VALUE, pstream->DetachBitmap(NULL));
@@ -108,7 +108,7 @@ public:
 
 	void Bitmap_DetachBitmap_SecondDetachReturnsError()
 	{
-		BApplication app("application/x-vnd.Haiku-translationkit_bitmapstreamtest");
+		BApplication app("application/x-vnd.vos-translationkit_bitmapstreamtest");
 
 		BBitmapStream* pstream = new BBitmapStream;
 		BBitmap* pbits = NULL;
@@ -128,7 +128,7 @@ public:
 
 	void BitmapDetachedFromStream_DeleteStream_PreservesBitmap()
 	{
-		BApplication app("application/x-vnd.Haiku-translationkit_bitmapstreamtest");
+		BApplication app("application/x-vnd.vos-translationkit_bitmapstreamtest");
 
 		BFile file("resources/kits/translation/image.jpg", B_READ_ONLY);
 		CPPUNIT_ASSERT_EQUAL(B_OK, file.InitCheck());
@@ -150,7 +150,7 @@ public:
 
 	void StreamWithAttachedBitmap_DeleteStream_DestroysBitmap()
 	{
-		BApplication app("application/x-vnd.Haiku-translationkit_bitmapstreamtest");
+		BApplication app("application/x-vnd.vos-translationkit_bitmapstreamtest");
 
 		BBitmap* pbits = new BBitmap(BRect(0, 0, 5, 5), B_RGB32);
 		BBitmapStream* pfullstream = new BBitmapStream(pbits);
@@ -164,7 +164,7 @@ public:
 
 	void Header_ReadWriteByteByByte_Succeeds()
 	{
-		BApplication app("application/x-vnd.Haiku-translationkit_bitmapstreamtest");
+		BApplication app("application/x-vnd.vos-translationkit_bitmapstreamtest");
 		char chheader[sizeof(TranslatorBitmap)], *pch;
 		TranslatorBitmap sheader;
 		BBitmapStream stream;
@@ -201,7 +201,7 @@ public:
 
 	void Header_ReadWriteAllAtOnce_Succeeds()
 	{
-		BApplication app("application/x-vnd.Haiku-translationkit_bitmapstreamtest");
+		BApplication app("application/x-vnd.vos-translationkit_bitmapstreamtest");
 		char chheader[sizeof(TranslatorBitmap)], *pch;
 		TranslatorBitmap sheader;
 		BBitmapStream stream;
@@ -234,7 +234,7 @@ public:
 
 	void BitmapData_ReadWrite_Succeeds()
 	{
-		BApplication app("application/x-vnd.Haiku-translationkit_bitmapstreamtest");
+		BApplication app("application/x-vnd.vos-translationkit_bitmapstreamtest");
 		TranslatorBitmap sheader;
 		BBitmapStream stream;
 		int32 width = 5, height = 5;
@@ -285,7 +285,7 @@ public:
 
 	void ZeroBytes_ReadWrite_Succeeds()
 	{
-		BApplication app("application/x-vnd.Haiku-translationkit_bitmapstreamtest");
+		BApplication app("application/x-vnd.vos-translationkit_bitmapstreamtest");
 		BBitmapStream stream;
 		char chbuf[1];
 		// CPPUNIT_ASSERT(stream.ReadAt(stream.Size(), &(chbuf[0]), 0) == 0);
@@ -295,7 +295,7 @@ public:
 
 	void ErroneousData_ReadWrite_ReturnsErrors()
 	{
-		BApplication app("application/x-vnd.Haiku-translationkit_bitmapstreamtest");
+		BApplication app("application/x-vnd.vos-translationkit_bitmapstreamtest");
 		BBitmapStream stream;
 		char byt = 0xCF;
 		char chbuf[1];
@@ -318,7 +318,7 @@ public:
 
 	void SEEK_END_Seek_Succeeds()
 	{
-		BApplication app("application/x-vnd.Haiku-translationkit_bitmapstreamtest");
+		BApplication app("application/x-vnd.vos-translationkit_bitmapstreamtest");
 
 		BFile file("resources/kits/translation/image.jpg", B_READ_ONLY);
 		CPPUNIT_ASSERT_EQUAL(B_OK, file.InitCheck());
@@ -349,7 +349,7 @@ public:
 
 	void SEEK_SET_Seek_Succeeds()
 	{
-		BApplication app("application/x-vnd.Haiku-translationkit_bitmapstreamtest");
+		BApplication app("application/x-vnd.vos-translationkit_bitmapstreamtest");
 
 		BFile file("resources/kits/translation/image.jpg", B_READ_ONLY);
 		CPPUNIT_ASSERT_EQUAL(B_OK, file.InitCheck());
@@ -379,7 +379,7 @@ public:
 
 	void SEEK_CUR_Seek_Succeeds()
 	{
-		BApplication app("application/x-vnd.Haiku-translationkit_bitmapstreamtest");
+		BApplication app("application/x-vnd.vos-translationkit_bitmapstreamtest");
 
 		BFile file("resources/kits/translation/image.jpg", B_READ_ONLY);
 		CPPUNIT_ASSERT_EQUAL(B_OK, file.InitCheck());
@@ -415,7 +415,7 @@ public:
 
 	void InvalidValues_SetSize_ReturnsBadValue()
 	{
-		BApplication app("application/x-vnd.Haiku-translationkit_bitmapstreamtest");
+		BApplication app("application/x-vnd.vos-translationkit_bitmapstreamtest");
 
 		BFile file("resources/kits/translation/image.jpg", B_READ_ONLY);
 		CPPUNIT_ASSERT_EQUAL(B_OK, file.InitCheck());

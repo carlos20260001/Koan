@@ -30,7 +30,7 @@ Application ShowImage :
 ;
 
 DoCatalogs ShowImage :
-	x-vnd.Haiku-ShowImage
+	x-vnd.vos-ShowImage
 	:
 	PrintOptionsWindow.cpp
 	ShowImageApp.cpp

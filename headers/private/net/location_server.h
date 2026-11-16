@@ -7,7 +7,7 @@
 
 /*!	The messages location_server understands; see docs/airos/LOCATION.md. */
 
-#define LOCATION_SERVER_SIGNATURE	"application/x-vnd.Haiku-location_server"
+#define LOCATION_SERVER_SIGNATURE	"application/x-vnd.vos-location_server"
 
 enum {
 	LOCATION_GET_POSITION	= 'lcgp'

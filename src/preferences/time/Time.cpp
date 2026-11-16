@@ -32,7 +32,7 @@
 #define B_TRANSLATION_CONTEXT "Time"
 
 
-const char* kAppSignature = "application/x-vnd.Haiku-Time";
+const char* kAppSignature = "application/x-vnd.vos-Time";
 
 
 TimeApplication::TimeApplication()

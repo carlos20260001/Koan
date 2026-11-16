@@ -12,7 +12,7 @@
 #include "DialUpView.h"
 
 
-static const char *kSignature = "application/x-vnd.haiku.dial-up-preflet";
+static const char *kSignature = "application/x-vnd.vos.dial-up-preflet";
 
 
 class DialUpApplication : public BApplication {

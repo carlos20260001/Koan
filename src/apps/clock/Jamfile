@@ -9,7 +9,7 @@ Application Clock :
 	;
 
 DoCatalogs Clock :
-	x-vnd.Haiku-Clock
+	x-vnd.vos-Clock
 	:
 	cl_view.cpp
 	clock.cpp

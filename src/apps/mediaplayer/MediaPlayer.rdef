@@ -1,7 +1,7 @@
 
-resource app_signature "application/x-vnd.Haiku-MediaPlayer";
+resource app_signature "application/x-vnd.vos-MediaPlayer";
 
-resource app_name_catalog_entry "x-vnd.Haiku-MediaPlayer:System name:MediaPlayer";
+resource app_name_catalog_entry "x-vnd.vos-MediaPlayer:System name:MediaPlayer";
 
 resource app_version {
 	major      = 1,
@@ -16,7 +16,7 @@ resource app_version {
 resource app_flags B_SINGLE_LAUNCH;
 
 resource file_types message {
-	"types" = "application/x-vnd.haiku-playlist",
+	"types" = "application/x-vnd.vos-playlist",
 
 	"types" = "application/ogg",
 	"types" = "application/x-ogg",

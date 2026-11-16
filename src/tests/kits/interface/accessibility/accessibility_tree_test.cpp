@@ -33,7 +33,7 @@
 
 
 static const char* kTestAppSignature
-	= "application/x-vnd.Haiku-AccessibilityTestApp";
+	= "application/x-vnd.vos-AccessibilityTestApp";
 static const bigtime_t kTimeout = 2000000;
 
 static int32 sPassed = 0;
@@ -331,7 +331,7 @@ dump(const char* signature)
 int
 main(int argc, char** argv)
 {
-	BApplication app("application/x-vnd.Haiku-accessibility_tree_test");
+	BApplication app("application/x-vnd.vos-accessibility_tree_test");
 
 	if (argc == 3 && strcmp(argv[1], "--dump") == 0)
 		return dump(argv[2]);

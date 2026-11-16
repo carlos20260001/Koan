@@ -10,7 +10,7 @@ Addon Label\ as… :
 ;
 
 DoCatalogs Label\ as… :
-	x-vnd.Haiku-LabelAs
+	x-vnd.vos-LabelAs
 	:
 	LabelAs.cpp
 ;

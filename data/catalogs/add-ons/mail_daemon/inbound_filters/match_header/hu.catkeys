@@ -1,4 +1,4 @@
-1	hungarian	x-vnd.Haiku-MatchHeader	1946584206
+1	hungarian	x-vnd.vos-MatchHeader	1946584206
 Delete message	ConfigView		az üzenet törlése
 Match \"%attribute\" against \"%regex\"	RuleFilter		Egyező \"%attribute\" \"%regex\" helyett
 Match header	RuleFilter		Fejléc egyezése

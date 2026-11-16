@@ -1,4 +1,4 @@
-1	german	x-vnd.Haiku-MatchHeader	1946584206
+1	german	x-vnd.vos-MatchHeader	1946584206
 Delete message	ConfigView		Nachricht löschen
 Match \"%attribute\" against \"%regex\"	RuleFilter		„%attribute“ mit „%regex“ vergleichen
 Match header	RuleFilter		Kopfdaten filtern

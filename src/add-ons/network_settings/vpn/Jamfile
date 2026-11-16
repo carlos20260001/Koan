@@ -13,6 +13,6 @@ Addon VPNInterface :
 		[ TargetLibstdc++ ] localestub
 ;
 
-DoCatalogs VPNInterface : x-vnd.Haiku-VPNInterface :
+DoCatalogs VPNInterface : x-vnd.vos-VPNInterface :
 	VPNInterfaceAddOn.cpp
 ;

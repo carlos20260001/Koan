@@ -112,7 +112,7 @@ UpdateManager::CheckRepositories()
 			int32 result;
 			reply.FindInt32(kKeyAlertResult, &result);
 			if (result == 1)
-				be_roster->Launch("application/x-vnd.Haiku-Repositories");
+				be_roster->Launch("application/x-vnd.vos-Repositories");
 		}
 		be_app->PostMessage(kMsgFinalQuit);
 		throw BException(B_TRANSLATE_COMMENT(

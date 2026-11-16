@@ -67,7 +67,7 @@ class Areas : public BApplication {
 public:
 	Areas() 
 		:
-		BApplication("application/x-vnd.haiku.Areas") 
+		BApplication("application/x-vnd.vos.Areas") 
 	{
 		BRect frameRect;
 		frameRect.Set(100, 100, 300, 300);

@@ -1,4 +1,4 @@
-1	hungarian	x-vnd.Haiku-Mail	2750130554
+1	hungarian	x-vnd.vos-Mail	2750130554
 Account settings	AutoConfigWindow		Fiókbeállítások
 \t\t· Outgoing	Config Window		\t\t· Kimenő
 An error occurred while creating the config view: %error.	Config Views		Hiba történt a konfigurációs nézet létrehozása közben: %error.

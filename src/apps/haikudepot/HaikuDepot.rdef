@@ -1,7 +1,7 @@
 
-resource app_signature "application/x-vnd.Haiku-HaikuDepot";
+resource app_signature "application/x-vnd.vos-HaikuDepot";
 
-resource app_name_catalog_entry "x-vnd.Haiku-HaikuDepot:System name:HaikuDepot";
+resource app_name_catalog_entry "x-vnd.vos-HaikuDepot:System name:HaikuDepot";
 
 resource app_flags B_SINGLE_LAUNCH;
 
@@ -18,7 +18,7 @@ resource app_version {
 };
 
 resource file_types message {
-	"types" = "application/x-vnd.haiku-package"
+	"types" = "application/x-vnd.vos-package"
 };
 
 resource vector_icon {

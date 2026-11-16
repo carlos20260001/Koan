@@ -105,7 +105,7 @@ def validate(text, output=None, software=False, mode=None):
     for cycle_string, _, body, _ in runs:
         cycle = int(cycle_string)
         started = re.findall(r'^ROCK5_APPLICATION_STARTED team=(\d+) '
-            r'signature=application/x-vnd.Haiku-GLTeapot$', body, re.M)
+            r'signature=application/x-vnd.vos-GLTeapot$', body, re.M)
         assert len(started) == 1 and int(started[0]) > 0
         teams.append(int(started[0]))
         assert re.findall(r'^ROCK5_APPLICATION_CONTROLLER_PASS team=(\d+) '

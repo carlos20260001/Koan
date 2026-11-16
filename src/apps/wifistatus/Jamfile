@@ -17,7 +17,7 @@ Application WiFiStatus :
 ;
 
 DoCatalogs WiFiStatus :
-	x-vnd.Haiku-WiFiStatus
+	x-vnd.vos-WiFiStatus
 	:
 	WiFiStatus.cpp
 	WiFiController.cpp

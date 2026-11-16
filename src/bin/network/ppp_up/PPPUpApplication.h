@@ -12,7 +12,7 @@
 
 class ConnectionWindow;
 
-#define APP_SIGNATURE "application/x-vnd.haiku.ppp_up"
+#define APP_SIGNATURE "application/x-vnd.vos.ppp_up"
 
 
 class PPPUpApplication : public BApplication {

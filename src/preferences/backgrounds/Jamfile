@@ -12,7 +12,7 @@ Application Backgrounds :
 	;
 
 DoCatalogs Backgrounds :
-	x-vnd.Haiku-Backgrounds
+	x-vnd.vos-Backgrounds
 	:
 	Backgrounds.cpp
 	BackgroundsView.cpp

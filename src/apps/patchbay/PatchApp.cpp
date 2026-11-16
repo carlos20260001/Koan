@@ -25,7 +25,7 @@
 #define B_TRANSLATION_CONTEXT "App"
 
 const char * kApplicationName = B_TRANSLATE_SYSTEM_NAME("PatchBay");
-const char * kApplicationSignature = "application/x-vnd.Haiku.PatchBay";
+const char * kApplicationSignature = "application/x-vnd.vos.PatchBay";
 
 
 PatchApp::PatchApp()

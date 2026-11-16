@@ -1,11 +1,11 @@
 
-resource(1, "BEOS:APP_SIG") #'MIMS' "application/x-vnd.Haiku-Debugger";
+resource(1, "BEOS:APP_SIG") #'MIMS' "application/x-vnd.vos-Debugger";
 
-resource app_name_catalog_entry "x-vnd.Haiku-Debugger:System name:Debugger";
+resource app_name_catalog_entry "x-vnd.vos-Debugger:System name:Debugger";
 
 resource file_types message {
   "types" = "application/x-vnd.Be-elfexecutable",
-  "types" = "application/x-vnd.haiku-core-file"
+  "types" = "application/x-vnd.vos-core-file"
 };
 
 resource app_version {

@@ -1,4 +1,4 @@
-1	swedish	x-vnd.Haiku-Mail	2750130554
+1	swedish	x-vnd.vos-Mail	2750130554
 Account settings	AutoConfigWindow		Kontoinställningar
 \t\t· Outgoing	Config Window		\t\t· Utgående
 An error occurred while creating the config view: %error.	Config Views		Ett fel inträffade vid skapandet av konfigurerings vy. %error.

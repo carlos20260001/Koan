@@ -1,4 +1,4 @@
-resource app_signature "application/x-vnd.Haiku-location_server";
+resource app_signature "application/x-vnd.vos-location_server";
 
 resource app_flags B_EXCLUSIVE_LAUNCH | B_BACKGROUND_APP;
 

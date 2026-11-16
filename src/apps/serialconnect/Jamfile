@@ -25,7 +25,7 @@ Application SerialConnect :
 ;
 
 DoCatalogs SerialConnect :
-	x-vnd.haiku.SerialConnect
+	x-vnd.vos.SerialConnect
 	:
 	CustomRateWindow.cpp
 	SerialWindow.cpp

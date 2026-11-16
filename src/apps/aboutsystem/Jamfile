@@ -12,7 +12,7 @@ Application AboutSystem :
 ;
 
 DoCatalogs AboutSystem :
-	x-vnd.Haiku-About
+	x-vnd.vos-About
 	:
 	AboutSystem.cpp
 	Utilities.cpp

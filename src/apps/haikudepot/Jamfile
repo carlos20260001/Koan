@@ -279,7 +279,7 @@ Application HaikuDepot
 ;
 
 DoCatalogs HaikuDepot :
-	x-vnd.Haiku-HaikuDepot
+	x-vnd.vos-HaikuDepot
 	:
 	$(applicationSources)
 ;

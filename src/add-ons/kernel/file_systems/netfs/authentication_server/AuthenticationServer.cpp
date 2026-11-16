@@ -257,7 +257,7 @@ private:
 // constructor
 AuthenticationServer::AuthenticationServer()
 	:
-	BApplication("application/x-vnd.haiku-authentication_server"),
+	BApplication("application/x-vnd.vos-authentication_server"),
 	fLock(),
 	fRequestPort(-1),
 	fRequestThread(-1),

@@ -109,7 +109,7 @@ Application Devices :
 ;
 
 DoCatalogs Devices :
-	x-vnd.Haiku-Devices
+	x-vnd.vos-Devices
 	:
 	DevicesApplication.cpp
 	DevicesView.cpp

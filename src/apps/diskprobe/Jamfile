@@ -19,7 +19,7 @@ Application DiskProbe :
 ;
 
 DoCatalogs DiskProbe :
-	x-vnd.Haiku-DiskProbe
+	x-vnd.vos-DiskProbe
 	:
 	AttributeWindow.cpp
 	DiskProbe.cpp

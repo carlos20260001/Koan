@@ -11,7 +11,7 @@ Application Magnify :
 ;
 
 DoCatalogs Magnify :
-	x-vnd.Haiku-Magnify
+	x-vnd.vos-Magnify
 	:
 	Magnify.cpp
 ;

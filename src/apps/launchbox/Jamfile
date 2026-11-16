@@ -16,7 +16,7 @@ Application LaunchBox :
 ;
 
 DoCatalogs LaunchBox :
-	x-vnd.Haiku-LaunchBox
+	x-vnd.vos-LaunchBox
 	:
 	App.cpp
 	LaunchButton.cpp

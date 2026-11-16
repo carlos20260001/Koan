@@ -1,6 +1,6 @@
 resource app_flags B_MULTIPLE_LAUNCH | B_ARGV_ONLY;
 
-resource app_signature "application/x-vnd.Haiku-mail_utils-mail";
+resource app_signature "application/x-vnd.vos-mail_utils-mail";
 
 resource app_version {
 	major  = 1,

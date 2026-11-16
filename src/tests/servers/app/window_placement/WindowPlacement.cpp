@@ -77,7 +77,7 @@ main(int argc, char** argv)
 		else if (strcmp(argv[first], "--workspace") == 0 && first + 1 < argc)
 			workspace = atoi(argv[++first]);
 		else if (strcmp(argv[first], "--activate") == 0 && first + 1 < argc) {
-			BApplication app("application/x-vnd.Haiku-WindowPlacement");
+			BApplication app("application/x-vnd.vos-WindowPlacement");
 			activate_workspace(atoi(argv[first + 1]));
 			return 0;
 		} else if (strcmp(argv[first], "--") == 0) {
@@ -98,7 +98,7 @@ main(int argc, char** argv)
 	BRect frame(left, top, left + atof(argv[first + 2]) - 1,
 		top + atof(argv[first + 3]) - 1);
 
-	BApplication app("application/x-vnd.Haiku-WindowPlacement");
+	BApplication app("application/x-vnd.vos-WindowPlacement");
 	BWindow* window = new PlacementWindow(frame, title);
 	if (workspace >= 0)
 		window->SetWorkspaces(1UL << workspace);

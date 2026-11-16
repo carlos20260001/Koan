@@ -1,4 +1,4 @@
-1	japanese	x-vnd.Haiku-SMTP	815985329
+1	japanese	x-vnd.vos-SMTP	815985329
 POP3 authentication failed. The server said:\n	smtp		POP3認証に失敗しました。サーバーからのメッセージです:\n
 Destination:	ConfigView		メッセージの保存先:
 Error while logging in to %serv	smtp		%serv へのログイン中にエラーが発生しました

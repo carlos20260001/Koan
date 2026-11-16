@@ -25,7 +25,7 @@ BluetoothIconView::BluetoothIconView()
 		uint8* tempIcon;
 		size_t tempSize;
 
-		BMimeType mime("application/x-vnd.Haiku-bluetooth_server");
+		BMimeType mime("application/x-vnd.vos-bluetooth_server");
 		mime.GetIcon(&tempIcon, &tempSize);
 
 		BIconUtils::GetVectorIcon(tempIcon, tempSize, fBitmap);

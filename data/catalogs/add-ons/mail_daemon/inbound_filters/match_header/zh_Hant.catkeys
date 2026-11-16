@@ -1,4 +1,4 @@
-1	english	x-vnd.Haiku-MatchHeader	1946584206
+1	english	x-vnd.vos-MatchHeader	1946584206
 Delete message	ConfigView		刪除訊息
 Match \"%attribute\" against \"%regex\"	RuleFilter		將 \"%attribute\" 和 \"%regex\" 配對
 Match header	RuleFilter		匹配標題

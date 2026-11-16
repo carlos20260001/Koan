@@ -1,4 +1,4 @@
-1	hungarian	x-vnd.Haiku-IMAP	1343128980
+1	hungarian	x-vnd.vos-IMAP	1343128980
 Could not connect to server \"%server%\":\n%error%	IMAPFolderConfig		Nem tudtam kapcsolódni \"%server%\" kiszolgálóhoz:\n%error%
 Updating subscriptions to IMAP folders, please be patient…	IMAPFolderConfig		IMAP mappák frissítése, kis türelmet kérek…
 Failed to fetch available storage.	IMAPFolderConfig		Nem sikerült letölteni az elérhető tárhely mennyiségét.

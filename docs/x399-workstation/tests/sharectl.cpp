@@ -28,7 +28,7 @@ static const uint32 kGetNetworkShares = 'gnsh';
 static const uint32 kMountNetworkShare = 'mnsh';
 static const uint32 kUnmountNetworkShare = 'unsh';
 static const char* kMountServerSignature
-	= "application/x-vnd.Haiku-mount_server";
+	= "application/x-vnd.vos-mount_server";
 
 // mounting waits for the server, which is given twenty seconds and one more
 // try

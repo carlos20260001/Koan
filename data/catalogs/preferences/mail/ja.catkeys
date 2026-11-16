@@ -1,4 +1,4 @@
-1	japanese	x-vnd.Haiku-Mail	2750130554
+1	japanese	x-vnd.vos-Mail	2750130554
 Account settings	AutoConfigWindow		アカウント設定
 \t\t· Outgoing	Config Window		\t\t· 送信
 An error occurred while creating the config view: %error.	Config Views		config view 作成時にエラーが発生しました: %error.

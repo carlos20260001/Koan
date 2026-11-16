@@ -40,7 +40,7 @@ src/bin/mediakey.cpp                             the media keys' command
 src/tests/kits/media_controls/                   media_session_test
 ```
 
-- **media_controls_server** (`application/x-vnd.Haiku-media_controls_server`,
+- **media_controls_server** (`application/x-vnd.vos-media_controls_server`,
   `/system/servers`) is an `on_demand` service of the launch daemon
   (`data/launch/system`): it starts with the first player's registration. It
   is its own small server and not part of media_server: players need not use

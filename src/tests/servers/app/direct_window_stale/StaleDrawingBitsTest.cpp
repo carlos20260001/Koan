@@ -166,7 +166,7 @@ int
 main(int argc, char** argv)
 {
 	bool mark = argc < 2 || strcmp(argv[1], "nomark") != 0;
-	BApplication app("application/x-vnd.haiku-stale_drawing_bits_test");
+	BApplication app("application/x-vnd.vos-stale_drawing_bits_test");
 
 	// small enough for a 1024x768 screen at 200%
 	BRect frame(40, 60, 199, 159);

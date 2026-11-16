@@ -55,7 +55,7 @@ public:
 int
 main()
 {
-	BApplication app("application/x-vnd.haiku.ALMOperator");
+	BApplication app("application/x-vnd.vos.ALMOperator");
 
 	OperatorWindow* window = new OperatorWindow(BRect(100, 100, 300, 300));
 	window->Show();

@@ -1,4 +1,4 @@
-1	danish	x-vnd.Haiku-Mail	2750130554
+1	danish	x-vnd.vos-Mail	2750130554
 Account settings	AutoConfigWindow		Kontoindstillinger
 \t\t· Outgoing	Config Window		\t\t· Udgående
 An error occurred while creating the config view: %error.	Config Views		Der opstod en fejl ved oprettelse af konfigurationsvisningen: %error.

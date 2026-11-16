@@ -4,7 +4,7 @@
 
 #include <SupportDefs.h>
 
-static const char* const kMCPServerSignature = "application/x-vnd.Haiku-mcp_server";
+static const char* const kMCPServerSignature = "application/x-vnd.vos-mcp_server";
 static const uint32 kMCPGetStatus = 'mcpg';
 static const uint32 kMCPSetEnabled = 'mcpe';
 static const int32 kMCPPort = 7780;

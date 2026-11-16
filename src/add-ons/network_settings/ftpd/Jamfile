@@ -13,6 +13,6 @@ Addon FTPService :
 		[ TargetLibstdc++ ] localestub
 ;
 
-DoCatalogs FTPService : x-vnd.Haiku-FTPService :
+DoCatalogs FTPService : x-vnd.vos-FTPService :
 	FTPServiceAddOn.cpp
 ;

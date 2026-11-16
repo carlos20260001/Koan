@@ -17,7 +17,7 @@
 #include <E-mail.h>
 #include <String.h>
 
-#define APP_SIG "application/x-vnd.Haiku-mail_utils-mail"
+#define APP_SIG "application/x-vnd.vos-mail_utils-mail"
 
 
 int main(int argc, char* argv[])

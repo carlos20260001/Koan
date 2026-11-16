@@ -30,7 +30,7 @@ public:
 	void setUp()
 	{
 		if (be_app == NULL)
-			fApp = new BApplication("application/x-vnd.Haiku-DevicesTreeTest");
+			fApp = new BApplication("application/x-vnd.vos-DevicesTreeTest");
 		else
 			fApp = NULL;
 	}

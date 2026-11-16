@@ -1,4 +1,4 @@
-1	slovak	x-vnd.Haiku-SMTP	815985329
+1	slovak	x-vnd.vos-SMTP	815985329
 POP3 authentication failed. The server said:\n	smtp		Autentifikácia POP3 zlyhala. Server povedal:\n
 Destination:	ConfigView		Cieľ:
 Error while logging in to %serv	smtp		Chyba pri prihlasovaní k %serv

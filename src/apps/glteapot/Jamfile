@@ -26,7 +26,7 @@ Application GLTeapot :
 ;
 
 DoCatalogs GLTeapot :
-	x-vnd.Haiku-GLTeapot
+	x-vnd.vos-GLTeapot
 	:
 	TeapotApp.cpp
 	TeapotWindow.cpp

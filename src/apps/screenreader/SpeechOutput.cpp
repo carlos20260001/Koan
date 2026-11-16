@@ -154,7 +154,7 @@ SpeechOutput::_Detect(const char* engine)
 		BMessage job;
 		if (be_roster->GetAppInfo(B_SPEECH_SERVER_SIGNATURE, &info) == B_OK)
 			server = BMessenger(NULL, info.team);
-		else if (BLaunchRoster().GetJobInfo("x-vnd.Haiku-speech_server", job)
+		else if (BLaunchRoster().GetJobInfo("x-vnd.vos-speech_server", job)
 				== B_OK && job.GetBool("service", false)
 				&& job.GetBool("enabled", false)) {
 			server = BMessenger(B_SPEECH_SERVER_SIGNATURE);

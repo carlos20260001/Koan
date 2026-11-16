@@ -50,7 +50,7 @@ static const uint32 kMsgWiFiSelectNetwork = 'wnsl';
 	// string "name", string "device", uint32 "authentication"
 static const uint32 kMsgWiFiJoinOther = 'wjno';
 
-#define kWiFiPreferencesSignature "application/x-vnd.Haiku-WiFi"
+#define kWiFiPreferencesSignature "application/x-vnd.vos-WiFi"
 
 
 enum wifi_state {

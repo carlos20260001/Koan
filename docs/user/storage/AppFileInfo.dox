@@ -242,7 +242,7 @@
 	If \a catalogEntry is \c NULL the file's catalog entry is unset.
 
 	\param catalogEntry The catalog entry to be assigned to the file.
-	       Of the form "x-vnd.Haiku-app:context:name". Must not be longer than
+	       Of the form "x-vnd.vos-app:context:name". Must not be longer than
 	       \c B_MIME_TYPE_LENGTH * 3 (including the terminating \0).
 	       The \a catalogEntry may be \c NULL.
 

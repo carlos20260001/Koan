@@ -55,7 +55,7 @@ Application registrar
 ;
 
 DoCatalogs registrar :
-	x-vnd.haiku-registrar
+	x-vnd.vos-registrar
 	:
 	ShutdownProcess.cpp
 ;

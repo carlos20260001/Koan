@@ -16,7 +16,7 @@ Application BluetoothStatus :
 ;
 
 DoCatalogs BluetoothStatus :
-	x-vnd.Haiku-BluetoothStatus
+	x-vnd.vos-BluetoothStatus
 	:
 	BluetoothStatus.cpp
 ;

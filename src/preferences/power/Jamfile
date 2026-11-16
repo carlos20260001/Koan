@@ -5,4 +5,4 @@ Application Power : Power.cpp
 	: Power.rdef
 ;
 
-DoCatalogs Power : x-vnd.Haiku-Power : Power.cpp ;
+DoCatalogs Power : x-vnd.vos-Power : Power.cpp ;

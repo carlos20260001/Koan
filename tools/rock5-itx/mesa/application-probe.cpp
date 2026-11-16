@@ -26,7 +26,7 @@ using namespace MaliCSF;
 
 extern char** environ;
 static constexpr bigtime_t kReplyTimeout = 2000000;
-static const char* kSignature = "application/x-vnd.Haiku-GLTeapot";
+static const char* kSignature = "application/x-vnd.vos-GLTeapot";
 static unsigned captures;
 
 static void Require(bool condition, const char* what)

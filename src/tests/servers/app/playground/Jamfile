@@ -20,7 +20,7 @@ if ( $(TARGET_PLATFORM) = libbe_test ) {
 }
 
 DoCatalogs Playground :
-    x-vnd.Haiku-Playground
+    x-vnd.vos-Playground
     :
     main.cpp
     ObjectView.cpp

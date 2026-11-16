@@ -7,7 +7,7 @@
 
 /*!	The messages mdns_server understands; see docs/airos/MDNS.md. */
 
-#define MDNS_SERVER_SIGNATURE	"application/x-vnd.Haiku-mdns_server"
+#define MDNS_SERVER_SIGNATURE	"application/x-vnd.vos-mdns_server"
 
 enum {
 	MDNS_REGISTER_NAME		= 'mdrg',

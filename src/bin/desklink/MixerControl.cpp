@@ -23,7 +23,7 @@
 #include <Path.h>
 
 
-static const char* kSettingsFile = "x-vnd.Haiku-desklink";
+static const char* kSettingsFile = "x-vnd.vos-desklink";
 
 
 MixerControl::MixerControl()

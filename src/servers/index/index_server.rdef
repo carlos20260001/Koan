@@ -1,5 +1,5 @@
 
-resource app_signature "application/x-vnd.Haiku-index_server";
+resource app_signature "application/x-vnd.vos-index_server";
 
 resource app_version {
 	major  = 1,

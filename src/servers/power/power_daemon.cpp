@@ -52,7 +52,7 @@ main(void)
 
 PowerManagementDaemon::PowerManagementDaemon()
 	:
-	BServer("application/x-vnd.Haiku-powermanagement", false, NULL),
+	BServer("application/x-vnd.vos-powermanagement", false, NULL),
 	fPolicy(this),
 	fMonitorCount(0),
 	fQuitRequested(false)

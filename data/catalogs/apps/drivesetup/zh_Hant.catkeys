@@ -1,4 +1,4 @@
-1	english	x-vnd.Haiku-DriveSetup	2660441571
+1	english	x-vnd.vos-DriveSetup	2660441571
 Could not unmount partition %s.	MainWindow		無法卸載分區 %s。
 Register disk image…	MainWindow		註冊磁碟映像檔…
 Mount all	MainWindow		全部掛載

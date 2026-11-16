@@ -20,7 +20,7 @@ class TextDocumentTest : public BApplication {
 public:
 	TextDocumentTest()
 		:
-		BApplication("application/x-vnd.Haiku-TextDocumentTest")
+		BApplication("application/x-vnd.vos-TextDocumentTest")
 	{}
 
 	virtual ~TextDocumentTest() {}

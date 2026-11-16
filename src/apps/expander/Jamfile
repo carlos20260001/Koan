@@ -19,7 +19,7 @@ Application Expander :
 ;
 
 DoCatalogs Expander :
-	x-vnd.Haiku-Expander
+	x-vnd.vos-Expander
 	:
 	ExpanderWindow.cpp
 	ExpanderPreferences.cpp

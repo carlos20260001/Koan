@@ -11,4 +11,4 @@ resource app_version {
 	long_info = "©2001-2017 Haiku Inc."
 };
 
-resource app_signature "application/x-vnd.Haiku-libsolvsolver" ;
+resource app_signature "application/x-vnd.vos-libsolvsolver" ;

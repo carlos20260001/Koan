@@ -95,7 +95,7 @@ FetchFileJob::Execute()
 		return result;
 
 	result = FetchUtils::SetFileType(fTargetFile,
-		"application/x-vnd.haiku-package");
+		"application/x-vnd.vos-package");
 	if (result != B_OK) {
 		fprintf(stderr, "failed to set file type for '%s': %s\n",
 			DownloadFileName(), strerror(result));

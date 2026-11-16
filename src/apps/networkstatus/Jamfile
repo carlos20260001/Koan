@@ -16,7 +16,7 @@ Application NetworkStatus :
 ;
 
 DoCatalogs NetworkStatus :
-	x-vnd.Haiku-NetworkStatus
+	x-vnd.vos-NetworkStatus
 	:
 	NetworkStatus.cpp
 	NetworkStatusWindow.cpp

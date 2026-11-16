@@ -504,7 +504,7 @@ main(int argc, char** argv)
 		setMode = true;
 	}
 
-	BApplication application("application/x-vnd.Haiku-screenmode");
+	BApplication application("application/x-vnd.vos-screenmode");
 
 	if (zoomToDisplay >= 0)
 		BPrivate::set_zoom_to_display(zoomToDisplay == 1);

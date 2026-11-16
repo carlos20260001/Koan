@@ -22,7 +22,7 @@ Application Bluetooth :
 	;
 
 DoCatalogs Bluetooth :
-	x-vnd.Haiku-BluetoothPrefs
+	x-vnd.vos-BluetoothPrefs
 	:
 	AdvancedWindow.cpp
 	BluetoothDeviceView.cpp

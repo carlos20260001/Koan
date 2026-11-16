@@ -14,7 +14,7 @@ ScreenSaver Spider :
 ;
 
 DoCatalogs Spider :
-	x-vnd.Haiku-SpiderScreensaver
+	x-vnd.vos-SpiderScreensaver
 	:
 	SpiderSaver.cpp	
 	SpiderView.cpp

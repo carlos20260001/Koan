@@ -167,7 +167,7 @@ static bigtime_t cpu_time(team_id team)
 }
 static team_id app_server()
 {
-    team_id team=be_roster->TeamFor("application/x-vnd.Haiku-app_server");
+    team_id team=be_roster->TeamFor("application/x-vnd.vos-app_server");
     require(team>=B_OK,"app_server team"); return team;
 }
 struct Arguments { bool benchmark; unsigned width,height,frames; };

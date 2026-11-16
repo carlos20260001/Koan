@@ -1,4 +1,4 @@
-1	dutch; flemish	x-vnd.Haiku-SMTP	815985329
+1	dutch; flemish	x-vnd.vos-SMTP	815985329
 POP3 authentication failed. The server said:\n	smtp		POP3 authenticatie gefaald. De server zegt:\n
 Destination:	ConfigView		Doel:
 Error while logging in to %serv	smtp		Fout bij het inloggen in %serv

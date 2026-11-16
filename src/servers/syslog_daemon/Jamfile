@@ -14,7 +14,7 @@ Application syslog_daemon :
 ;
 
 DoCatalogs syslog_daemon :
-	x-vnd.Haiku-SystemLogger
+	x-vnd.vos-SystemLogger
 	:
 	SyslogDaemon.cpp
 ;

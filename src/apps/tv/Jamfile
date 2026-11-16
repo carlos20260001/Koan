@@ -13,7 +13,7 @@ Application TV :
 ;
 
 DoCatalogs TV :
-	x-vnd.Haiku.TV
+	x-vnd.vos.TV
 	:
 	MainApp.cpp
 	MainWin.cpp

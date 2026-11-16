@@ -3,4 +3,4 @@
 #include "NetFSServerRosterDefs.h"
 
 const char* kNetFSServerSignature
-	= "application/x-vnd.haiku-netfs_server";
+	= "application/x-vnd.vos-netfs_server";

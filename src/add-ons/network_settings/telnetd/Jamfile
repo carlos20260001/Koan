@@ -13,6 +13,6 @@ Addon TelnetService :
 		[ TargetLibstdc++ ] localestub
 ;
 
-DoCatalogs TelnetService : x-vnd.Haiku-TelnetService :
+DoCatalogs TelnetService : x-vnd.vos-TelnetService :
 	TelnetServiceAddOn.cpp
 ;

@@ -29,7 +29,7 @@ Application E-mail
 
 DoCatalogs E-mail
 	:
-	x-vnd.Haiku-Mail
+	x-vnd.vos-Mail
 	:
 	AutoConfigView.cpp
 	AutoConfigWindow.cpp

@@ -1,4 +1,4 @@
-1	ukrainian	x-vnd.Haiku-MatchHeader	1946584206
+1	ukrainian	x-vnd.vos-MatchHeader	1946584206
 Delete message	ConfigView		Видалити повідомлення
 Match \"%attribute\" against \"%regex\"	RuleFilter		Зіставити \«%attribute\» з \«%regex\»
 Match header	RuleFilter		Співпадаючий заголовок

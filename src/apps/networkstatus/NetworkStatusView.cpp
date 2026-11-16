@@ -580,7 +580,7 @@ NetworkStatusView::_Update(bool force)
 void
 NetworkStatusView::_OpenNetworksPreferences()
 {
-	status_t status = be_roster->Launch("application/x-vnd.Haiku-Network");
+	status_t status = be_roster->Launch("application/x-vnd.vos-Network");
 	if (status != B_OK && status != B_ALREADY_RUNNING) {
 		BString errorMessage(B_TRANSLATE("Launching the network preflet "
 			"failed.\n\nError: "));

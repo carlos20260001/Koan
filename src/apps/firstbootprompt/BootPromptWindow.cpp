@@ -427,7 +427,7 @@ BootPromptWindow::_PopulateLanguages()
 
 	BMessage installedCatalogs;
 	BLocaleRoster::Default()->GetAvailableCatalogs(&installedCatalogs,
-		"x-vnd.Haiku-FirstBootPrompt");
+		"x-vnd.vos-FirstBootPrompt");
 
 	BFont font;
 	fLanguagesListView->GetFont(&font);

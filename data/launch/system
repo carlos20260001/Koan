@@ -1,56 +1,56 @@
-service x-vnd.Haiku-registrar {
+service x-vnd.vos-registrar {
 	launch /system/servers/registrar
 	port auth {
 		capacity 100
 	}
 }
 
-service x-vnd.Haiku-debug_server {
+service x-vnd.vos-debug_server {
 	launch /system/servers/debug_server
 }
 
-service x-vnd.Haiku-package_daemon {
+service x-vnd.vos-package_daemon {
 	launch /system/servers/package_daemon
 }
 
-service x-vnd.Haiku-SystemLogger {
+service x-vnd.vos-SystemLogger {
 	launch /system/servers/syslog_daemon
 	port logger {
 		capacity 256
 	}
 }
 
-service x-vnd.Haiku-mount_server {
+service x-vnd.vos-mount_server {
 	launch /system/servers/mount_server
 }
 
-service x-vnd.Haiku-mcp_server {
+service x-vnd.vos-mcp_server {
 	launch /system/servers/mcp_server
 	no_safemode
 	on initial_volumes_mounted
 }
 
-service x-vnd.Haiku-media_server {
+service x-vnd.vos-media_server {
 	launch /system/servers/media_server
 	no_safemode
 	legacy
 	on initial_volumes_mounted
 }
 
-service x-vnd.Haiku-midi_server {
+service x-vnd.vos-midi_server {
 	launch /system/servers/midi_server
 	no_safemode
 	on_demand
 }
 
-service x-vnd.Haiku-bluetooth_server {
+service x-vnd.vos-bluetooth_server {
 	launch /system/servers/bluetooth_server
 	no_safemode
 	legacy
 	on initial_volumes_mounted
 }
 
-service x-vnd.Haiku-net_server {
+service x-vnd.vos-net_server {
 	launch /system/servers/net_server
 	no_safemode
 	legacy
@@ -62,25 +62,25 @@ service x-vnd.Be-PSRV {
 	on_demand
 }
 
-service x-vnd.Haiku-location_server {
+service x-vnd.vos-location_server {
 	launch /system/servers/location_server
 	no_safemode
 	on_demand
 }
 
-service x-vnd.Haiku-mdns_server {
+service x-vnd.vos-mdns_server {
 	launch /system/servers/mdns_server
 	no_safemode
 	on_demand
 }
 
-service x-vnd.Haiku-notification_server {
+service x-vnd.vos-notification_server {
 	launch /system/servers/notification_server
 	no_safemode
 	on_demand
 }
 
-service x-vnd.Haiku-media_controls_server {
+service x-vnd.vos-media_controls_server {
 	launch /system/servers/media_controls_server
 	no_safemode
 	on_demand
@@ -88,37 +88,37 @@ service x-vnd.Haiku-media_controls_server {
 
 # air/OS: started when an assistive technology (the screen reader) subscribes;
 # it quits again once the last one has left (docs/airos/ACCESSIBILITY.md)
-service x-vnd.Haiku-accessibility_server {
+service x-vnd.vos-accessibility_server {
 	launch /system/servers/accessibility_server
 	no_safemode
 	on_demand
 }
 
-service x-vnd.Haiku-osd_server {
+service x-vnd.vos-osd_server {
 	launch /system/servers/osd_server
 	no_safemode
 	on_demand
 }
 
-service x-vnd.Haiku-quick_look_server {
+service x-vnd.vos-quick_look_server {
 	launch /system/servers/quick_look_server
 	no_safemode
 	on_demand
 }
 
-service x-vnd.Haiku-power_daemon {
+service x-vnd.vos-power_daemon {
 	launch /system/servers/power_daemon
 	no_safemode
 	legacy
 }
 
-job x-vnd.Haiku-cddb_lookup {
+job x-vnd.vos-cddb_lookup {
 	launch /system/bin/cddb_lookup
 	no_safemode
 	on volume_mounted
 }
 
 # target login
-job x-vnd.Haiku-autologin {
+job x-vnd.vos-autologin {
 	launch /system/bin/autologin
 }

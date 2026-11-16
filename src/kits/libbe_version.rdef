@@ -11,4 +11,4 @@ resource app_version {
 	long_info = "©2001-2026 Haiku Inc."
 };
 
-resource app_signature "application/x-vnd.Haiku-libbe" ;
+resource app_signature "application/x-vnd.vos-libbe" ;

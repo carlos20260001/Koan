@@ -1,7 +1,7 @@
 
-resource app_signature "application/x-vnd.Haiku.PatchBay";
+resource app_signature "application/x-vnd.vos.PatchBay";
 
-resource app_name_catalog_entry "application/x-vnd.Haiku.PatchBay:System name:PatchBay";
+resource app_name_catalog_entry "application/x-vnd.vos.PatchBay:System name:PatchBay";
 
 resource app_version {
 	major  = 1,

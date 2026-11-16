@@ -31,7 +31,7 @@ enum {
 		= ENABLE_DPMS_STAND_BY | ENABLE_DPMS_SUSPEND | ENABLE_DPMS_OFF
 };
 
-#define SCREEN_BLANKER_SIG "application/x-vnd.Haiku.screenblanker"
+#define SCREEN_BLANKER_SIG "application/x-vnd.vos.screenblanker"
 
 // While any team owns a port with this name, the screen saver does not start
 // on its own (as if the user were active); a blank corner still starts it.

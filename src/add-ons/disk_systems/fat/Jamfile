@@ -15,7 +15,7 @@ Addon <disk_system>fat :
 ;
 
 DoCatalogs <disk_system>fat :
-	x-vnd.Haiku-FATAddOn
+	x-vnd.vos-FATAddOn
 	:
 	InitializeParameterEditor.cpp
 ;

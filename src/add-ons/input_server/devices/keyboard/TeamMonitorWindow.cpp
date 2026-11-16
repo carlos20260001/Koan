@@ -341,7 +341,7 @@ TeamMonitorWindow::MessageReceived(BMessage* msg)
 		case TM_FORCE_REBOOT:
 			BRoster::Private().ShutDown(true, false, false);
 #else	// !__VOS__
-			be_roster->Launch("application/x-vnd.Haiku-Terminal");
+			be_roster->Launch("application/x-vnd.vos-Terminal");
 			PostMessage(B_QUIT_REQUESTED);
 			break;
 

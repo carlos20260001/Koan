@@ -2,7 +2,7 @@
  * IntelDiskAddOn.rdef
  */
 
-resource app_signature "application/x-vnd.Haiku-IntelDiskAddOn";
+resource app_signature "application/x-vnd.vos-IntelDiskAddOn";
 
 resource app_version {
 	major  = 1,

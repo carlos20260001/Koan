@@ -13,6 +13,6 @@ Addon SSHService :
 		[ TargetLibstdc++ ] localestub
 ;
 
-DoCatalogs SSHService : x-vnd.Haiku-SSHService :
+DoCatalogs SSHService : x-vnd.vos-SSHService :
 	SSHServiceAddOn.cpp
 ;

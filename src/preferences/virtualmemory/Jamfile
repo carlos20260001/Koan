@@ -18,7 +18,7 @@ if ! $(TARGET_PLATFORM_HAIKU_COMPATIBLE) {
 }
 
 DoCatalogs VirtualMemory :
-    x-vnd.Haiku-VirtualMemory
+    x-vnd.vos-VirtualMemory
     :
     VirtualMemory.cpp
     SettingsWindow.cpp

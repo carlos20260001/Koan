@@ -7,7 +7,7 @@ Application tgainfo :
 AddResources tgainfo : tgainfo.rdef ;
 
 #DoCatalogs tgainfo :
-#	x-vnd.Haiku-tgainfo
+#	x-vnd.vos-tgainfo
 #	:
 #	tgainfo.cpp
 #;

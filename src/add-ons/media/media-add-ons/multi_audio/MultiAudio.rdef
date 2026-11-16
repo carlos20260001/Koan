@@ -2,7 +2,7 @@
  * MultiAudio.rdef
  */
 
-resource app_signature "application/x-vnd.Haiku-hmulti_audio.media_addon";
+resource app_signature "application/x-vnd.vos-hmulti_audio.media_addon";
 
 resource app_version {
 	major  = 1,

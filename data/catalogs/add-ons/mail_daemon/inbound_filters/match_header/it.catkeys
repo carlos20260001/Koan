@@ -1,4 +1,4 @@
-1	italian	x-vnd.Haiku-MatchHeader	1946584206
+1	italian	x-vnd.vos-MatchHeader	1946584206
 Delete message	ConfigView		Cancella messaggio
 Match \"%attribute\" against \"%regex\"	RuleFilter		Controlla \"%attribute\" rispetto a \"%regex\"
 Match header	RuleFilter		Intestazione corrispondente

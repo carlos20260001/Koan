@@ -13,7 +13,7 @@
 
 int main()
 {
-	BApplication app("application/x-vnd.Haiku-FullTextSearch");
+	BApplication app("application/x-vnd.vos-FullTextSearch");
 
 	SearchWindow* window = new SearchWindow(BRect(50, 50, 500, 250));
 	window->Show();

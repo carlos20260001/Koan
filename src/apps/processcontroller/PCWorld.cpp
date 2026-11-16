@@ -37,10 +37,10 @@ public:
 };
 
 
-const char* kSignature = "application/x-vnd.Haiku-ProcessController";
+const char* kSignature = "application/x-vnd.vos-ProcessController";
 const char* kTrackerSig = "application/x-vnd.Be-TRAK";
 const char* kDeskbarSig = "application/x-vnd.Be-TSKB";
-const char* kTerminalSig = "application/x-vnd.Haiku-Terminal";
+const char* kTerminalSig = "application/x-vnd.vos-Terminal";
 const char* kPreferencesFileName = "ProcessController Prefs";
 
 const char*	kPosPrefName = "Position";

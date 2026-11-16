@@ -1,7 +1,7 @@
 
 resource(1, "BEOS:FILE_TYPES") message;
 
-resource(1, "BEOS:APP_SIG") #'MIMS' "application/x-vnd.Haiku-powermanagement";
+resource(1, "BEOS:APP_SIG") #'MIMS' "application/x-vnd.vos-powermanagement";
 
 resource app_version
 {

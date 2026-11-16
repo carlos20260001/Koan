@@ -3758,7 +3758,7 @@ BWindow::_HandleKeyDown(BMessage* event)
 		// With no modifier keys the best way to get a screenshot is by
 		// calling the screenshot CLI
 		if (modifiers == 0) {
-			be_roster->Launch("application/x-vnd.haiku-screenshot-cli");
+			be_roster->Launch("application/x-vnd.vos-screenshot-cli");
 			return true;
 		}
 
@@ -3768,7 +3768,7 @@ BWindow::_HandleKeyDown(BMessage* event)
 			message.AddString("argv", "screenshot");
 			message.AddString("argv", "--area");
 			message.AddInt32("argc", 2);
-			be_roster->Launch("application/x-vnd.haiku-screenshot-cli", &message);
+			be_roster->Launch("application/x-vnd.vos-screenshot-cli", &message);
 			return true;
 		}
 
@@ -3786,7 +3786,7 @@ BWindow::_HandleKeyDown(BMessage* event)
 			message.AddString("argv", "--silent");
 		}
 		message.AddInt32("argc", argc);
-		be_roster->Launch("application/x-vnd.haiku-screenshot", &message);
+		be_roster->Launch("application/x-vnd.vos-screenshot", &message);
 		return true;
 	}
 

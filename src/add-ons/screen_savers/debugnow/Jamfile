@@ -11,7 +11,7 @@ ScreenSaver DebugNow :
 ;
 
 DoCatalogs DebugNow :
-	x-vnd.Haiku-DebugNowScreensaver
+	x-vnd.vos-DebugNowScreensaver
 	:
 	DebugNow.cpp
 ;

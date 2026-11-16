@@ -374,13 +374,13 @@ AccessibilityServer::_IsEligible(team_id team) const
 
 	// system servers that are not BApplications or have no user interface
 	static const char* kSkip[] = {
-		"application/x-vnd.Haiku-app_server",
-		"application/x-vnd.haiku-registrar",
-		"application/x-vnd.Haiku-debug_server",
-		"application/x-vnd.Haiku-launch_daemon",
-		"application/x-vnd.Haiku-package_daemon",
-		"application/x-vnd.Haiku-net_server",
-		"application/x-vnd.Haiku-syslog_daemon",
+		"application/x-vnd.vos-app_server",
+		"application/x-vnd.vos-registrar",
+		"application/x-vnd.vos-debug_server",
+		"application/x-vnd.vos-launch_daemon",
+		"application/x-vnd.vos-package_daemon",
+		"application/x-vnd.vos-net_server",
+		"application/x-vnd.vos-syslog_daemon",
 		NULL
 	};
 	for (int32 i = 0; kSkip[i] != NULL; i++) {

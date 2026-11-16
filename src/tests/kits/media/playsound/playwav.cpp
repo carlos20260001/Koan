@@ -88,7 +88,7 @@ main(int argc, char *argv[])
 	// Good relations with the Wookiees, I have. 
 	signal(SIGINT, keyb_int);
 
-	new BApplication("application/x-vnd.Haiku-playwav");
+	new BApplication("application/x-vnd.vos-playwav");
 	finished = create_sem(0, "finish wait");
 	port = create_port(64, "buffer");
 	

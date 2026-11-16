@@ -14,7 +14,7 @@ Application Login :
 ;
 
 DoCatalogs Login :
-	x-vnd.Haiku-Login
+	x-vnd.vos-Login
 	:
 	LoginApp.cpp
 	DesktopWindow.cpp

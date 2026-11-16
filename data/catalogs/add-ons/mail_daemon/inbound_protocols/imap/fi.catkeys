@@ -1,4 +1,4 @@
-1	finnish	x-vnd.Haiku-IMAP	1343128980
+1	finnish	x-vnd.vos-IMAP	1343128980
 Could not connect to server \"%server%\":\n%error%	IMAPFolderConfig		Yhdistäminen palvelimelle ”%server%” epäonnistui:\n%error%
 Updating subscriptions to IMAP folders, please be patient…	IMAPFolderConfig		Päivitetään IMAP-kansioiden tilausta, kärsivällisyyttä…
 Failed to fetch available storage.	IMAPFolderConfig		Saatavilla olevan tallennuspaikan noutaminen epäonnistui.

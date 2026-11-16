@@ -250,7 +250,7 @@ StdBinCommands
 
 # Localization of some applications
 DoCatalogs dstcheck
-	: x-vnd.Haiku-cmd-dstconfig
+	: x-vnd.vos-cmd-dstconfig
 	: dstcheck.cpp
 ;
 

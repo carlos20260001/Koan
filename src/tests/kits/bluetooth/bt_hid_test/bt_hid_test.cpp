@@ -576,7 +576,7 @@ class TestApp : public BApplication {
 public:
 	TestApp(const Bytes& descriptor)
 		:
-		BApplication("application/x-vnd.Haiku-bt_hid_test"),
+		BApplication("application/x-vnd.vos-bt_hid_test"),
 		fDescriptor(descriptor)
 	{
 	}

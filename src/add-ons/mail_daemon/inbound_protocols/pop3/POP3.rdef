@@ -2,7 +2,7 @@
  * POP3.rdef
  */
 
-resource app_signature "application/x-vnd.Haiku-POP3";
+resource app_signature "application/x-vnd.vos-POP3";
 
 resource app_version {
 	major  = 1,

@@ -1,4 +1,4 @@
-1	korean	x-vnd.Haiku-MatchHeader	1946584206
+1	korean	x-vnd.vos-MatchHeader	1946584206
 Delete message	ConfigView		메세지 삭제
 Match \"%attribute\" against \"%regex\"	RuleFilter		\"%attribute\" 속성이 \"%regex\" 조건에 일치
 Match header	RuleFilter		헤더 일치

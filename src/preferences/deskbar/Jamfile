@@ -13,7 +13,7 @@ Application <preference>Deskbar
 
 DoCatalogs <preference>Deskbar
 	:
-	x-vnd.Haiku-DeskbarPreferences
+	x-vnd.vos-DeskbarPreferences
 	:
 	DeskbarPreferences.cpp
 ;

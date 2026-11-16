@@ -2,7 +2,7 @@
  * nfs4_idmapper_server.rdef
  */
 
-resource app_signature "application/x-vnd.Haiku-nfs4_idmapper-server";
+resource app_signature "application/x-vnd.vos-nfs4_idmapper-server";
 
 resource app_flags B_EXCLUSIVE_LAUNCH | B_BACKGROUND_APP;
 

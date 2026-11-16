@@ -490,11 +490,11 @@ MainWindow::MessageReceived(BMessage* message)
 			break;
 
 		case MSG_MANAGE_REPOS:
-			be_roster->Launch("application/x-vnd.Haiku-Repositories");
+			be_roster->Launch("application/x-vnd.vos-Repositories");
 			break;
 
 		case MSG_SOFTWARE_UPDATER:
-			be_roster->Launch("application/x-vnd.haiku-softwareupdater");
+			be_roster->Launch("application/x-vnd.vos-softwareupdater");
 			break;
 
 		case MSG_LOG_IN:

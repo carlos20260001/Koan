@@ -1,4 +1,4 @@
-1	french	x-vnd.Haiku-SMTP	815985329
+1	french	x-vnd.vos-SMTP	815985329
 POP3 authentication failed. The server said:\n	smtp		L’authentification POP3 a échoué. Le serveur a indiqué :\n
 Destination:	ConfigView		Destination :
 Error while logging in to %serv	smtp		Impossible de se connecter à %serv

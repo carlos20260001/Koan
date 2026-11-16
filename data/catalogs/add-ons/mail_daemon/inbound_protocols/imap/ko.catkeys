@@ -1,4 +1,4 @@
-1	korean	x-vnd.Haiku-IMAP	1343128980
+1	korean	x-vnd.vos-IMAP	1343128980
 Could not connect to server \"%server%\":\n%error%	IMAPFolderConfig		\"%server%\" 서버에 연결할 수 없습니다 : \n%error%
 Updating subscriptions to IMAP folders, please be patient…	IMAPFolderConfig		IMAP 폴더 구독을 업데이트하는 중입니다. 잠시만 기다려주세요…
 Failed to fetch available storage.	IMAPFolderConfig		사용 가능한 저장소를 가져오는 데 실패했습니다.

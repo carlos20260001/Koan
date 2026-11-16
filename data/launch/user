@@ -1,4 +1,4 @@
-service x-vnd.Haiku-app_server {
+service x-vnd.vos-app_server {
 	env /system/boot/SetupEnvironment
 	launch /system/servers/app_server
 }
@@ -17,7 +17,7 @@ target desktop {
 		on initial_volumes_mounted
 	}
 
-	job x-vnd.Haiku-LaunchBox {
+	job x-vnd.vos-LaunchBox {
 		launch /system/apps/LaunchBox
 		if setting ~/config/settings/LaunchBox/main_settings autostart
 		on initial_volumes_mounted
@@ -88,12 +88,12 @@ target desktop {
 # ICU may not find its data (as on arm64), leaving the language list empty.
 target first_boot {
 	env /system/boot/SetupEnvironment
-	job x-vnd.Haiku-FirstBootPrompt
+	job x-vnd.vos-FirstBootPrompt
 }
 
 target installer {
 	env /system/boot/SetupEnvironment
-	job x-vnd.Haiku-Installer
+	job x-vnd.vos-Installer
 }
 
 run {

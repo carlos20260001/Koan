@@ -1,4 +1,4 @@
-resource app_signature "application/x-vnd.Haiku-VPNInterface";
+resource app_signature "application/x-vnd.vos-VPNInterface";
 
 resource app_version {
 	major  = 1,

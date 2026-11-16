@@ -1,4 +1,4 @@
-1	romanian	x-vnd.Haiku-MatchHeader	1946584206
+1	romanian	x-vnd.vos-MatchHeader	1946584206
 Delete message	ConfigView		Șterge mesajul
 Match \"%attribute\" against \"%regex\"	RuleFilter		Potrivește \„%attribute\” peste \„%regex\”
 Match header	RuleFilter		Potrivește antetul

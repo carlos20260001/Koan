@@ -17,7 +17,7 @@
 
 
 VirtualMemory::VirtualMemory()
-	: BApplication("application/x-vnd.Haiku-VirtualMemory")
+	: BApplication("application/x-vnd.vos-VirtualMemory")
 {
 }
 

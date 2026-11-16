@@ -48,7 +48,7 @@ clip(BView* view, int how)
 int
 main(int argc, char** argv)
 {
-	BApplication app("application/x-vnd.Haiku-layer-clipping-test");
+	BApplication app("application/x-vnd.vos-layer-clipping-test");
 	BBitmap* bitmap = new BBitmap(kBounds, B_BITMAP_ACCEPTS_VIEWS, B_RGB32);
 	BView* view = new BView(kBounds, "v", B_FOLLOW_NONE, B_WILL_DRAW);
 	bitmap->AddChild(view);

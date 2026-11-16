@@ -1,4 +1,4 @@
-resource app_signature "application/x-vnd.Haiku-mcp_server";
+resource app_signature "application/x-vnd.vos-mcp_server";
 resource app_flags B_SINGLE_LAUNCH | B_BACKGROUND_APP;
 resource vector_icon { import "mcp.hvif" };
 resource app_version {

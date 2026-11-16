@@ -149,7 +149,7 @@ class Application : public BApplication {
 
 
 Application::Application()
-	: BApplication("application/x-vnd.haiku-layers_test")
+	: BApplication("application/x-vnd.vos-layers_test")
 {
 }
 

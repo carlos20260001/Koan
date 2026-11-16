@@ -1,5 +1,5 @@
 
-resource app_signature "application/x-vnd.haiku-print-addon-server";
+resource app_signature "application/x-vnd.vos-print-addon-server";
 
 resource app_version {
 	major = 1,

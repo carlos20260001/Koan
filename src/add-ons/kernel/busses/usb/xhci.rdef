@@ -2,7 +2,7 @@
  * xhci.rdef
  */
 
-resource app_signature "application/x-vnd.haiku-xhci";
+resource app_signature "application/x-vnd.vos-xhci";
 
 resource app_version {
 	major  = 1,

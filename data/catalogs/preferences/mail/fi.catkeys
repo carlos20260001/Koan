@@ -1,4 +1,4 @@
-1	finnish	x-vnd.Haiku-Mail	2750130554
+1	finnish	x-vnd.vos-Mail	2750130554
 Account settings	AutoConfigWindow		Tiliasetukset
 \t\t· Outgoing	Config Window		\t\t· Lähtevä
 An error occurred while creating the config view: %error.	Config Views		Asetusnäkymää luodessa tapahtui virhe: %error.

@@ -358,7 +358,7 @@ WiFiWindow::MessageReceived(BMessage* message)
 			break;
 
 		case kMsgAdvanced:
-			be_roster->Launch("application/x-vnd.Haiku-Network");
+			be_roster->Launch("application/x-vnd.vos-Network");
 			break;
 
 		case kMsgWiFiJoinOther:

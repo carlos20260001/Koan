@@ -33,7 +33,7 @@
 #define QUOTED_NAME B_UTF8_OPEN_QUOTE "%name%" B_UTF8_CLOSE_QUOTE
 
 
-static const char* kSignature = "application/x-vnd.Haiku-WiFiStatus";
+static const char* kSignature = "application/x-vnd.vos-WiFiStatus";
 static const char* kItemName = "WiFiStatus";
 
 static const uint32 kMsgMenuJoin = 'wsjn';

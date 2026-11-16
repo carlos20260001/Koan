@@ -2,7 +2,7 @@
 	ppp_up.rdef
 */
 
-resource app_signature "application/x-vnd.haiku.ppp_up";
+resource app_signature "application/x-vnd.vos.ppp_up";
 
 /* BEOS:APP_FLAGS :
    00000000 = 							   SINGLE LAUNCH

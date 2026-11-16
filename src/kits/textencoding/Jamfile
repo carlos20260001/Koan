@@ -23,7 +23,7 @@ for architectureObject in [ MultiArchSubDirSetup ] {
 }
 
 DoCatalogs libtextencoding.so :
-	x-vnd.Haiku-libtextencoding
+	x-vnd.vos-libtextencoding
 	:
 	character_sets.cpp
 ;

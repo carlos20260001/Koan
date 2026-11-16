@@ -20,7 +20,7 @@ Application Input :
 	: Input.rdef
 	;
 DoCatalogs Input :
-	x-vnd.Haiku-Input
+	x-vnd.vos-Input
 	:
 	Input.cpp
 	InputDeviceView.cpp

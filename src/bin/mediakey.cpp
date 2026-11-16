@@ -193,11 +193,11 @@ main(int argc, char** argv)
 		argi++;
 	}
 	if (argi == argc - 1 && strcmp(argv[argi], "status") == 0) {
-		BApplication app("application/x-vnd.Haiku-mediakey");
+		BApplication app("application/x-vnd.vos-mediakey");
 		return print_status();
 	}
 	if (argi == argc - 2 && strcmp(argv[argi], "seek") == 0) {
-		BApplication app("application/x-vnd.Haiku-mediakey");
+		BApplication app("application/x-vnd.vos-mediakey");
 		double seconds = atof(argv[argi + 1]);
 		if (seconds < 0)
 			usage(argv[0]);
@@ -214,7 +214,7 @@ main(int argc, char** argv)
 	}
 
 	// Replies need a looper of our own.
-	BApplication app("application/x-vnd.Haiku-mediakey");
+	BApplication app("application/x-vnd.vos-mediakey");
 
 	// Players registered with the media controls come first.
 	if (send_to_media_controls(media_key_action(key)))

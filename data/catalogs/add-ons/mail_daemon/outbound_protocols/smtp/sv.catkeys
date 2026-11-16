@@ -1,4 +1,4 @@
-1	swedish	x-vnd.Haiku-SMTP	815985329
+1	swedish	x-vnd.vos-SMTP	815985329
 POP3 authentication failed. The server said:\n	smtp		POP3 verifiering misslyckades. Servern sa:\n
 Destination:	ConfigView		Mål:
 Error while logging in to %serv	smtp		Fel vid inloggning till %serv

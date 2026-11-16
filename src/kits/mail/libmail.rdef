@@ -2,7 +2,7 @@
  * libmail.rdef
  */
 
-resource app_signature "application/x-vnd.Haiku-libmail";
+resource app_signature "application/x-vnd.vos-libmail";
 
 resource app_version {
 	major  = 1,

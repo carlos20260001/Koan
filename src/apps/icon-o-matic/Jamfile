@@ -304,7 +304,7 @@ Application Icon-O-Matic :
 ;
 
 DoCatalogs Icon-O-Matic :
-	x-vnd.haiku-icon_o_matic
+	x-vnd.vos-icon_o_matic
 	:
 	MainWindow.cpp
 	IconEditorApp.cpp

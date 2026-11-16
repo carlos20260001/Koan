@@ -2,7 +2,7 @@
  * dns_resolver_server.rdef
  */
 
-resource app_signature "application/x-vnd.Haiku-dns-resolver-server";
+resource app_signature "application/x-vnd.vos-dns-resolver-server";
 
 resource app_flags B_EXCLUSIVE_LAUNCH | B_BACKGROUND_APP;
 

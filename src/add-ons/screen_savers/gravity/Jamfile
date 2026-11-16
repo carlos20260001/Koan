@@ -36,7 +36,7 @@ ScreenSaver Gravity :
 ;
 
 DoCatalogs Gravity :
-	x-vnd.Haiku-GravityScreensaver
+	x-vnd.vos-GravityScreensaver
 	:
 	$(sources)
 ;

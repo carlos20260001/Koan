@@ -294,7 +294,7 @@ MainWindow::MessageReceived(BMessage* message)
 
 int main(int argc, char** argv)
 {
-	BApplication app("application/x-vnd.Haiku-MixerToy");
+	BApplication app("application/x-vnd.vos-MixerToy");
 	(new MainWindow())->Show();
 	app.Run();
 }

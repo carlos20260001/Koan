@@ -1,5 +1,5 @@
 
-resource app_signature "application/x-vnd.Haiku-net_server";
+resource app_signature "application/x-vnd.vos-net_server";
 
 resource app_flags B_EXCLUSIVE_LAUNCH | B_BACKGROUND_APP;
 

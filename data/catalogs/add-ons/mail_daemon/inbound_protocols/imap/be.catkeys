@@ -1,4 +1,4 @@
-1	belarusian	x-vnd.Haiku-IMAP	1343128980
+1	belarusian	x-vnd.vos-IMAP	1343128980
 Could not connect to server \"%server%\":\n%error%	IMAPFolderConfig		Немагчыма далучыцца да  \"%server%\":\n%error%
 Updating subscriptions to IMAP folders, please be patient…	IMAPFolderConfig		Абнаўленне падпісак IMAP, калі ласка пачкайце…
 Failed to fetch available storage.	IMAPFolderConfig		Памылка падчас атрымання дадзеных.

@@ -407,7 +407,7 @@
 	       clicked by the user.
 
 	The value \c app should be a valid application signature, for example
-	\c 'application/x-vnd.Haiku-StyledEdit'.
+	\c 'application/x-vnd.vos-StyledEdit'.
 
 	Using this property has precedence on when BNotification::SetOnClickFile()
 	is used. If you want interacting with the notification opening a specific

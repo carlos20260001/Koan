@@ -97,7 +97,7 @@ class Views : public BApplication {
 public:
 	Views() 
 		:
-		BApplication("application/x-vnd.haiku.Views") 
+		BApplication("application/x-vnd.vos.Views") 
 	{
 		BRect frameRect;
 		frameRect.Set(100, 100, 300, 300);

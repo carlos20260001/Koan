@@ -31,7 +31,7 @@ Application package_daemon
 ;
 
 DoCatalogs package_daemon :
-	x-vnd.haiku-package_daemon
+	x-vnd.vos-package_daemon
 	:
 	PackageManager.cpp
 	ProblemWindow.cpp

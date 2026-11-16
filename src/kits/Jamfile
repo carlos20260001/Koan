@@ -85,7 +85,7 @@ SEARCH_SOURCE += [ FDirName $(SUBDIR) interface textview_support ] ;
 SEARCH_SOURCE += [ FDirName $(SUBDIR) shared ] ;
 
 DoCatalogs libbe.so
-	: x-vnd.Haiku-libbe
+	: x-vnd.vos-libbe
 	:
 	AboutMenuItem.cpp
 	AboutWindow.cpp

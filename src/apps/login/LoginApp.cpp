@@ -30,7 +30,7 @@
 #undef B_TRANSLATION_CONTEXT
 #define B_TRANSLATION_CONTEXT "Login App"
 
-const char *kLoginAppSig = "application/x-vnd.Haiku-Login";
+const char *kLoginAppSig = "application/x-vnd.vos-Login";
 
 
 LoginApp::LoginApp()

@@ -7,7 +7,7 @@ Application bitsinfo :
 AddResources bitsinfo : bitsinfo.rdef ;
 
 #DoCatalogs bitsinfo :
-#	x-vnd.Haiku-bitsinfo
+#	x-vnd.vos-bitsinfo
 #	:
 #	bitsinfo.cpp
 #;

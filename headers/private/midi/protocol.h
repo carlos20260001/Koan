@@ -26,7 +26,7 @@
 #define MIDI_PROTOCOL_H
 
 // MIME signature of the midi_server application.
-#define MIDI_SERVER_SIGNATURE  "application/x-vnd.Haiku-midi_server"
+#define MIDI_SERVER_SIGNATURE  "application/x-vnd.vos-midi_server"
 
 // Timeout for delivering and responding to messages (microseconds).
 #define TIMEOUT  2000000

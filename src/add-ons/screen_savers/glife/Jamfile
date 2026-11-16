@@ -29,7 +29,7 @@ ScreenSaver GLife :
 ;
 
 DoCatalogs GLife :
-	x-vnd.Haiku-GLifeScreensaver
+	x-vnd.vos-GLifeScreensaver
 	:
 	$(sources)
 ;

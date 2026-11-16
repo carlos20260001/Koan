@@ -17,7 +17,7 @@ Addon <disk_system>bfs :
 ;
 
 DoCatalogs <disk_system>bfs :
-	x-vnd.Haiku-BFSAddOn
+	x-vnd.vos-BFSAddOn
 	:
 	InitializeParameterEditor.cpp
 ;

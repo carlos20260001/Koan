@@ -1,4 +1,4 @@
-1	korean	x-vnd.Haiku-Mail	2750130554
+1	korean	x-vnd.vos-Mail	2750130554
 Account settings	AutoConfigWindow		계정 설정
 \t\t· Outgoing	Config Window		\t\t· 보낸 편지함
 An error occurred while creating the config view: %error.	Config Views		설정 화면을 생성하는 데 오류가 발생하였습니다: %error.

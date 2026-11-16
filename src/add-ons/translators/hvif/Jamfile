@@ -20,7 +20,7 @@ for architectureObject in [ MultiArchSubDirSetup ] {
 }
 
 DoCatalogs HVIFTranslator :
-	x-vnd.Haiku-HVIFTranslator
+	x-vnd.vos-HVIFTranslator
 	:
 	HVIFMain.cpp
 	HVIFTranslator.cpp

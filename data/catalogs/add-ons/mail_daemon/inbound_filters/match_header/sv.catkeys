@@ -1,4 +1,4 @@
-1	swedish	x-vnd.Haiku-MatchHeader	1946584206
+1	swedish	x-vnd.vos-MatchHeader	1946584206
 Delete message	ConfigView		Radera meddelande
 Match \"%attribute\" against \"%regex\"	RuleFilter		Matcha \"%attribute\" mot \"%regex\"
 Match header	RuleFilter		Matcha rubrik

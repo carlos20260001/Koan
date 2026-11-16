@@ -31,7 +31,7 @@
 
 
 #define kMediaControlsServerSignature \
-	"application/x-vnd.Haiku-media_controls_server"
+	"application/x-vnd.vos-media_controls_server"
 
 // The name of the server's Deskbar replicant.
 #define kMediaControlsReplicantName "media_controls"

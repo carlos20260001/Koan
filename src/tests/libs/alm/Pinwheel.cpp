@@ -91,7 +91,7 @@ class Pinwheel : public BApplication {
 public:
 	Pinwheel() 
 		:
-		BApplication("application/x-vnd.haiku.Pinwheel") 
+		BApplication("application/x-vnd.vos.Pinwheel") 
 	{
 		BRect frameRect;
 		frameRect.Set(100, 100, 300, 300);

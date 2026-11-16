@@ -2,7 +2,7 @@
  * MatchHeader.rdef
  */
 
-resource app_signature "application/x-vnd.Haiku-MatchHeader";
+resource app_signature "application/x-vnd.vos-MatchHeader";
 
 resource app_version {
 	major  = 1,

@@ -78,7 +78,7 @@
 #define B_TRANSLATION_CONTEXT "Screen"
 
 
-const char* kBackgroundsSignature = "application/x-vnd.Haiku-Backgrounds";
+const char* kBackgroundsSignature = "application/x-vnd.vos-Backgrounds";
 
 static const bigtime_t kReloadDelay = 300000;
 	// how long we wait after ScreenChanged() before reading the layout again

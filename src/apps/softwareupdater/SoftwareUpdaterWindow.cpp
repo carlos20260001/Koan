@@ -882,7 +882,7 @@ SuperItem::_GetPackageIcon(float listItemHeight)
 	BRect iconRect(0, 0, iconSize - 1, iconSize - 1);
 	BBitmap* packageIcon = new BBitmap(iconRect, 0, B_RGBA32);
 	BMimeType nodeType;
-	nodeType.SetTo("application/x-vnd.haiku-package");
+	nodeType.SetTo("application/x-vnd.vos-package");
 	result = nodeType.GetIcon(packageIcon, icon_size(iconSize));
 	// Get super type icon
 	if (result != B_OK) {

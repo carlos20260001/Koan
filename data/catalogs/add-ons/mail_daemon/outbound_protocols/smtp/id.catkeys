@@ -1,4 +1,4 @@
-1	indonesian	x-vnd.Haiku-SMTP	815985329
+1	indonesian	x-vnd.vos-SMTP	815985329
 POP3 authentication failed. The server said:\n	smtp		Otentifikasi POP3 gagal. Server mengatakan:\n
 Destination:	ConfigView		Tujuan:
 Error while logging in to %serv	smtp		Terjadi kesalahan ketika login ke %serv

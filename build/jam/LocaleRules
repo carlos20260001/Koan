@@ -172,7 +172,7 @@ rule AddCatalogEntryAttribute target
 	# AddCatalogEntryAttribute <target> : <attribute value> ;
 	#
 	# <attribute value> should be of the form
-	#	"x-vnd.Haiku-App:context:string"
+	#	"x-vnd.vos-App:context:string"
 
 	CATALOG_ENTRY on $(target) = "$(2)" ;
 

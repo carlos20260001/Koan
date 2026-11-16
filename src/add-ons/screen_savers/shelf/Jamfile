@@ -9,7 +9,7 @@ ScreenSaver Shelf :
 
 
 DoCatalogs Shelf :
-	x-vnd.Haiku-ShelfScreensaver
+	x-vnd.vos-ShelfScreensaver
 	:
 	Shelf.cpp
 ;

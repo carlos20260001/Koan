@@ -1,7 +1,7 @@
 
-resource app_signature "application/x-vnd.Haiku-Repositories";
+resource app_signature "application/x-vnd.vos-Repositories";
 
-resource app_name_catalog_entry "x-vnd.Haiku-Repositories:System name:Repositories";
+resource app_name_catalog_entry "x-vnd.vos-Repositories:System name:Repositories";
 
 resource app_flags B_SINGLE_LAUNCH;
 

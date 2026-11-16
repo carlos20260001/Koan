@@ -1,4 +1,4 @@
-1	spanish; castilian	x-vnd.Haiku-SMTP	815985329
+1	spanish; castilian	x-vnd.vos-SMTP	815985329
 POP3 authentication failed. The server said:\n	smtp		Fallo de autenticación POP3. El servidor dijo:\n
 Destination:	ConfigView		Destino:
 Error while logging in to %serv	smtp		Error durante el ingreso en %serv

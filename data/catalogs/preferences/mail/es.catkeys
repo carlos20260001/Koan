@@ -1,4 +1,4 @@
-1	spanish; castilian	x-vnd.Haiku-Mail	2750130554
+1	spanish; castilian	x-vnd.vos-Mail	2750130554
 Account settings	AutoConfigWindow		Configuración de la cuenta
 \t\t· Outgoing	Config Window		\t\t· Saliente
 An error occurred while creating the config view: %error.	Config Views		Ocurrió un error al crear la vista de configuración: %error.

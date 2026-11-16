@@ -30,7 +30,7 @@ SEARCH on <src!apps!installer>Utility.cpp = [
 	FDirName $(HAIKU_TOP) src servers launch ] ;
 
 DoCatalogs Installer :
-	x-vnd.Haiku-Installer
+	x-vnd.vos-Installer
 	:
 	EULAWindow.cpp
 	InstallerApp.cpp

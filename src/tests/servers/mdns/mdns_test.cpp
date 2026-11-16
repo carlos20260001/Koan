@@ -75,7 +75,7 @@ main(int argc, char** argv)
 		printf("usage: %s <name>.local [seconds]\n", argv[0]);
 		return 2;
 	}
-	BApplication app("application/x-vnd.Haiku-mdns-test");
+	BApplication app("application/x-vnd.vos-mdns-test");
 	const char* name = argv[1];
 	int seconds = argc > 2 ? atoi(argv[2]) : 0;
 	int failures = 0;

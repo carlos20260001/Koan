@@ -57,7 +57,7 @@ const uint32 kMountNetworkShare		= 'mnsh';
 const uint32 kUnmountNetworkShare	= 'unsh';
 const uint32 kNetworkShareReply		= 'nsrp';
 
-#define kMountServerSignature "application/x-vnd.Haiku-mount_server"
+#define kMountServerSignature "application/x-vnd.vos-mount_server"
 
 
 #endif // _MOUNT_SERVER_H

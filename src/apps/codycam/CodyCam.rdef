@@ -23,9 +23,9 @@ resource vector_icon array {
 	$"03023FF03D3D7A6FBD81013FE8DA495AD5C9C96A"
 };
 
-resource app_signature "application/x-vnd.Haiku-CodyCam";
+resource app_signature "application/x-vnd.vos-CodyCam";
 
-resource app_name_catalog_entry "x-vnd.Haiku-CodyCam:System name:CodyCam";
+resource app_name_catalog_entry "x-vnd.vos-CodyCam:System name:CodyCam";
 
 resource app_version {
 	major  = 1,

@@ -12,7 +12,7 @@ Application osd_server :
 ;
 
 DoCatalogs osd_server :
-	x-vnd.Haiku-osd_server
+	x-vnd.vos-osd_server
 	:
 	LevelView.cpp
 ;

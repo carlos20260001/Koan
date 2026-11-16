@@ -13,6 +13,6 @@ Addon IPv4Interface :
 		[ TargetLibstdc++ ] localestub
 ;
 
-DoCatalogs IPv4Interface : x-vnd.Haiku-IPv4Interface :
+DoCatalogs IPv4Interface : x-vnd.vos-IPv4Interface :
 	IPv4InterfaceAddOn.cpp
 ;

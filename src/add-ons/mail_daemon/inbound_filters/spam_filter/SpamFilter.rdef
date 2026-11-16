@@ -2,7 +2,7 @@
  * SpamFilter.rdef
  */
 
-resource app_signature "application/x-vnd.Haiku-SpamFilter";
+resource app_signature "application/x-vnd.vos-SpamFilter";
 
 resource app_version {
 	major  = 1,

@@ -13,7 +13,7 @@ namespace BPackageKit {
 namespace BPrivate {
 
 
-#define B_PACKAGE_DAEMON_APP_SIGNATURE "application/x-vnd.haiku-package_daemon"
+#define B_PACKAGE_DAEMON_APP_SIGNATURE "application/x-vnd.vos-package_daemon"
 
 
 // message codes for requests to and replies from the daemon

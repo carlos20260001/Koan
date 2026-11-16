@@ -12,7 +12,7 @@ Application media_controls_server :
 ;
 
 DoCatalogs media_controls_server :
-	x-vnd.Haiku-media_controls_server
+	x-vnd.vos-media_controls_server
 	:
 	MediaControlsView.cpp
 	NowPlayingWindow.cpp

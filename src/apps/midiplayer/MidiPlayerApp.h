@@ -27,7 +27,7 @@
 #include <Application.h>
 
 
-#define MIDI_PLAYER_SIGNATURE  "application/x-vnd.Haiku-MidiPlayer"
+#define MIDI_PLAYER_SIGNATURE  "application/x-vnd.vos-MidiPlayer"
 
 
 class MidiPlayerWindow;

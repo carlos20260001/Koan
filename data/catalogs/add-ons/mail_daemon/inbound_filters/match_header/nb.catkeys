@@ -1,4 +1,4 @@
-1	bokmål, norwegian; norwegian bokmål	x-vnd.Haiku-MatchHeader	1946584206
+1	bokmål, norwegian; norwegian bokmål	x-vnd.vos-MatchHeader	1946584206
 Delete message	ConfigView		Slett melding
 Match \"%attribute\" against \"%regex\"	RuleFilter		Match \"%attribute\" mot \"%regex\"
 Match header	RuleFilter		Match header

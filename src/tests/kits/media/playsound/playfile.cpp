@@ -92,7 +92,7 @@ main(int argc, char *argv[])
 	// Good relations with the Wookiees, I have. 
 	signal(SIGINT, keyb_int);
 
-	new BApplication("application/x-vnd.Haiku-playfile");
+	new BApplication("application/x-vnd.vos-playfile");
 	finished = create_sem(0, "finish wait");
 	
 	printf("playing file...\n");

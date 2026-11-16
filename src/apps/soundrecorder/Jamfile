@@ -20,7 +20,7 @@ Application SoundRecorder :
 ;
 
 DoCatalogs SoundRecorder :
-	x-vnd.Haiku-SoundRecorder
+	x-vnd.vos-SoundRecorder
 	:
 	RecorderWindow.cpp
 	SoundListView.cpp

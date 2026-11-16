@@ -13,7 +13,7 @@ mDNSResponder, `mdns_server` on another air/OS machine) and from this
 machine's `mdns_server` are taken. IPv4 queries only; AAAA records in the
 answers are used.
 
-**Answering.** `mdns_server` (`application/x-vnd.Haiku-mdns_server`, started
+**Answering.** `mdns_server` (`application/x-vnd.vos-mdns_server`, started
 on demand by the launch daemon) answers A questions for names that programs
 register. It publishes nothing by itself, not even the machine's name.
 
@@ -30,7 +30,7 @@ holds fails with `B_NAME_IN_USE`. Constants: `<mdns_server.h>` (private
 headers, `headers/private/net`).
 
 ```cpp
-BMessenger server("application/x-vnd.Haiku-mdns_server");
+BMessenger server("application/x-vnd.vos-mdns_server");
 BMessage request('mdrg');
 request.AddString("name", "5f3a9c1e-2b7d-4c8e-9a1f-3d6b8e2c4a70.local");
 BMessage reply;

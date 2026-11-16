@@ -122,7 +122,7 @@ int main(int argc, char* argv[])
 	if (argc < 2)
 		return -1;
 
-	BApplication app("application/x-vnd.Haiku-VideoDecoder");
+	BApplication app("application/x-vnd.vos-VideoDecoder");
 
 	BWindow* window = new VideoWindow(argv[1]);
 	window->Show();

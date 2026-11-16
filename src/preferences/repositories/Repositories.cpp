@@ -16,7 +16,7 @@
 #undef B_TRANSLATION_CONTEXT
 #define B_TRANSLATION_CONTEXT "RepositoriesApplication"
 
-const char* kAppSignature = "application/x-vnd.Haiku-Repositories";
+const char* kAppSignature = "application/x-vnd.vos-Repositories";
 
 
 RepositoriesApplication::RepositoriesApplication()

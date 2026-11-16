@@ -2,7 +2,7 @@
  * usb.rdef
  */
 
-resource app_signature "application/x-vnd.haiku-usb";
+resource app_signature "application/x-vnd.vos-usb";
 
 resource app_version {
 	major  = 1,

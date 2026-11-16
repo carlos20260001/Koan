@@ -1,6 +1,6 @@
 # Location service
 
-`location_server` (on demand, `application/x-vnd.Haiku-location_server`)
+`location_server` (on demand, `application/x-vnd.vos-location_server`)
 tells programs where the computer is, so that they don't each look it up
 themselves. Messages are in `<location_server.h>` (private headers, `net`).
 

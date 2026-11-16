@@ -215,7 +215,7 @@ Browse mode is a virtual cursor for web pages, where Tab only reaches what
 takes the focus. It works in any window; the tree is fetched again when it
 is more than a second old, and the cursor keeps its place by the node.
 Links inside running text are read with the sentence and are still found by
-"next link". `hey application/x-vnd.Haiku-ScreenReader srBR with
+"next link". `hey application/x-vnd.vos-ScreenReader srBR with
 'kind=int32(1)'` drives it from a script (`srAC` activates).
 
 The review keys are only taken while the screen reader runs.
@@ -233,7 +233,7 @@ rate 175           # words per minute, passed to the engine
 
 Text to speech is haiku#52. The screen reader uses, in this order:
 
-1. a `speech_server` (`application/x-vnd.Haiku-speech_server`, ideally an
+1. a `speech_server` (`application/x-vnd.vos-speech_server`, ideally an
    on-demand launch_daemon service) with the proposed protocol
    `B_SPEECH_SPEAK` ('SPsp': "text", "interrupt", "rate", "client") and
    `B_SPEECH_STOP` ('SPst');
@@ -313,7 +313,7 @@ follows what the WebKit ports for ATK and macOS do:
 # in a QEMU image built with the test programs (UserBuildConfig:
 # AddFilesToHaikuImage home tests : AccessibilityTestApp accessibility_tree_test ;)
 ~/tests/accessibility_tree_test                    # checks, prints PASS/FAIL
-~/tests/accessibility_tree_test --dump application/x-vnd.Haiku-Network
+~/tests/accessibility_tree_test --dump application/x-vnd.vos-Network
 ```
 
 Start the screen reader with Option+Command+S, move with Tab in

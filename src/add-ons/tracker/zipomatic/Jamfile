@@ -14,7 +14,7 @@ Application ZipOMatic :
 ;
 
 DoCatalogs ZipOMatic :
-	x-vnd.haiku.zip-o-matic
+	x-vnd.vos.zip-o-matic
 	:
 	ZipOMatic.cpp
 	ZipOMaticWindow.cpp

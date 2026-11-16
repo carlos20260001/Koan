@@ -12,7 +12,7 @@ Application notification_server :
 ;
 
 DoCatalogs notification_server :
-	x-vnd.Haiku-notification_server
+	x-vnd.vos-notification_server
 	:
 	NotificationServer.cpp
 	NotificationView.cpp

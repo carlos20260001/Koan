@@ -51,7 +51,7 @@ class NestedLayout : public BApplication {
 public:
 	NestedLayout() 
 		:
-		BApplication("application/x-vnd.haiku.NestedLayout") 
+		BApplication("application/x-vnd.vos.NestedLayout") 
 	{
 		BRect frameRect;
 		frameRect.Set(100, 100, 300, 300);

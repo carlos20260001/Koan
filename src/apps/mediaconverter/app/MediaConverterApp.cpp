@@ -29,7 +29,7 @@ extern "C" {
 #define B_TRANSLATION_CONTEXT "MediaConverter"
 
 
-const char* kAppSignature = "application/x-vnd.Haiku-MediaConverter";
+const char* kAppSignature = "application/x-vnd.vos-MediaConverter";
 
 
 MediaConverterApp::MediaConverterApp()

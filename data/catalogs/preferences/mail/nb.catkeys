@@ -1,4 +1,4 @@
-1	bokmål, norwegian; norwegian bokmål	x-vnd.Haiku-Mail	2750130554
+1	bokmål, norwegian; norwegian bokmål	x-vnd.vos-Mail	2750130554
 Account settings	AutoConfigWindow		Kontoinnstillinger
 \t\t· Outgoing	Config Window		\t\t· Utgående
 An error occurred while creating the config view: %error.	Config Views		Det oppstod en feil under oppretting av konfigurasjonsvisningen: %error.

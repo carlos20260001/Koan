@@ -1,6 +1,6 @@
-resource app_signature "application/x-vnd.Haiku-BluetoothStatus";
+resource app_signature "application/x-vnd.vos-BluetoothStatus";
 
-resource app_name_catalog_entry "x-vnd.Haiku-BluetoothStatus:System name:BluetoothStatus";
+resource app_name_catalog_entry "x-vnd.vos-BluetoothStatus:System name:BluetoothStatus";
 
 resource app_flags B_SINGLE_LAUNCH | B_BACKGROUND_APP;
 

@@ -20,7 +20,7 @@ Application Appearance :
 	;
 
 DoCatalogs Appearance :
-	x-vnd.Haiku-Appearance
+	x-vnd.vos-Appearance
 	:
 	AntialiasingSettingsView.cpp
 	ColorsView.cpp

@@ -1,4 +1,4 @@
-1	slovak	x-vnd.Haiku-MatchHeader	3544711400
+1	slovak	x-vnd.vos-MatchHeader	3544711400
 Delete message	ConfigView		Zmazať správu
 Match \"%attribute\" against \"%regex\"	RuleFilter		Zhoda \"%attribute\" voči \"%regex\"
 Match header	RuleFilter		Zhoda hlavičky

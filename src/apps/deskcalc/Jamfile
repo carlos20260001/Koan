@@ -15,7 +15,7 @@ Application DeskCalc :
 ;
 
 DoCatalogs DeskCalc :
-	x-vnd.Haiku-DeskCalc
+	x-vnd.vos-DeskCalc
 	:
 	CalcApplication.cpp
 	CalcView.cpp

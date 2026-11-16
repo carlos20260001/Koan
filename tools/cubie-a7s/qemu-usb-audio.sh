@@ -82,7 +82,7 @@ c, _ = s.accept(); c.sendall(open(sys.argv[2], "rb").read()); c.close()
 
 # launch_daemon restarts a killed media_server; stop it through the roster,
 # then its add-on server, which holds the device
-stop_media='launch_roster stop x-vnd.Haiku-media_server; sleep 3; for team in $(ps | grep -a media_addon_server | grep -v grep | awk "{ print \$2 }"); do kill $team; done; sleep 2'
+stop_media='launch_roster stop x-vnd.vos-media_server; sleep 3; for team in $(ps | grep -a media_addon_server | grep -v grep | awk "{ print \$2 }"); do kill $team; done; sleep 2'
 
 {
 	echo "== listusb"; guest "listusb"
@@ -97,7 +97,7 @@ stop_media='launch_roster stop x-vnd.Haiku-media_server; sleep 3; for team in $(
 	server=$!
 	guest "cubie_fetch 10.0.2.2 $((PORT + 1)) /boot/home/tone-media.wav; ls -l /boot/home/tone-media.wav" 60
 	wait $server || true
-	guest "launch_roster start x-vnd.Haiku-media_server; sleep 15; ps | grep -a media_ | grep -v grep" 60
+	guest "launch_roster start x-vnd.vos-media_server; sleep 15; ps | grep -a media_ | grep -v grep" 60
 	echo "-- the hmulti add-on has the device open now:"
 	guest "cubie_audio_test -s 1; true" 30
 	guest "media_client play /boot/home/tone-media.wav 2>&1 | tail -5" 90 || true

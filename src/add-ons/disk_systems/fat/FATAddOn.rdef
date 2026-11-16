@@ -2,7 +2,7 @@
  * FATAddOn.rdef
  */
 
-resource app_signature "application/x-vnd.Haiku-FATAddOn";
+resource app_signature "application/x-vnd.vos-FATAddOn";
 
 resource app_version {
 	major  = 0,

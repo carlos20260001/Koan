@@ -2,7 +2,7 @@
  * Fortune.rdef
  */
 
-resource app_signature "application/x-vnd.Haiku-Fortune";
+resource app_signature "application/x-vnd.vos-Fortune";
 
 resource app_version {
 	major  = 1,

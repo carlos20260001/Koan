@@ -41,7 +41,7 @@ static const char* const kKeyMainSettings = "main_settings";
 
 App::App()
 	:
-	BApplication("application/x-vnd.Haiku-HaikuDepot"),
+	BApplication("application/x-vnd.vos-HaikuDepot"),
 	fMainWindow(NULL),
 	fWindowCount(0),
 	fSettingsRead(false)
@@ -451,7 +451,7 @@ App::_StoreSettings(const BMessage& settings)
 // #pragma mark -
 
 
-static const char* kPackageDaemonSignature = "application/x-vnd.haiku-package_daemon";
+static const char* kPackageDaemonSignature = "application/x-vnd.vos-package_daemon";
 
 
 void

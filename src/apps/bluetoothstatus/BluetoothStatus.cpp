@@ -53,14 +53,14 @@
 
 extern char** environ;
 
-static const char* kSignature = "application/x-vnd.Haiku-BluetoothStatus";
+static const char* kSignature = "application/x-vnd.vos-BluetoothStatus";
 static const char* kItemName = "BluetoothStatus";
 static const char* kPreferencesSignature
-	= "application/x-vnd.Haiku-BluetoothPrefs";
+	= "application/x-vnd.vos-BluetoothPrefs";
 	// The replicant bluetooth_server used to install; an older system may
 	// have left it in the Deskbar.
 static const char* kServerItemName = "BluetoothServerReplicant";
-static const char* kServerJob = "x-vnd.Haiku-bluetooth_server";
+static const char* kServerJob = "x-vnd.vos-bluetooth_server";
 
 static const uint32 kMsgRefresh = 'btrf';
 static const uint32 kMsgOpenPreferences = 'btop';

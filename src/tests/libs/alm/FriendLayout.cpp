@@ -153,7 +153,7 @@ class Friend : public BApplication {
 public:
 	Friend() 
 		:
-		BApplication("application/x-vnd.haiku.Friend") 
+		BApplication("application/x-vnd.vos.Friend") 
 	{
 		BRect frameRect;
 		frameRect.Set(100, 100, 300, 300);

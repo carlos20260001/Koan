@@ -92,7 +92,7 @@ Application Terminal :
 ;
 
 DoCatalogs Terminal :
-	x-vnd.Haiku-Terminal
+	x-vnd.vos-Terminal
 	:
 	AppearPrefView.cpp
 	Arguments.cpp

@@ -1,4 +1,4 @@
-1	english	x-vnd.Haiku-IMAP	1343128980
+1	english	x-vnd.vos-IMAP	1343128980
 Could not connect to server \"%server%\":\n%error%	IMAPFolderConfig		无法连接到服务器 \"%server%\":\n%error%
 Updating subscriptions to IMAP folders, please be patient…	IMAPFolderConfig		正在更新 IMAP 文件夹, 请耐心等待…
 Failed to fetch available storage.	IMAPFolderConfig		获取可用存储失败

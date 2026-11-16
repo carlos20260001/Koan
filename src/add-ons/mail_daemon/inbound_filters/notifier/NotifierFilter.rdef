@@ -2,7 +2,7 @@
  * NewMailNotification.rdef
  */
 
-resource app_signature "application/x-vnd.Haiku-NewMailNotification";
+resource app_signature "application/x-vnd.vos-NewMailNotification";
 
 resource app_version {
 	major  = 1,

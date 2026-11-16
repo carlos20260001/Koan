@@ -1,4 +1,4 @@
-1	portuguese (brazil)	x-vnd.Haiku-SMTP	815985329
+1	portuguese (brazil)	x-vnd.vos-SMTP	815985329
 POP3 authentication failed. The server said:\n	smtp		Autenticação POP3 falhou. O servidor disse:\n
 Destination:	ConfigView		Destino:
 Error while logging in to %serv	smtp		Erro ao logar ao %serv

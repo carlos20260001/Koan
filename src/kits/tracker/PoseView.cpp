@@ -4376,7 +4376,7 @@ BPoseView::CompressSelection()
 			fSelectionList->ItemAt(index)->TargetModel()->EntryRef());
 	}
 
-	be_roster->Launch("application/x-vnd.haiku.zip-o-matic", &refs);
+	be_roster->Launch("application/x-vnd.vos.zip-o-matic", &refs);
 }
 
 
@@ -4395,7 +4395,7 @@ IsExpandable(const Model* model)
 	const char* signature;
 	for (int32 index = 0; apps.FindString("applications", index, &signature)
 			== B_OK; index++) {
-		if (strcasecmp(signature, "application/x-vnd.Haiku-Expander") == 0)
+		if (strcasecmp(signature, "application/x-vnd.vos-Expander") == 0)
 			return true;
 	}
 
@@ -4431,7 +4431,7 @@ BPoseView::ExtractSelectionHere()
 		refs.AddRef("refs",
 			fSelectionList->ItemAt(index)->TargetModel()->EntryRef());
 		refs.AddBool("airos:expand here", true);
-		be_roster->Launch("application/x-vnd.Haiku-Expander", &refs);
+		be_roster->Launch("application/x-vnd.vos-Expander", &refs);
 	}
 }
 

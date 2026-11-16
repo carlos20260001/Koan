@@ -73,7 +73,7 @@ static const int kMaxTocSize = 1024;
 
 CDDBLookup::CDDBLookup()
 	:
-	BApplication("application/x-vnd.Haiku-cddb_lookup")
+	BApplication("application/x-vnd.vos-cddb_lookup")
 {
 }
 

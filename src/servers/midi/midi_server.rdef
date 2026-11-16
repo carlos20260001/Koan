@@ -1,5 +1,5 @@
 
-resource app_signature "application/x-vnd.Haiku-midi_server";
+resource app_signature "application/x-vnd.vos-midi_server";
 
 resource app_flags B_EXCLUSIVE_LAUNCH | B_BACKGROUND_APP;
 

@@ -2,7 +2,7 @@
  * SMTP.rdef
  */
 
-resource app_signature "application/x-vnd.Haiku-SMTP";
+resource app_signature "application/x-vnd.vos-SMTP";
 
 resource app_version {
 	major  = 1,

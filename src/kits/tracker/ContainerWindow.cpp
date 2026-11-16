@@ -2195,7 +2195,7 @@ BContainerWindow::MessageReceived(BMessage* message)
 				break;
 
 			const char* argv[] = { "-w", path.Path(), NULL };
-			be_roster->Launch("application/x-vnd.Haiku-Terminal", 2, argv);
+			be_roster->Launch("application/x-vnd.vos-Terminal", 2, argv);
 			break;
 		}
 

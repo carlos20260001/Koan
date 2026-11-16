@@ -15,7 +15,7 @@ ScreenSaver SlideShowSaver :
 ;
 
 DoCatalogs SlideShowSaver :
-	x-vnd.Haiku-SlideShowSaver
+	x-vnd.vos-SlideShowSaver
 	:
 	SlideShowSaver.cpp
 ;

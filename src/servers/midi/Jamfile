@@ -15,7 +15,7 @@ Application midi_server :
 ;
 
 DoCatalogs midi_server :
-	x-vnd.Haiku-midi_server
+	x-vnd.vos-midi_server
 	:
 	DeviceWatcher.cpp
 	MidiServerApp.cpp

@@ -1,4 +1,4 @@
-resource app_signature "application/x-vnd.haiku-package_daemon";
+resource app_signature "application/x-vnd.vos-package_daemon";
 
 resource app_flags B_EXCLUSIVE_LAUNCH | B_BACKGROUND_APP;
 

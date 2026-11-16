@@ -22,7 +22,7 @@ for architectureObject in [ MultiArchSubDirSetup ] {
 }
 
 DoCatalogs PCXTranslator :
-	x-vnd.Haiku-PCXTranslator
+	x-vnd.vos-PCXTranslator
 	:
 	main.cpp
 	ConfigView.cpp

@@ -1,4 +1,4 @@
-1	slovak	x-vnd.Haiku-Mail	2750130554
+1	slovak	x-vnd.vos-Mail	2750130554
 Account settings	AutoConfigWindow		Nastavenie účtu
 \t\t· Outgoing	Config Window		\t \t · Odchádzajúce
 An error occurred while creating the config view: %error.	Config Views		Vyskytla sa chyba počas vytvárania zobrazenia len na čítanie: %error.

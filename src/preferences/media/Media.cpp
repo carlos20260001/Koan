@@ -96,7 +96,7 @@ old_window_position(BPoint& position)
 
 Media::Media()
 	:
-	BApplication("application/x-vnd.Haiku-Media"),
+	BApplication("application/x-vnd.vos-Media"),
 	fWindow(NULL)
 {
 }

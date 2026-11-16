@@ -113,7 +113,7 @@ class App : public BApplication {
 public:
 	App()
 		:
-		BApplication("application/x-vnd.haiku.text-renderer-test")
+		BApplication("application/x-vnd.vos.text-renderer-test")
 	{
 		BWindow* window = new BWindow(BRect(100, 100, 640, 400), "Text renderer test",
 			B_TITLED_WINDOW, B_QUIT_ON_WINDOW_CLOSE);

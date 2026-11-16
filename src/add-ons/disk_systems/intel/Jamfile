@@ -27,7 +27,7 @@ Addon <disk_system>intel :
 ;
 
 DoCatalogs <disk_system>intel :
-	x-vnd.Haiku-IntelDiskAddOn
+	x-vnd.vos-IntelDiskAddOn
 	:
 	PrimaryParameterEditor.cpp
 ;

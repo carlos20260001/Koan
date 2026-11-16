@@ -106,7 +106,7 @@ public:
 
 			BMessage refs(B_REFS_RECEIVED);
 			_RecursiveAddRefs(refs, item);
-			be_roster->Launch("application/x-vnd.Haiku-MediaPlayer", &refs);
+			be_roster->Launch("application/x-vnd.vos-MediaPlayer", &refs);
 		}
 	};
 

@@ -1,4 +1,4 @@
-1	portuguese (brazil)	x-vnd.Haiku-IMAP	1343128980
+1	portuguese (brazil)	x-vnd.vos-IMAP	1343128980
 Could not connect to server \"%server%\":\n%error%	IMAPFolderConfig		Não é possível conectar ao servidor \"%server%\":\n%error%
 Updating subscriptions to IMAP folders, please be patient…	IMAPFolderConfig		Atualizando inscrições de pastas IMAP, por favor aguarde…
 Failed to fetch available storage.	IMAPFolderConfig		Falhou ao buscar armazenamento disponível.

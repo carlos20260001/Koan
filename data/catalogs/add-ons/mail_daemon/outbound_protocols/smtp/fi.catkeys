@@ -1,4 +1,4 @@
-1	finnish	x-vnd.Haiku-SMTP	815985329
+1	finnish	x-vnd.vos-SMTP	815985329
 POP3 authentication failed. The server said:\n	smtp		POP3-todennus epäonnistui. Palvelin sanoi:\n
 Destination:	ConfigView		Kohde:
 Error while logging in to %serv	smtp		Virhe kirjauduttaessa palvelimeen %serv

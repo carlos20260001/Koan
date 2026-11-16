@@ -15,7 +15,7 @@ for architectureObject in [ MultiArchSubDirSetup ] {
 }
 
 DoCatalogs TextPreview :
-	x-vnd.Haiku-QuickLook-TextPreview
+	x-vnd.vos-QuickLook-TextPreview
 	:
 	TextPreview.cpp
 	TablePreview.cpp

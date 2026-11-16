@@ -21,7 +21,7 @@ for architectureObject in [ MultiArchSubDirSetup ] {
 }
 
 DoCatalogs SGITranslator :
-	x-vnd.Haiku-SGITranslator
+	x-vnd.vos-SGITranslator
 	:
 	SGIMain.cpp
 	SGITranslator.cpp

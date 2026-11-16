@@ -57,7 +57,7 @@ static property_info sProperties[] = {
 };
 
 
-static const char* kMediaServerJob = "x-vnd.haiku-media_server";
+static const char* kMediaServerJob = "x-vnd.vos-media_server";
 static const char* kRestartPageKey = "restarting";
 static const char* kServerPageKey = "server";
 

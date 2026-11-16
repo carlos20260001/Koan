@@ -40,7 +40,7 @@
 
 static const char* kCurrentPlaylistFilename = "MediaPlayer Current Playlist";
 
-const char* kAppSig = "application/x-vnd.Haiku-MediaPlayer";
+const char* kAppSig = "application/x-vnd.vos-MediaPlayer";
 
 MainApp* gMainApp;
 

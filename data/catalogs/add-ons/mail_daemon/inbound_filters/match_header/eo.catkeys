@@ -1,4 +1,4 @@
-1	esperanto	x-vnd.Haiku-MatchHeader	1946584206
+1	esperanto	x-vnd.vos-MatchHeader	1946584206
 Delete message	ConfigView		Forigi mesaĝon
 Match \"%attribute\" against \"%regex\"	RuleFilter		Kongrua \"%attribute\" per \"%regex\"
 Match header	RuleFilter		Kongrua kapo

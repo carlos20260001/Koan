@@ -56,7 +56,7 @@ for architectureObject in [ MultiArchSubDirSetup ] {
 
 
 DoCatalogs libmail.so :
-	x-vnd.Haiku-libmail
+	x-vnd.vos-libmail
 	:
 	FileConfigView.cpp
 	ProtocolConfigView.cpp

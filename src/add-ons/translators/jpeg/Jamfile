@@ -33,7 +33,7 @@ for architectureObject in [ MultiArchSubDirSetup ] {
 }
 
 DoCatalogs JPEGTranslator :
-	x-vnd.Haiku-JPEGTranslator
+	x-vnd.vos-JPEGTranslator
 	:
 	JPEGTranslator.h
 	JPEGTranslator.cpp

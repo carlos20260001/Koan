@@ -14,7 +14,7 @@
 // for a moment after a key changed it. The launch daemon starts the server
 // when the first message arrives.
 
-#define kOSDServerSignature "application/x-vnd.Haiku-osd_server"
+#define kOSDServerSignature "application/x-vnd.vos-osd_server"
 
 
 enum {

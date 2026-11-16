@@ -90,7 +90,7 @@ Application mediaconvert :
 ;
 
 DoCatalogs MediaConverter :
-	x-vnd.Haiku-MediaConverter
+	x-vnd.vos-MediaConverter
 	:
 	$(appSources)
 ;

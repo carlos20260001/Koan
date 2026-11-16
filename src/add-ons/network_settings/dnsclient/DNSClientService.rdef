@@ -1,4 +1,4 @@
-resource app_signature "application/x-vnd.Haiku-DNSClientService";
+resource app_signature "application/x-vnd.vos-DNSClientService";
 
 resource app_version {
 	major  = 1,

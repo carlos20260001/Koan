@@ -13,7 +13,7 @@ Application Sounds :
 	;
 
 DoCatalogs Sounds :
-	x-vnd.Haiku-Sounds
+	x-vnd.vos-Sounds
 	:
 	HApp.cpp
 	HWindow.cpp

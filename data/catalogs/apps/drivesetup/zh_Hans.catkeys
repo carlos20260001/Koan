@@ -1,4 +1,4 @@
-1	english	x-vnd.Haiku-DriveSetup	2756866399
+1	english	x-vnd.vos-DriveSetup	2756866399
 Could not unmount partition %s.	MainWindow		无法卸载分区 %s。
 Mount all	MainWindow		挂载所有磁盘
 Disk	MainWindow		磁盘

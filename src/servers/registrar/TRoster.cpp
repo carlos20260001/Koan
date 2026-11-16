@@ -1401,12 +1401,12 @@ TRoster::GetShutdownApps(AppInfoList& userApps, AppInfoList& systemApps,
 
 	// app server
 	RosterAppInfo* info
-		= fRegisteredApps.InfoFor("application/x-vnd.haiku-app_server");
+		= fRegisteredApps.InfoFor("application/x-vnd.vos-app_server");
 	if (info != NULL)
 		vitalSystemApps.Add(info->team);
 
 	// debug server
-	info = fRegisteredApps.InfoFor("application/x-vnd.haiku-debug_server");
+	info = fRegisteredApps.InfoFor("application/x-vnd.vos-debug_server");
 	if (info != NULL)
 		vitalSystemApps.Add(info->team);
 

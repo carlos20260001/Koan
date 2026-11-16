@@ -1,4 +1,4 @@
-1	indonesian	x-vnd.Haiku-MatchHeader	1946584206
+1	indonesian	x-vnd.vos-MatchHeader	1946584206
 Delete message	ConfigView		Hapus pesan
 Match \"%attribute\" against \"%regex\"	RuleFilter		Cocokkan \"%attribute\" terhadap \"%regex\"
 Match header	RuleFilter		Cocokan tajuk

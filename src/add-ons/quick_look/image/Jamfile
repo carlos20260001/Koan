@@ -7,7 +7,7 @@ Addon ImagePreview :
 ;
 
 DoCatalogs ImagePreview :
-	x-vnd.Haiku-QuickLook-ImagePreview
+	x-vnd.vos-QuickLook-ImagePreview
 	:
 	ImagePreview.cpp
 ;

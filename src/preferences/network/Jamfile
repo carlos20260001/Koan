@@ -41,7 +41,7 @@ Application Network :
 ;
 
 DoCatalogs Network :
-	x-vnd.Haiku-Network
+	x-vnd.vos-Network
 	:
 	InterfaceListItem.cpp
 	InterfaceStatus.cpp

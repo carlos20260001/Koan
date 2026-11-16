@@ -9,7 +9,7 @@
 #include <OS.h>
 
 
-#define B_SYSTEM_LOGGER_SIGNATURE	"application/x-vnd.Haiku-SystemLogger"
+#define B_SYSTEM_LOGGER_SIGNATURE	"application/x-vnd.vos-SystemLogger"
 
 #define SYSLOG_MESSAGE			'_Syl'
 #define SYSLOG_ADD_LISTENER		'aSyl'

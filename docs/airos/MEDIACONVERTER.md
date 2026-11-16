@@ -9,7 +9,7 @@ make the chosen format, and says so - or warns that the CPU will have to do
 it, which takes longer and uses more power.
 
 It replaces Haiku's MediaConverter (same signature,
-`application/x-vnd.Haiku-MediaConverter`, same icon) in the haiku package.
+`application/x-vnd.vos-MediaConverter`, same icon) in the haiku package.
 
 ## What it makes
 

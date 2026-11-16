@@ -12,7 +12,7 @@ ScreenSaver Message :
 	be libscreensaver.so localestub [ TargetLibsupc++ ] ;
 
 DoCatalogs Message :
-	x-vnd.Haiku-MessageScreensaver
+	x-vnd.vos-MessageScreensaver
 	:
 	Message.cpp	
 ;

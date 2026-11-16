@@ -1,4 +1,4 @@
-1	danish	x-vnd.Haiku-MatchHeader	1946584206
+1	danish	x-vnd.vos-MatchHeader	1946584206
 Delete message	ConfigView		Slet meddelelse
 Match \"%attribute\" against \"%regex\"	RuleFilter		Match \"%attribute\" mod \"%regex\"
 Match header	RuleFilter		Match header

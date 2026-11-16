@@ -25,7 +25,7 @@
 #include <Accessible.h>
 
 
-static const char* kSignature = "application/x-vnd.Haiku-AccessibilityTestApp";
+static const char* kSignature = "application/x-vnd.vos-AccessibilityTestApp";
 
 
 /*!	A custom drawn view whose content is published as its own tree of

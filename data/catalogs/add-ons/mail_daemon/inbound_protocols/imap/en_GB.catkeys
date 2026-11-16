@@ -1,4 +1,4 @@
-1	english (united kingdom)	x-vnd.Haiku-IMAP	1343128980
+1	english (united kingdom)	x-vnd.vos-IMAP	1343128980
 Could not connect to server \"%server%\":\n%error%	IMAPFolderConfig		Could not connect to server \"%server%\":\n%error%
 Updating subscriptions to IMAP folders, please be patient…	IMAPFolderConfig		Updating subscriptions to IMAP folders, please be patient…
 Failed to fetch available storage.	IMAPFolderConfig		Failed to fetch available storage.

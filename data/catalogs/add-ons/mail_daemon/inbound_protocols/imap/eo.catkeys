@@ -1,4 +1,4 @@
-1	esperanto	x-vnd.Haiku-IMAP	1343128980
+1	esperanto	x-vnd.vos-IMAP	1343128980
 Could not connect to server \"%server%\":\n%error%	IMAPFolderConfig		Ne eblis konekti al \"%server%\":\n%error%
 Updating subscriptions to IMAP folders, please be patient…	IMAPFolderConfig		Ĝisdatiganta abonajn dosierojn IMAPajn, bonvolu pancienci…
 Failed to fetch available storage.	IMAPFolderConfig		Fiaskis akiri liberan konservujon.

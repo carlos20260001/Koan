@@ -1,4 +1,4 @@
-resource app_signature "application/x-vnd.Haiku-WebPositive";
+resource app_signature "application/x-vnd.vos-WebPositive";
 
 resource app_version {
 	major      = 1,

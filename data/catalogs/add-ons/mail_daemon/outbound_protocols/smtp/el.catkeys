@@ -1,4 +1,4 @@
-1	greek, modern (1453-)	x-vnd.Haiku-SMTP	815985329
+1	greek, modern (1453-)	x-vnd.vos-SMTP	815985329
 POP3 authentication failed. The server said:\n	smtp		Η πιστοποίηση POP3 απέτυχε. Ο εξυπηρετητής αποκρίθηκε:\n
 Destination:	ConfigView		Προορισμός:
 Error while logging in to %serv	smtp		Προέκυψε σφάλμα κατά την σύνδεση στον %serv

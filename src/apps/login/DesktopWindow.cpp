@@ -45,9 +45,9 @@ DesktopWindow::DesktopWindow(BRect frame, bool editMode)
 	err = find_directory(B_SYSTEM_SETTINGS_DIRECTORY, &path, true);
 	if (err >= B_OK) {
 		BDirectory dir(path.Path());
-		if (!dir.Contains("x-vnd.Haiku-Login", B_DIRECTORY_NODE))
-			dir.CreateDirectory("x-vnd.Haiku-Login", NULL);
-		path.Append("x-vnd.Haiku-Login");
+		if (!dir.Contains("x-vnd.vos-Login", B_DIRECTORY_NODE))
+			dir.CreateDirectory("x-vnd.vos-Login", NULL);
+		path.Append("x-vnd.vos-Login");
 		dir.SetTo(path.Path());
 		if (!dir.Contains("Shelf", B_FILE_NODE))
 			dir.CreateFile("Shelf", NULL);

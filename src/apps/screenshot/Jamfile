@@ -14,7 +14,7 @@ Application Screenshot :
 ;
 
 DoCatalogs Screenshot :
-	x-vnd.haiku-screenshot
+	x-vnd.vos-screenshot
 	:
 	ScreenshotWindow.cpp
 	Utility.cpp
@@ -28,7 +28,7 @@ Application screenshot :
 ;
 
 DoCatalogs screenshot :
-	x-vnd.haiku-screenshot-cli
+	x-vnd.vos-screenshot-cli
 	:
 	Utility.cpp
 	ScreenshotWindow.cpp

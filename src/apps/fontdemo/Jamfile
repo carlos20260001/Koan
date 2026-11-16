@@ -9,7 +9,7 @@ Application FontDemo :
 	;
 
 DoCatalogs FontDemo :
-	x-vnd.Haiku-FontDemo
+	x-vnd.vos-FontDemo
 	:
 	FontDemo.cpp
 	ControlView.cpp

@@ -29,7 +29,7 @@ if $(TARGET_PLATFORM) = libbe_test {
 }
 
 DoCatalogs Screen :
-	x-vnd.Haiku-Screen
+	x-vnd.vos-Screen
 	:
 	AlertWindow.cpp
 	DisplayArrangementView.cpp

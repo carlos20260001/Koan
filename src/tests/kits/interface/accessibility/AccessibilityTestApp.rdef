@@ -1,2 +1,2 @@
-resource app_signature "application/x-vnd.Haiku-AccessibilityTestApp";
+resource app_signature "application/x-vnd.vos-AccessibilityTestApp";
 resource app_flags B_SINGLE_LAUNCH;

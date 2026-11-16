@@ -15,7 +15,7 @@ Addon NewMailNotification :
 	;
 
 DoCatalogs NewMailNotification :
-	x-vnd.Haiku-NewMailNotification
+	x-vnd.vos-NewMailNotification
 	:
 	NotifierFilter.cpp
 	NotifierConfigView.cpp

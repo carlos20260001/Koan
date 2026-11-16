@@ -3,7 +3,7 @@
 **
 */
 
-resource app_signature "application/x-vnd.haiku-ohci";
+resource app_signature "application/x-vnd.vos-ohci";
 
 resource app_version {
 	major  = 1,

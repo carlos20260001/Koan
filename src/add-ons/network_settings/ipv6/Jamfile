@@ -15,6 +15,6 @@ Addon IPv6Interface :
 		[ TargetLibstdc++ ] localestub
 ;
 
-DoCatalogs IPv6Interface : x-vnd.Haiku-IPv6Interface :
+DoCatalogs IPv6Interface : x-vnd.vos-IPv6Interface :
 	IPv6InterfaceAddOn.cpp
 ;

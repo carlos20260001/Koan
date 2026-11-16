@@ -1,4 +1,4 @@
-1	czech	x-vnd.Haiku-IMAP	1343128980
+1	czech	x-vnd.vos-IMAP	1343128980
 Could not connect to server \"%server%\":\n%error%	IMAPFolderConfig		Nepodařilo se připojit k serveru \"%server%\":\n%error%
 Updating subscriptions to IMAP folders, please be patient…	IMAPFolderConfig		Aktualizuji odběr složek IMAP, strpeníčko prosím…
 Failed to fetch available storage.	IMAPFolderConfig		Nepodařilo se zjistit dostupné úložné místo.

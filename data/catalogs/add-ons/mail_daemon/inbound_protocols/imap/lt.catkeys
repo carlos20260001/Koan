@@ -1,4 +1,4 @@
-1	lithuanian	x-vnd.Haiku-IMAP	1343128980
+1	lithuanian	x-vnd.vos-IMAP	1343128980
 Could not connect to server \"%server%\":\n%error%	IMAPFolderConfig		Klaida jungiantis prie serverio „%server%“:\n%error%
 Updating subscriptions to IMAP folders, please be patient…	IMAPFolderConfig		Luktelėkite, kol atnaujinamos IMAP aplankų prenumeratos…
 Failed to fetch available storage.	IMAPFolderConfig		Aplankų sąrašo gauti nepavyko.

@@ -65,7 +65,7 @@
 static const uint32 kMsgRemoveConfirmed = 'rmCf';
 
 // The launch_daemon job that runs bluetooth_server
-static const char* kServerJob = "x-vnd.Haiku-bluetooth_server";
+static const char* kServerJob = "x-vnd.vos-bluetooth_server";
 
 static const bigtime_t kTickInterval = 2000000;
 static const bigtime_t kServerStartDelay = 1500000;

@@ -1,4 +1,4 @@
-1	belarusian	x-vnd.Haiku-SMTP	815985329
+1	belarusian	x-vnd.vos-SMTP	815985329
 POP3 authentication failed. The server said:\n	smtp		Аўтэнтыфікацыя POP3 не ўдалася. Паведамленне сервера:\n
 Destination:	ConfigView		Прызначэнне:
 Error while logging in to %serv	smtp		Памылка падчас лагіну ў %serv

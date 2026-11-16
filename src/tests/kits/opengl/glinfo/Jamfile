@@ -35,7 +35,7 @@ Application GLInfo :
 ;
 
 DoCatalogs GLInfo :
-    x-vnd.Haiku-GLInfo
+    x-vnd.vos-GLInfo
 	:
 	CapabilitiesView.cpp
 	ExtensionsView.cpp

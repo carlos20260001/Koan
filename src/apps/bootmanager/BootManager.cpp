@@ -18,7 +18,7 @@
 #define B_TRANSLATION_CONTEXT "BootManager"
 
 
-static const char* kSignature = "application/x-vnd.Haiku-BootManager";
+static const char* kSignature = "application/x-vnd.vos-BootManager";
 
 
 class BootManager : public BApplication {

@@ -74,7 +74,7 @@ class TranslationUtilsTest : public CppUnit::TestFixture {
 public:
 	void FilePath_GetBitmap_Succeeds()
 	{
-		BApplication app("application/x-vnd.Haiku-translationkit_translationutilstest");
+		BApplication app("application/x-vnd.vos-translationkit_translationutilstest");
 		BBitmap* pbits = BTranslationUtils::GetBitmap("resources/kits/translation/image.png");
 		CheckBitmap(pbits);
 		delete pbits;
@@ -82,14 +82,14 @@ public:
 
 	void NonExistentFile_GetBitmap_ReturnsNull()
 	{
-		BApplication app("application/x-vnd.Haiku-translationkit_translationutilstest");
+		BApplication app("application/x-vnd.vos-translationkit_translationutilstest");
 		BBitmap* pbits = BTranslationUtils::GetBitmap("/tmp/no-file-here.bmp");
 		CPPUNIT_ASSERT(pbits == NULL);
 	}
 
 	void FilePath_GetBitmapFile_Succeeds()
 	{
-		BApplication app("application/x-vnd.Haiku-translationkit_translationutilstest");
+		BApplication app("application/x-vnd.vos-translationkit_translationutilstest");
 		BBitmap* pbits = BTranslationUtils::GetBitmapFile("resources/kits/translation/image.png");
 		CheckBitmap(pbits);
 		delete pbits;
@@ -97,14 +97,14 @@ public:
 
 	void NonExistentFile_GetBitmapFile_ReturnsNull()
 	{
-		BApplication app("application/x-vnd.Haiku-translationkit_translationutilstest");
+		BApplication app("application/x-vnd.vos-translationkit_translationutilstest");
 		BBitmap* pbits = BTranslationUtils::GetBitmapFile("/tmp/no-file-here.bmp");
 		CPPUNIT_ASSERT(pbits == NULL);
 	}
 
 	void EntryRef_GetBitmap_Succeeds()
 	{
-		BApplication app("application/x-vnd.Haiku-translationkit_translationutilstest");
+		BApplication app("application/x-vnd.vos-translationkit_translationutilstest");
 		entry_ref ref;
 		BEntry bent("resources/kits/translation/image.png");
 		CPPUNIT_ASSERT_EQUAL(B_OK, bent.InitCheck());
@@ -116,7 +116,7 @@ public:
 
 	void NullEntryRef_GetBitmap_ReturnsNull()
 	{
-		BApplication app("application/x-vnd.Haiku-translationkit_translationutilstest");
+		BApplication app("application/x-vnd.vos-translationkit_translationutilstest");
 		entry_ref* pref = NULL;
 		BBitmap* pbits = BTranslationUtils::GetBitmap(pref);
 		CPPUNIT_ASSERT(pbits == NULL);
@@ -124,7 +124,7 @@ public:
 
 	void ResourceName_GetBitmap_Succeeds()
 	{
-		BApplication app("application/x-vnd.Haiku-translationkit_translationutilstest");
+		BApplication app("application/x-vnd.vos-translationkit_translationutilstest");
 		BBitmap* pbits = BTranslationUtils::GetBitmap("res_image");
 		CheckBitmap(pbits);
 		delete pbits;
@@ -132,14 +132,14 @@ public:
 
 	void InvalidResourceName_GetBitmap_ReturnsNull()
 	{
-		BApplication app("application/x-vnd.Haiku-translationkit_translationutilstest");
+		BApplication app("application/x-vnd.vos-translationkit_translationutilstest");
 		BBitmap* pbits = BTranslationUtils::GetBitmap("Michael Wilber");
 		CPPUNIT_ASSERT(pbits == NULL);
 	}
 
 	void ResourceTypeAndId_GetBitmap_Succeeds()
 	{
-		BApplication app("application/x-vnd.Haiku-translationkit_translationutilstest");
+		BApplication app("application/x-vnd.vos-translationkit_translationutilstest");
 		BBitmap* pbits = BTranslationUtils::GetBitmap(B_TRANSLATOR_BITMAP, 246);
 		CheckBitmap(pbits);
 		delete pbits;
@@ -147,21 +147,21 @@ public:
 
 	void WrongResourceType_GetBitmap_ReturnsNull()
 	{
-		BApplication app("application/x-vnd.Haiku-translationkit_translationutilstest");
+		BApplication app("application/x-vnd.vos-translationkit_translationutilstest");
 		BBitmap* pbits = BTranslationUtils::GetBitmap(B_TRANSLATOR_TEXT, 246);
 		CPPUNIT_ASSERT(pbits == NULL);
 	}
 
 	void WrongResourceId_GetBitmap_ReturnsNull()
 	{
-		BApplication app("application/x-vnd.Haiku-translationkit_translationutilstest");
+		BApplication app("application/x-vnd.vos-translationkit_translationutilstest");
 		BBitmap* pbits = BTranslationUtils::GetBitmap(B_TRANSLATOR_BITMAP, 166);
 		CPPUNIT_ASSERT(pbits == NULL);
 	}
 
 	void ResourceTypeAndName_GetBitmap_Succeeds()
 	{
-		BApplication app("application/x-vnd.Haiku-translationkit_translationutilstest");
+		BApplication app("application/x-vnd.vos-translationkit_translationutilstest");
 		BBitmap* pbits = BTranslationUtils::GetBitmap(B_TRANSLATOR_BITMAP, "res_image");
 		CheckBitmap(pbits);
 		delete pbits;
@@ -169,21 +169,21 @@ public:
 
 	void WrongResourceTypeName_GetBitmap_ReturnsNull()
 	{
-		BApplication app("application/x-vnd.Haiku-translationkit_translationutilstest");
+		BApplication app("application/x-vnd.vos-translationkit_translationutilstest");
 		BBitmap* pbits = BTranslationUtils::GetBitmap(B_TRANSLATOR_TEXT, "res_image");
 		CPPUNIT_ASSERT(pbits == NULL);
 	}
 
 	void WrongResourceNameValue_GetBitmap_ReturnsNull()
 	{
-		BApplication app("application/x-vnd.Haiku-translationkit_translationutilstest");
+		BApplication app("application/x-vnd.vos-translationkit_translationutilstest");
 		BBitmap* pbits = BTranslationUtils::GetBitmap(B_TRANSLATOR_BITMAP, "Michael Wilber");
 		CPPUNIT_ASSERT(pbits == NULL);
 	}
 
 	void Stream_GetBitmap_Succeeds()
 	{
-		BApplication app("application/x-vnd.Haiku-translationkit_translationutilstest");
+		BApplication app("application/x-vnd.vos-translationkit_translationutilstest");
 		BFile imgfile("resources/kits/translation/image.png", B_READ_ONLY);
 		CPPUNIT_ASSERT_EQUAL(B_OK, imgfile.InitCheck());
 		BTranslatorRoster* proster = BTranslatorRoster::Default();
@@ -197,7 +197,7 @@ public:
 
 	void StylesOff_GetStyledText_Succeeds()
 	{
-		BApplication app("application/x-vnd.Haiku-translationkit_translationutilstest");
+		BApplication app("application/x-vnd.vos-translationkit_translationutilstest");
 		BTextView* ptextview
 			= new BTextView(BRect(0, 0, 100, 100), "utilstest_textview", BRect(0, 0, 100, 100),
 							B_FOLLOW_ALL_SIDES, B_WILL_DRAW | B_PULSE_NEEDED);
@@ -216,7 +216,7 @@ public:
 
 	void StylesOn_GetStyledText_Succeeds()
 	{
-		BApplication app("application/x-vnd.Haiku-translationkit_translationutilstest");
+		BApplication app("application/x-vnd.vos-translationkit_translationutilstest");
 		BTextView* ptextview
 			= new BTextView(BRect(0, 0, 100, 100), "utilstest_textview", BRect(0, 0, 100, 100),
 							B_FOLLOW_ALL_SIDES, B_WILL_DRAW | B_PULSE_NEEDED);
@@ -235,7 +235,7 @@ public:
 
 	void File_PutStyledText_MatchesOriginal()
 	{
-		BApplication app("application/x-vnd.Haiku-translationkit_translationutilstest");
+		BApplication app("application/x-vnd.vos-translationkit_translationutilstest");
 		BTextView* ptextview
 			= new BTextView(BRect(0, 0, 100, 100), "utilstest_textview", BRect(0, 0, 100, 100),
 							B_FOLLOW_ALL_SIDES, B_WILL_DRAW | B_PULSE_NEEDED);
@@ -265,7 +265,7 @@ public:
 
 	void NullPointers_GetStyledText_ReturnsBadValue()
 	{
-		BApplication app("application/x-vnd.Haiku-translationkit_translationutilstest");
+		BApplication app("application/x-vnd.vos-translationkit_translationutilstest");
 		BTextView* ptextview
 			= new BTextView(BRect(0, 0, 100, 100), "utilstest_textview", BRect(0, 0, 100, 100),
 							B_FOLLOW_ALL_SIDES, B_WILL_DRAW | B_PULSE_NEEDED);
@@ -277,7 +277,7 @@ public:
 
 	void NullPointers_PutStyledText_ReturnsBadValue()
 	{
-		BApplication app("application/x-vnd.Haiku-translationkit_translationutilstest");
+		BApplication app("application/x-vnd.vos-translationkit_translationutilstest");
 		BTextView* ptextview
 			= new BTextView(BRect(0, 0, 100, 100), "utilstest_textview", BRect(0, 0, 100, 100),
 							B_FOLLOW_ALL_SIDES, B_WILL_DRAW | B_PULSE_NEEDED);
@@ -289,7 +289,7 @@ public:
 
 	void Roster_GetDefaultSettings_Succeeds()
 	{
-		BApplication app("application/x-vnd.Haiku-translationkit_translationutilstest");
+		BApplication app("application/x-vnd.vos-translationkit_translationutilstest");
 		translator_id* pids = NULL;
 		int32 ncount = 0;
 		BTranslatorRoster* proster = BTranslatorRoster::Default();
@@ -304,7 +304,7 @@ public:
 
 	void NoRoster_GetDefaultSettings_Succeeds()
 	{
-		BApplication app("application/x-vnd.Haiku-translationkit_translationutilstest");
+		BApplication app("application/x-vnd.vos-translationkit_translationutilstest");
 		translator_id* pids = NULL;
 		int32 ncount = 0;
 		BTranslatorRoster* proster = BTranslatorRoster::Default();
@@ -333,21 +333,21 @@ public:
 
 	void NonExistentTranslator_GetDefaultSettings_ReturnsNull()
 	{
-		BApplication app("application/x-vnd.Haiku-translationkit_translationutilstest");
+		BApplication app("application/x-vnd.vos-translationkit_translationutilstest");
 		BMessage* pmsg = BTranslationUtils::GetDefaultSettings("Michael Wilber", 0);
 		CPPUNIT_ASSERT(pmsg == NULL);
 	}
 
 	void WrongVersion_GetDefaultSettings_ReturnsNull()
 	{
-		BApplication app("application/x-vnd.Haiku-translationkit_translationutilstest");
+		BApplication app("application/x-vnd.vos-translationkit_translationutilstest");
 		BMessage* pmsg = BTranslationUtils::GetDefaultSettings("PPM Images", 1);
 		CPPUNIT_ASSERT(pmsg == NULL);
 	}
 
 	void BitmapTranslators_AddTranslationItems_Succeeds()
 	{
-		BApplication app("application/x-vnd.Haiku-translationkit_translationutilstest");
+		BApplication app("application/x-vnd.vos-translationkit_translationutilstest");
 		BMenu* pmenu = new BMenu("utilstest_menu");
 		CPPUNIT_ASSERT(pmenu);
 		CPPUNIT_ASSERT_EQUAL(B_OK, BTranslationUtils::AddTranslationItems(pmenu, B_TRANSLATOR_BITMAP));
@@ -357,7 +357,7 @@ public:
 
 	void TextTranslators_AddTranslationItems_Succeeds()
 	{
-		BApplication app("application/x-vnd.Haiku-translationkit_translationutilstest");
+		BApplication app("application/x-vnd.vos-translationkit_translationutilstest");
 		BMenu* pmenu = new BMenu("utilstest_menu");
 		CPPUNIT_ASSERT(pmenu);
 		CPPUNIT_ASSERT_EQUAL(B_OK, BTranslationUtils::AddTranslationItems(pmenu, B_TRANSLATOR_TEXT));
@@ -367,7 +367,7 @@ public:
 
 	void SingleTranslator_AddTranslationItems_Succeeds()
 	{
-		BApplication app("application/x-vnd.Haiku-translationkit_translationutilstest");
+		BApplication app("application/x-vnd.vos-translationkit_translationutilstest");
 		BMenu* pmenu = new BMenu("utilstest_menu");
 		CPPUNIT_ASSERT(pmenu);
 		BTranslatorRoster* proster = new BTranslatorRoster();
@@ -382,7 +382,7 @@ public:
 
 	void NullMenu_AddTranslationItems_ReturnsBadValue()
 	{
-		BApplication app("application/x-vnd.Haiku-translationkit_translationutilstest");
+		BApplication app("application/x-vnd.vos-translationkit_translationutilstest");
 		CPPUNIT_ASSERT_EQUAL(B_BAD_VALUE, BTranslationUtils::AddTranslationItems(NULL, B_TRANSLATOR_BITMAP));
 	}
 };

@@ -680,7 +680,7 @@ DWindowHWInterface::SetMode(const display_mode& mode)
 		// a real BWindow in the test environment.
 		// be_app->Run() needs to be called in another thread
 		BApplication* app = new BApplication(
-			"application/x-vnd.Haiku-test-app_server");
+			"application/x-vnd.vos-test-app_server");
 		app->Unlock();
 
 		thread_id appThread = spawn_thread(run_app_thread, "app thread",

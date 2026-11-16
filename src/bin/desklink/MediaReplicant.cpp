@@ -318,7 +318,7 @@ MediaReplicant::MessageReceived(BMessage* message)
 {
 	switch (message->what) {
 		case kMsgOpenMediaSettings:
-			_Launch("Media Preferences", "application/x-vnd.Haiku-Media",
+			_Launch("Media Preferences", "application/x-vnd.vos-Media",
 				B_SYSTEM_PREFERENCES_DIRECTORY, "Media");
 			break;
 

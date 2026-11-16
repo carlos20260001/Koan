@@ -9,7 +9,7 @@
 #ifndef CONSTANTS_H
 #define CONSTANTS_H
 
-#define kAppSignature "application/x-vnd.haiku-softwareupdater"
+#define kAppSignature "application/x-vnd.vos-softwareupdater"
 #define kSettingsFilename "SoftwareUpdater_settings"
 
 static const size_t kCleanUpKeepDays = 30;

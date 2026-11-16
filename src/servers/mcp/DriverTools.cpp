@@ -478,7 +478,7 @@ RegisterDriverTools(McpServer& server)
 		"drivers/dev to symlink to the binary, e.g. graphics/nvidia_rm\"},"
 		"\"stop_services\":{\"type\":\"array\",\"items\":{\"type\":\"string\"},"
 		"\"description\":\"launch_roster service names to stop first, e.g. "
-		"x-vnd.haiku-bluetooth_server\"},"
+		"x-vnd.vos-bluetooth_server\"},"
 		"\"kill_teams\":{\"type\":\"array\",\"items\":{\"type\":\"string\"},"
 		"\"description\":\"command line substrings of teams to kill first\"},"
 		"\"swap\":{\"type\":\"boolean\",\"description\":\"rename into place "

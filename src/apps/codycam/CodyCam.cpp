@@ -79,7 +79,7 @@ UploadClientAt(int32 i)
 
 CodyCam::CodyCam()
 	:
-	BApplication("application/x-vnd.Haiku-CodyCam"),
+	BApplication("application/x-vnd.vos-CodyCam"),
 	fMediaRoster(NULL),
 	fVideoConsumer(NULL),
 	fWindow(NULL),

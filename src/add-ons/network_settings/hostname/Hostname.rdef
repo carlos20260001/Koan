@@ -1,4 +1,4 @@
-resource app_signature "application/x-vnd.Haiku-Hostname";
+resource app_signature "application/x-vnd.vos-Hostname";
 
 resource app_version {
 	major  = 1,

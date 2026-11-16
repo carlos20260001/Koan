@@ -14,7 +14,7 @@ Addon Hostname :
 		[ TargetLibstdc++ ] localestub
 ;
 
-DoCatalogs Hostname : x-vnd.Haiku-Hostname :
+DoCatalogs Hostname : x-vnd.vos-Hostname :
 	HostnameAddOn.cpp
 	HostnameView.cpp
 ;

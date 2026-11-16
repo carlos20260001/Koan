@@ -431,7 +431,7 @@ PlaylistWindow::_SavePlaylist(BEntry& origEntry, BEntry& tempEntry,
 	remover.Detach();
 
 	BNodeInfo info(&file);
-	info.SetType("application/x-vnd.haiku-playlist");
+	info.SetType("application/x-vnd.vos-playlist");
 }
 
 

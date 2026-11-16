@@ -19,7 +19,7 @@ Application FirstBootPrompt :
 ;
 
 DoCatalogs FirstBootPrompt :
-	x-vnd.Haiku-FirstBootPrompt
+	x-vnd.vos-FirstBootPrompt
 	:
 	BootPrompt.cpp
 	BootPromptWindow.cpp

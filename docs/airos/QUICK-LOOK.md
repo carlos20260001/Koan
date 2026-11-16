@@ -38,7 +38,7 @@ src/kits/tracker/QuickLook.*   Tracker's side: finds or starts the server
 - **Tracker** (`BPoseView`) turns the space bar into a Quick Look when it is
   not part of a name being typed or a type-ahead filter, builds a message
   with the selection's refs and the window's frame, and sends it to the
-  server by signature (`application/x-vnd.Haiku-quick_look_server`),
+  server by signature (`application/x-vnd.vos-quick_look_server`),
   launching it through the roster when it is not running
   (`data/launch/system` lists it on demand). While the panel is up, every
   change of the selection sends the new refs (coalesced over 50 ms, for a

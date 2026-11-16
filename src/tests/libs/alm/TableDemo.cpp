@@ -55,7 +55,7 @@ public:
 class TableDemo : public BApplication {
 public:
 	TableDemo() 
-		: BApplication("application/x-vnd.haiku.table-demo")
+		: BApplication("application/x-vnd.vos.table-demo")
 	{
 		BRect frameRect;
 		frameRect.Set(100, 100, 400, 400);

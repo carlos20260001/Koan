@@ -411,7 +411,7 @@ no_more_args(int argc, int argi)
 int
 main(int argc, char** argv)
 {
-	BApplication app("application/x-vnd.haiku-netfs_server_prefs");
+	BApplication app("application/x-vnd.vos-netfs_server_prefs");
 
 	// parse first argument
 	int argi = 1;

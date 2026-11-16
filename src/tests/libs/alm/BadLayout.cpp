@@ -77,7 +77,7 @@ class BadLayout : public BApplication {
 public:
 	BadLayout() 
 		:
-		BApplication("application/x-vnd.haiku.BadLayout") 
+		BApplication("application/x-vnd.vos.BadLayout") 
 	{
 		BRect frameRect;
 		frameRect.Set(100, 100, 300, 300);

@@ -11,7 +11,7 @@ Application <preference>Tracker
 
 DoCatalogs <preference>Tracker
 	:
-	x-vnd.Haiku-TrackerPreferences
+	x-vnd.vos-TrackerPreferences
 	:
 	TrackerPreferences.cpp
 ;

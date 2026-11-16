@@ -237,7 +237,7 @@ DeskbarView::MessageReceived(BMessage* message)
 			break;
 		}
 		case MD_OPEN_PREFS:
-			be_roster->Launch("application/x-vnd.Haiku-Mail");
+			be_roster->Launch("application/x-vnd.vos-Mail");
 			break;
 
 		case MD_REFRESH_QUERY:

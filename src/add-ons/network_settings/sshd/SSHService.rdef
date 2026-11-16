@@ -1,4 +1,4 @@
-resource app_signature "application/x-vnd.Haiku-SSHService";
+resource app_signature "application/x-vnd.vos-SSHService";
 
 resource app_version {
 	major  = 1,

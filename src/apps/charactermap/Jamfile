@@ -16,7 +16,7 @@ Application CharacterMap :
 	;
 
 DoCatalogs CharacterMap :
-	x-vnd.Haiku-CharacterMap
+	x-vnd.vos-CharacterMap
 	:
 	CharacterMap.cpp
 	CharacterView.cpp

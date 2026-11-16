@@ -1,4 +1,4 @@
-1	croatian	x-vnd.Haiku-SMTP	815985329
+1	croatian	x-vnd.vos-SMTP	815985329
 POP3 authentication failed. The server said:\n	smtp		POP3 provjera valjanosti neuspjela. Poslužitelj je rekao:\n
 Destination:	ConfigView		Odredište:
 Error while logging in to %serv	smtp		Greška pri prijavi u %serv

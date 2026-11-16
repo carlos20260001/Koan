@@ -16,4 +16,4 @@ Application Locale
 	: Locale.rdef
 ;
 
-DoCatalogs Locale : x-vnd.Haiku-Locale : $(sources) ;
+DoCatalogs Locale : x-vnd.vos-Locale : $(sources) ;

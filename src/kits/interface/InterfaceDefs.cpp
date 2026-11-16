@@ -1110,7 +1110,7 @@ void
 run_be_about()
 {
 	if (be_roster != NULL)
-		be_roster->Launch("application/x-vnd.Haiku-About");
+		be_roster->Launch("application/x-vnd.vos-About");
 }
 
 

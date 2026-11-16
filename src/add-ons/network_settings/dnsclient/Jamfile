@@ -14,7 +14,7 @@ Addon DNSClientService :
 		[ TargetLibstdc++ ] localestub
 ;
 
-DoCatalogs DNSClientService : x-vnd.Haiku-DNSClientService :
+DoCatalogs DNSClientService : x-vnd.vos-DNSClientService :
 	DNSClientServiceAddOn.cpp
 	DNSSettingsView.cpp
 ;

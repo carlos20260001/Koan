@@ -1,4 +1,4 @@
-1	portuguese	x-vnd.Haiku-MatchHeader	1946584206
+1	portuguese	x-vnd.vos-MatchHeader	1946584206
 Delete message	ConfigView		Eliminar mensagem
 Match \"%attribute\" against \"%regex\"	RuleFilter		Corresponder \"%attribute\" com \"%regex\"
 Match header	RuleFilter		Corresponder cabeçalho

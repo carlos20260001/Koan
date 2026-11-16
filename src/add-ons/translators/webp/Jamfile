@@ -29,7 +29,7 @@ for architectureObject in [ MultiArchSubDirSetup ] {
 }
 
 DoCatalogs WebPTranslator :
-	x-vnd.Haiku-WebPTranslator
+	x-vnd.vos-WebPTranslator
 	:
 	main.cpp
 	ConfigView.cpp

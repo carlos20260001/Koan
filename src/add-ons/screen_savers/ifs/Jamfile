@@ -10,7 +10,7 @@ ScreenSaver IFS :
 ;
 
 DoCatalogs IFS :
-	x-vnd.Haiku-IFSScreensaver
+	x-vnd.vos-IFSScreensaver
 	:
 	IFSSaver.cpp	
 ;

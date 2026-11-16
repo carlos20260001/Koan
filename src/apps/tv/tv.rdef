@@ -1,7 +1,7 @@
 
-resource app_signature "application/x-vnd.Haiku.TV";
+resource app_signature "application/x-vnd.vos.TV";
 
-resource app_name_catalog_entry "x-vnd.Haiku.TV:System name:TV";
+resource app_name_catalog_entry "x-vnd.vos.TV:System name:TV";
 
 resource app_version {
 	major  = 1,

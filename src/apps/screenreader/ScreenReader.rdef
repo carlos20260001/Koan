@@ -1,4 +1,4 @@
-resource app_signature "application/x-vnd.Haiku-ScreenReader";
+resource app_signature "application/x-vnd.vos-ScreenReader";
 
 resource app_flags B_SINGLE_LAUNCH | B_BACKGROUND_APP;
 

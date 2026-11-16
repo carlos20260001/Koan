@@ -22,7 +22,7 @@
 
 int main(void)
 {
-	Joysticks application("application/x-vnd.Haiku-Joysticks");
+	Joysticks application("application/x-vnd.vos-Joysticks");
 	application.Run();
 	return 0;
 }

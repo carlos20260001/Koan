@@ -23,7 +23,7 @@ Application Media :
 	;
 
 DoCatalogs Media
-	: x-vnd.Haiku-Media
+	: x-vnd.vos-Media
 	: LiveViews.cpp
 	  MediaModel.cpp
 	  MediaWindow.cpp

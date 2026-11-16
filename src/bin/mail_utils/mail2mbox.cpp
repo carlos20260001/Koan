@@ -299,7 +299,7 @@ ProcessMessageFile(char* fileName)
 int
 main(int argc, char** argv)
 {
-	BApplication app("application/x-vnd.Haiku-mail2mbox");
+	BApplication app("application/x-vnd.vos-mail2mbox");
 
 	if (argc <= 1 || argc >= 3) {
 		printf("%s is a utility for converting Mail e-mail\n", argv[0]);

@@ -1,1 +1,1 @@
-resource app_signature "application/x-vnd.Haiku-libmedia";
+resource app_signature "application/x-vnd.vos-libmedia";

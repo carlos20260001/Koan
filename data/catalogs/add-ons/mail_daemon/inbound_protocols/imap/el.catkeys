@@ -1,4 +1,4 @@
-1	greek, modern (1453-)	x-vnd.Haiku-IMAP	1343128980
+1	greek, modern (1453-)	x-vnd.vos-IMAP	1343128980
 Could not connect to server \"%server%\":\n%error%	IMAPFolderConfig		Δεν ήταν δυνατή η σύνδεση με τον διακομιστή \"%server%\":\n%error%
 Updating subscriptions to IMAP folders, please be patient…	IMAPFolderConfig		Γίνεται ενημέρωση εγγραφών σε φακέλους IMAP, παρακαλώ περιμένετε…
 Failed to fetch available storage.	IMAPFolderConfig		Το κατέβασμα επιπλέον χωρητικότητας απέτυχε.

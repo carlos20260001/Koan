@@ -33,7 +33,7 @@ bool gVerbose = false;
 
 PackageInstaller::PackageInstaller()
 	:
-	BApplication("application/x-vnd.Haiku-PackageInstaller"),
+	BApplication("application/x-vnd.vos-PackageInstaller"),
 	fWindowCount(0)
 {
 }

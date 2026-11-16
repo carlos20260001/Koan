@@ -36,7 +36,7 @@
 #include <util/DoublyLinkedList.h>
 
 
-static const char* kDebuggerSignature = "application/x-vnd.Haiku-Debugger";
+static const char* kDebuggerSignature = "application/x-vnd.vos-Debugger";
 static const int32 MSG_DEBUG_THIS_TEAM = 'dbtt';
 static const bigtime_t kGUIServersTimeout = 30000000;
 	// how long a crash early in the boot waits for the desktop
@@ -54,7 +54,7 @@ using std::map;
 using std::nothrow;
 
 
-static const char *kSignature = "application/x-vnd.Haiku-debug_server";
+static const char *kSignature = "application/x-vnd.vos-debug_server";
 
 
 static status_t

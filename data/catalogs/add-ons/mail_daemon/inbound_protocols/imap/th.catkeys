@@ -1,4 +1,4 @@
-1	thai	x-vnd.Haiku-IMAP	1343128980
+1	thai	x-vnd.vos-IMAP	1343128980
 Could not connect to server \"%server%\":\n%error%	IMAPFolderConfig		ไม่สามารถเชื่อมต่อกับเซิฟเวอร์ \"%server%\":\n%error%
 Updating subscriptions to IMAP folders, please be patient…	IMAPFolderConfig		กำลังอัปเดตการสมัครรับข้อมูลไปยังโฟลเดอร์ IMAP โปรดรอ ...
 Failed to fetch available storage.	IMAPFolderConfig		ไม่สามารถดึงที่เก็บข้อมูลที่มีอยู่

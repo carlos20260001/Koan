@@ -140,7 +140,7 @@ for architectureObject in [ MultiArchSubDirSetup ] {
 SEARCH_SOURCE += [ FDirName $(HAIKU_TOP) src kits package manager ] ;
 
 DoCatalogs libpackage.so :
-	x-vnd.Haiku-libpackage
+	x-vnd.vos-libpackage
 	:
 	PackageManager.cpp
 	RefreshRepositoryRequest.cpp

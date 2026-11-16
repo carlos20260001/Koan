@@ -91,7 +91,7 @@ class HelloWorld : public BApplication {
 public:
 	HelloWorld() 
 		:
-		BApplication("application/x-vnd.haiku.HelloWorld") 
+		BApplication("application/x-vnd.vos.HelloWorld") 
 	{
 		BRect frameRect;
 		frameRect.Set(100, 100, 300, 300);

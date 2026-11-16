@@ -21,7 +21,7 @@ Application PatchBay
 ;
 
 DoCatalogs PatchBay :
-	x-vnd.Haiku.PatchBay
+	x-vnd.vos.PatchBay
 	:
 	PatchView.cpp
 ;

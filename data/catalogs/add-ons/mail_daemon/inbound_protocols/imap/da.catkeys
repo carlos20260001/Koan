@@ -1,4 +1,4 @@
-1	danish	x-vnd.Haiku-IMAP	1343128980
+1	danish	x-vnd.vos-IMAP	1343128980
 Could not connect to server \"%server%\":\n%error%	IMAPFolderConfig		Kunne ikke oprette forbindelse til serveren \"%server%\":\n%error%
 Updating subscriptions to IMAP folders, please be patient…	IMAPFolderConfig		Opdaterer abonneringer på IMAP-mapper, vent venligst…
 Failed to fetch available storage.	IMAPFolderConfig		Kunne ikke hente tilgængeligt lager.

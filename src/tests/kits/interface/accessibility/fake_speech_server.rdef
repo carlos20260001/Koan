@@ -1,2 +1,2 @@
-resource app_signature "application/x-vnd.Haiku-speech_server";
+resource app_signature "application/x-vnd.vos-speech_server";
 resource app_flags B_SINGLE_LAUNCH | B_BACKGROUND_APP;

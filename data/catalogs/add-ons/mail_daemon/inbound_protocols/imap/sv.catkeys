@@ -1,4 +1,4 @@
-1	swedish	x-vnd.Haiku-IMAP	1343128980
+1	swedish	x-vnd.vos-IMAP	1343128980
 Could not connect to server \"%server%\":\n%error%	IMAPFolderConfig		Kunde inte koppla till server \"%server%\":\n%error%
 Updating subscriptions to IMAP folders, please be patient…	IMAPFolderConfig		Uppdaterar prenumerationer till IMAP-mappar, vänta en stund…
 Failed to fetch available storage.	IMAPFolderConfig		Misslyckades att hämta tillgängligt lagringsutrymme.

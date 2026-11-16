@@ -27,7 +27,7 @@ Application BootManager :
 	: BootManager.rdef
 ;
 
-DoCatalogs BootManager : x-vnd.Haiku-BootManager : $(cataloguedSources) ;
+DoCatalogs BootManager : x-vnd.vos-BootManager : $(cataloguedSources) ;
 
 # Assemble the boot loader, and convert it into a header file
 

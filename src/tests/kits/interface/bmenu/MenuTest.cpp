@@ -31,7 +31,7 @@ public:
 	void
 	ConcurrencyAbuseTest()
 	{
-		BApplication app("application/x-vnd.Haiku-interfacekit-menutest");
+		BApplication app("application/x-vnd.vos-interfacekit-menutest");
 		BPopUpMenu* menu = new BPopUpMenu("Test");
 		menu->AddItem(new BMenuItem("One", NULL));
 		menu->AddItem(new BMenuItem("Two", NULL));

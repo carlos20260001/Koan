@@ -1,4 +1,4 @@
-1	lithuanian	x-vnd.Haiku-SMTP	815985329
+1	lithuanian	x-vnd.vos-SMTP	815985329
 POP3 authentication failed. The server said:\n	smtp		Tapatybės nustatymas per POP3 nepavyko. Serveris atsakė:\n
 Destination:	ConfigView		Paskirties aplankas:
 Error while logging in to %serv	smtp		Klaida registruojantis į seansą su %serv

@@ -25,7 +25,7 @@ extern const char* kRAppLooperPortName;
 
 #ifndef HAIKU_TARGET_PLATFORM_LIBBE_TEST
 #ifndef __VOS__
-#	define B_REGISTRAR_SIGNATURE "application/x-vnd.haiku-registrar"
+#	define B_REGISTRAR_SIGNATURE "application/x-vnd.vos-registrar"
 #else /* __VOS__ */
 #	define B_REGISTRAR_SIGNATURE "application/x-vnd.vos-registrar"
 #endif /* __VOS__ */

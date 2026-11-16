@@ -282,7 +282,7 @@ private:
 
 class PowerApplication : public BApplication {
 public:
-	PowerApplication() : BApplication("application/x-vnd.Haiku-Power") {}
+	PowerApplication() : BApplication("application/x-vnd.vos-Power") {}
 
 	virtual void ReadyToRun()
 	{

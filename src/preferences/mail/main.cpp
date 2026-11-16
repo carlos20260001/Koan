@@ -13,7 +13,7 @@
 int
 main(int argc, char** argv)
 {
-	BApplication app("application/x-vnd.Haiku-Mail");
+	BApplication app("application/x-vnd.vos-Mail");
 
 	BWindow* window = new ConfigWindow;
 	window->Show();

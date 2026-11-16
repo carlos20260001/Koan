@@ -1,4 +1,4 @@
-1	catalan; valencian	x-vnd.Haiku-MatchHeader	1946584206
+1	catalan; valencian	x-vnd.vos-MatchHeader	1946584206
 Delete message	ConfigView		Suprimeix el missatge
 Match \"%attribute\" against \"%regex\"	RuleFilter		Relaciona \"%attribute\" amb \"%regex\"
 Match header	RuleFilter		Capçalera de coincidència

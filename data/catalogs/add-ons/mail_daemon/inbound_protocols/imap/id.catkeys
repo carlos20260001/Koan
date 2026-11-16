@@ -1,4 +1,4 @@
-1	indonesian	x-vnd.Haiku-IMAP	1343128980
+1	indonesian	x-vnd.vos-IMAP	1343128980
 Could not connect to server \"%server%\":\n%error%	IMAPFolderConfig		Tidak dapat terhubung ke server \"%server%\":\n%error%
 Updating subscriptions to IMAP folders, please be patient…	IMAPFolderConfig		Memperbarui langganan ke folder IMAP, harap bersabar…
 Failed to fetch available storage.	IMAPFolderConfig		Gagal untuk mengambil penyimpanan yang tersedia.

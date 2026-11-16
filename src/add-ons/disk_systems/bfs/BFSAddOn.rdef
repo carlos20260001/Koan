@@ -1,4 +1,4 @@
-resource app_signature "application/x-vnd.Haiku-BFSAddOn";
+resource app_signature "application/x-vnd.vos-BFSAddOn";
 
 resource app_version {
 	major  = 1,

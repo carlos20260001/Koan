@@ -81,7 +81,7 @@ private:
 int
 main()
 {
-	BApplication app("application/x-vnd.haiku.ComplexButtons");
+	BApplication app("application/x-vnd.vos.ComplexButtons");
 
 	BRect frameRect;
 	frameRect.Set(100, 100, 600, 300);
