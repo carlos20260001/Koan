@@ -222,3 +222,34 @@ BUSBEndpoint::ClearStall() const
 
 	return B_OK;
 }
+
+
+// #pragma mark - isochronous streams (air/OS)
+
+
+// TODO(linux backend): air/OS's usb_raw driver keeps the stream's transfers
+// queued in the kernel (0af4c0889e). With libusb the same is a set of
+// asynchronous isochronous transfers (libusb_fill_iso_transfer) resubmitted
+// from an event thread into a ring buffer that ReadIsochronousStream()
+// drains; until that exists streams are not available.
+status_t
+BUSBEndpoint::StartIsochronousStream(size_t packetSize,
+	uint32 packetsPerTransfer, uint32 transferCount, size_t bufferSize) const
+{
+	return B_NOT_SUPPORTED;
+}
+
+
+ssize_t
+BUSBEndpoint::ReadIsochronousStream(void *data, size_t length,
+	bigtime_t timeout) const
+{
+	return B_NOT_SUPPORTED;
+}
+
+
+status_t
+BUSBEndpoint::StopIsochronousStream() const
+{
+	return B_NOT_SUPPORTED;
+}
