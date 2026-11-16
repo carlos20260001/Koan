@@ -1,3 +1,0 @@
-SubDir HAIKU_TOP src system ;
-
-SubInclude HAIKU_TOP src system libnetwork ;

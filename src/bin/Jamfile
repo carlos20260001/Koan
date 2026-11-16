@@ -281,9 +281,6 @@ SubInclude HAIKU_TOP src bin rc ;
 SubInclude HAIKU_TOP src bin screen_blanker ;
 SubInclude HAIKU_TOP src bin screenmode ;
 
-# debugging tools
-SubInclude HAIKU_TOP src bin debug ;
-
 # Network command line tools
 SubInclude HAIKU_TOP src bin network ;
 SubInclude HAIKU_TOP src bin neural ;

@@ -1,5 +1,0 @@
-#define DO_PTHREADS
-
-#define HAS_INET6_STRUCTS 1
-#define HAVE_SA_LEN 1
-#define HAVE_SIN6_SCOPE_ID 1
