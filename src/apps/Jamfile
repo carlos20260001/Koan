@@ -4,7 +4,6 @@ HaikuSubInclude aboutsystem ;
 HaikuSubInclude activitymonitor ;
 HaikuSubInclude autoraise ;
 HaikuSubInclude bluetoothstatus ;
-HaikuSubInclude bootmanager ;
 HaikuSubInclude charactermap ;
 HaikuSubInclude clock ;
 HaikuSubInclude codycam ;

@@ -1,3 +1,0 @@
-SubDir HAIKU_TOP src tools mbrtool ;
-
-BuildPlatformMain <build>mbrtool : mbrtool.cpp : $(HOST_LIBSUPC++) ;
