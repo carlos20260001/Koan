@@ -1,0 +1,33 @@
+SubDir HAIKU_TOP src tools package ;
+
+UsePrivateBuildHeaders libroot shared storage support ;
+
+SEARCH_SOURCE += [ FDirName $(HAIKU_TOP) src bin package ] ;
+
+USES_BE_API on <build>package = true ;
+
+# New packages are zstd-compressed where the zstd build feature is enabled,
+# unless HAIKU_PACKAGE_DEFAULT_COMPRESSION is zlib: a build whose packages
+# systems without zstd support must still read (air/OS arm64 until all of
+# them have it).
+if [ FIsBuildFeatureEnabled zstd ]
+		&& $(HAIKU_PACKAGE_DEFAULT_COMPRESSION:E=zstd) = zstd {
+	SubDirC++Flags -DZSTD_DEFAULT ;
+}
+
+BuildPlatformMain <build>package :
+	command_add.cpp
+	command_checksum.cpp
+	command_create.cpp
+	command_dump.cpp
+	command_extract.cpp
+	command_info.cpp
+	command_list.cpp
+	command_recompress.cpp
+	package.cpp
+	PackageWriterListener.cpp
+	PackageWritingUtils.cpp
+
+	:
+	libpackage_build.so $(HOST_LIBBE) $(HOST_LIBSUPC++)
+;

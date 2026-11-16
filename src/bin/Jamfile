@@ -259,15 +259,22 @@ DoCatalogs filepanel
 	: filepanel.cpp
 ;
 
+SubInclude HAIKU_TOP src bin acpi_call ;
 SubInclude HAIKU_TOP src bin addattr ;
+SubInclude HAIKU_TOP src bin bfs_tools ;
 SubInclude HAIKU_TOP src bin cddb_lookup ;
+SubInclude HAIKU_TOP src bin consoled ;
 SubInclude HAIKU_TOP src bin desklink ;
+SubInclude HAIKU_TOP src bin fwcontrol ;
 SubInclude HAIKU_TOP src bin hid_decode ;
+SubInclude HAIKU_TOP src bin i2c ;
 SubInclude HAIKU_TOP src bin bt_firmware ;
 SubInclude HAIKU_TOP src bin keymap ;
 SubInclude HAIKU_TOP src bin keystore ;
+SubInclude HAIKU_TOP src bin listdev ;
 SubInclude HAIKU_TOP src bin listusb ;
 SubInclude HAIKU_TOP src bin locale ;
+SubInclude HAIKU_TOP src bin makebootable ;
 SubInclude HAIKU_TOP src bin mail_utils ;
 SubInclude HAIKU_TOP src bin media_client ;
 SubInclude HAIKU_TOP src bin mkfs ;
@@ -275,11 +282,16 @@ SubInclude HAIKU_TOP src bin multiuser ;
 SubInclude HAIKU_TOP src bin package ;
 SubInclude HAIKU_TOP src bin package_repo ;
 SubInclude HAIKU_TOP src bin pc ;
+SubInclude HAIKU_TOP src bin pcmcia-cs ;
 SubInclude HAIKU_TOP src bin pkgman ;
 SubInclude HAIKU_TOP src bin query ;
 SubInclude HAIKU_TOP src bin rc ;
 SubInclude HAIKU_TOP src bin screen_blanker ;
 SubInclude HAIKU_TOP src bin screenmode ;
+SubInclude HAIKU_TOP src bin writembr ;
+
+# debugging tools
+SubInclude HAIKU_TOP src bin debug ;
 
 # Network command line tools
 SubInclude HAIKU_TOP src bin network ;

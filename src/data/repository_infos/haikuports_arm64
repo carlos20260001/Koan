@@ -1,0 +1,7 @@
+name HaikuPorts
+vendor "Haiku Project"
+summary "HaikuPorts' arm64 build packages, served by air/OS"
+priority 1
+baseurl https://airos.works/repo/arm64
+identifier tag:haikuports.org,2013:repositories/haikuports/master/arm64
+architecture arm64

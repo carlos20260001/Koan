@@ -1,0 +1,33 @@
+name 			smbfs
+version			%HAIKU_VERSION%
+architecture	%HAIKU_PACKAGING_ARCH%
+summary			"Mounts the shares of Windows, Samba and NAS servers"
+
+description		"A file system for the shares of servers that talk SMB2 or
+SMB3, which is what Windows, Samba and most NAS do. Shares are set up in
+Tracker's preferences, where they can be told to be mounted whenever the
+system starts, or mounted by hand with
+mount -t userlandfs -p \"smbfs server=<host> share=<name> user=<name>
+password=<password>\" <directory>."
+
+packager		"The Haiku build system"
+vendor			"Haiku Project"
+
+copyrights {
+	"2026 Haiku, Inc."
+	"2016-2025 Ronnie Sahlberg"
+}
+licenses {
+	"MIT"
+	"GNU LGPL v2.1"
+}
+
+provides {
+	smbfs = %HAIKU_VERSION% compat >= R1~beta1
+	add_on:smbfs = %HAIKU_VERSION%
+}
+
+requires {
+	haiku >= R1~beta1
+	userland_fs >= R1~beta1
+}
