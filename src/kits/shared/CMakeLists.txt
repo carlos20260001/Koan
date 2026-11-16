@@ -18,6 +18,7 @@ AddOn(
 	DateTimeEdit.cpp
 	DragTrackingFilter.cpp
 	DriverSettingsMessageAdapter.cpp
+	EmojiTables.cpp
 	#Geolocation.cpp
 	HashString.cpp
 	HSL.cpp
@@ -36,9 +37,11 @@ AddOn(
 	MessageBuilder.cpp
 	NaturalCompare.cpp
 	PromptWindow.cpp
-	#QueryFile.cpp
+	QueryFile.cpp
 	RegExp.cpp
 	BRWLocker.cpp
+	# air/OS keeps RWLocker next to VitruvianOS's BRWLocker
+	RWLocker.cpp
 	RWLockManager.cpp
 	SettingsHandler.cpp
 	SettingsMessage.cpp
@@ -56,7 +59,9 @@ AddOn(
 
 	INCLUDES
 	"${PROJECT_SOURCE_DIR}/src/add-ons/input_server/devices/keyboard"
+	# QueryFile.cpp includes <tracker/MimeTypes.h>
+	"${PROJECT_SOURCE_DIR}/src/kits"
 )
 
-UsePrivateHeaders(shared shared locale interface kernel libroot system)
+UsePrivateHeaders(shared shared locale interface kernel libroot system app)
 target_link_libraries(shared PRIVATE xkbcommon)

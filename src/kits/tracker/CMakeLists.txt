@@ -6,10 +6,14 @@ AddOn(
 	AttributeStream.cpp
 	AutoMounterSettings.cpp
 	BackgroundImage.cpp
+	BatchRenameWindow.cpp
 	Bitmaps.cpp
+	BreadcrumbView.cpp
 	ContainerWindow.cpp
+	CopyConflicts.cpp
 	CountView.cpp
 	DesktopPoseView.cpp
+	DetailsPane.cpp
 	DeskWindow.cpp
 	DialogPane.cpp
 	DirMenu.cpp
@@ -21,6 +25,8 @@ AddOn(
 	FilePanelPriv.cpp
 	#FilePermissionsView.cpp
 	FindPanel.cpp
+	FolderSizes.cpp
+	FolderStateStore.cpp
 	FSClipboard.cpp
 	FSUndoRedo.cpp
 	FSUtils.cpp
@@ -35,15 +41,18 @@ AddOn(
 	MountMenu.cpp
 	Navigator.cpp
 	NavMenu.cpp
+	NetworkSharesSettings.cpp
 	NodePreloader.cpp
 	NodeWalker.cpp
 	OpenWithWindow.cpp
 	OverrideAlert.cpp
+	PaneSplitView.cpp
 	PendingNodeMonitorCache.cpp
 	Pose.cpp
 	PoseList.cpp
 	PoseView.cpp
 	PoseViewScripting.cpp
+	QuickLook.cpp
 	QueryContainerWindow.cpp
 	QueryPoseView.cpp
 	RecentItems.cpp
@@ -53,9 +62,12 @@ AddOn(
 	#SettingsHandler.cpp
 	SettingsViews.cpp
 	Shortcuts.cpp
+	SidebarView.cpp
 	#SlowContextPopup.cpp
 	SlowMenu.cpp
 	StatusWindow.cpp
+	TabBarView.cpp
+	Tags.cpp
 	TaskLoop.cpp
 	TemplatesMenu.cpp
 	Tests.cpp
@@ -105,7 +117,10 @@ AddOn(
 	RDEF TrackerIcons.rdef libtracker.rdef
 )
 
-UsePrivateHeaders(tracker interface shared tracker mount storage system support print)
+UsePrivateHeaders(tracker app interface shared tracker mount storage system support print)
+# air/OS's Quick Look integration; UsePrivateHeaders has no "quicklook" entry.
+target_include_directories(tracker PRIVATE
+	"${PROJECT_SOURCE_DIR}/headers/private/quicklook")
 
 target_compile_definitions(tracker PRIVATE
 	_BUILDING_tracker=1
