@@ -77,11 +77,14 @@ AddOn(
 UsePrivateHeaders(be_bootstrap interface app support)
 
 # ported subset: upstream adds every kit unconditionally.
+# air/OS-only kits (debug, debugger, mail, media, media_controls, neural,
+# print, quicklook) are listed with VitruvianOS's; each is added only once
+# it has a CMakeLists.txt. media comes before neural, which links it.
 foreach(_kit
-		accounts app bluetooth device game hwaccel interface locale
-		location media2 midi midi2 network opengl package screensaver
-		shared storage support telephony textencoding translation tracker
-		web)
+		accounts app bluetooth debug debugger device game hwaccel interface
+		locale location mail media media_controls media2 midi midi2 network
+		neural opengl package print quicklook screensaver shared storage
+		support telephony textencoding translation tracker web)
 	if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/${_kit}/CMakeLists.txt")
 		add_subdirectory(${_kit})
 	endif()
