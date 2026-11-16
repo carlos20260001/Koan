@@ -14,17 +14,16 @@
 #    application on libmedia that also uses libgame (on media2) - without
 #    one library's references binding to the other's classes.
 
-set(VOS_MEDIA_HEADERS
-	"${CMAKE_SOURCE_DIR}/headers/os/media"
-	"${CMAKE_SOURCE_DIR}/headers/private/media"
-	"${CMAKE_SOURCE_DIR}/headers/private/media/experimental"
-)
-
 # Put the classic Media Kit headers first for <target>, ahead of the global
 # headers/os/media2. For libmedia and every application or add-on that uses
-# the classic API (#include <MediaRoster.h>, <MediaDefs.h>, ...).
+# the classic API (#include <MediaRoster.h>, <MediaDefs.h>, ...). Defined
+# here, before src/servers, src/add-ons and src/apps are configured.
 function(UseMediaKit target)
-	target_include_directories(${target} BEFORE PRIVATE ${VOS_MEDIA_HEADERS})
+	target_include_directories(${target} BEFORE PRIVATE
+		"${PROJECT_SOURCE_DIR}/headers/os/media"
+		"${PROJECT_SOURCE_DIR}/headers/private/media"
+		"${PROJECT_SOURCE_DIR}/headers/private/media/experimental"
+	)
 endfunction()
 
 AddOn(media
