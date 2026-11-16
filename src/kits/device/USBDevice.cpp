@@ -1,33 +1,63 @@
 /*
- * Copyright 2007-2008, Haiku Inc. All rights reserved.
+ * BUSBDevice: USB kit device side, libusb-1.0 backend.
+ *
+ * Copyright 2026, Dario Casalinuovo. All rights reserved.
  * Distributed under the terms of the MIT License.
  *
- * Authors:
- *		Michael Lotz <mmlr@mlotz.ch>
+ * Descriptors are read without opening the device; a handle the user may
+ * not get answers every transfer with B_PERMISSION_DENIED, never root.
  */
 
-#include <ByteOrder.h>
 #include <USBKit.h>
-#include <usb_raw.h>
-#include <UTF8.h>
+
+#include <ByteOrder.h>
+#include <String.h>
+
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+
 #include <new>
+
+#include <Locker.h>
+
+#include "USBPriv.h"
+
+
+static BLocker sContextLock;
+static libusb_context *sContext = NULL;
+
+
+static libusb_context *
+usb_context()
+{
+	if (!sContextLock.Lock())
+		return NULL;
+
+	if (sContext == NULL && libusb_init(&sContext) != 0)
+		sContext = NULL;
+
+	sContextLock.Unlock();
+	return sContext;
+}
 
 
 BUSBDevice::BUSBDevice(const char *path)
-	:	fPath(NULL),
-		fRawFD(-1),
-		fConfigurations(NULL),
-		fActiveConfiguration(0),
-		fManufacturerString(NULL),
-		fProductString(NULL),
-		fSerialNumberString(NULL)
+	:
+	fPath(NULL),
+	fRawFD(-1),
+	fConfigurations(NULL),
+	fActiveConfiguration(0),
+	fManufacturerString(NULL),
+	fProductString(NULL),
+	fSerialNumberString(NULL),
+	fLibusb(NULL),
+	fInitStatus(B_NO_INIT)
 {
 	memset(&fDescriptor, 0, sizeof(fDescriptor));
 
-	if (path)
+	if (path != NULL)
 		SetTo(path);
 }
 
@@ -41,47 +71,148 @@ BUSBDevice::~BUSBDevice()
 status_t
 BUSBDevice::InitCheck()
 {
-	return (fRawFD >= 0 ? B_OK : B_ERROR);
+	return fInitStatus;
 }
 
 
 status_t
 BUSBDevice::SetTo(const char *path)
 {
-	if (!path)
+	Unset();
+
+	if (path == NULL)
+		return B_BAD_VALUE;
+
+	int busNumber = -1;
+	int deviceNumber = -1;
+	char extra;
+	if (sscanf(path, "/dev/bus/usb/%3d/%3d%c", &busNumber, &deviceNumber,
+			&extra) != 2 || busNumber < 0 || deviceNumber < 0)
 		return B_BAD_VALUE;
 
 	fPath = strdup(path);
-	fRawFD = open(path, O_RDWR | O_CLOEXEC);
-	if (fRawFD < 0) {
-		Unset();
-		return B_ERROR;
+	if (fPath == NULL) {
+		fInitStatus = B_NO_MEMORY;
+		return fInitStatus;
 	}
 
-	usb_raw_command command;
-	if (ioctl(fRawFD, B_USB_RAW_COMMAND_GET_VERSION, &command, sizeof(command))
-		|| command.version.status != B_USB_RAW_PROTOCOL_VERSION) {
+	libusb_context *context = usb_context();
+	if (context == NULL) {
 		Unset();
-		return B_ERROR;
+		fInitStatus = B_ERROR;
+		return fInitStatus;
 	}
 
-	command.device.descriptor = &fDescriptor;
-	if (ioctl(fRawFD, B_USB_RAW_COMMAND_GET_DEVICE_DESCRIPTOR, &command,
-		sizeof(command)) || command.device.status != B_USB_RAW_STATUS_SUCCESS) {
+	libusb_device **list = NULL;
+	ssize_t count = libusb_get_device_list(context, &list);
+	if (count < 0) {
 		Unset();
-		return B_ERROR;
+		fInitStatus = B_ERROR;
+		return fInitStatus;
+	}
+
+	libusb_device *found = NULL;
+	for (ssize_t i = 0; i < count; i++) {
+		if (libusb_get_bus_number(list[i]) == busNumber
+			&& libusb_get_device_address(list[i]) == deviceNumber) {
+			found = libusb_ref_device(list[i]);
+			break;
+		}
+	}
+	libusb_free_device_list(list, 1);
+
+	if (found == NULL) {
+		Unset();
+		fInitStatus = B_ENTRY_NOT_FOUND;
+		return fInitStatus;
+	}
+
+	struct libusb_device_descriptor descriptor;
+	if (libusb_get_device_descriptor(found, &descriptor) != 0) {
+		libusb_unref_device(found);
+		Unset();
+		fInitStatus = B_ERROR;
+		return fInitStatus;
+	}
+
+	fDescriptor.length = descriptor.bLength;
+	fDescriptor.descriptor_type = descriptor.bDescriptorType;
+	fDescriptor.usb_version = descriptor.bcdUSB;
+	fDescriptor.device_class = descriptor.bDeviceClass;
+	fDescriptor.device_subclass = descriptor.bDeviceSubClass;
+	fDescriptor.device_protocol = descriptor.bDeviceProtocol;
+	fDescriptor.max_packet_size_0 = descriptor.bMaxPacketSize0;
+	fDescriptor.vendor_id = descriptor.idVendor;
+	fDescriptor.product_id = descriptor.idProduct;
+	fDescriptor.device_version = descriptor.bcdDevice;
+	fDescriptor.manufacturer = descriptor.iManufacturer;
+	fDescriptor.product = descriptor.iProduct;
+	fDescriptor.serial_number = descriptor.iSerialNumber;
+	fDescriptor.num_configurations = descriptor.bNumConfigurations;
+
+	_usb_lib_state *state = new(std::nothrow) _usb_lib_state;
+	if (state == NULL) {
+		libusb_unref_device(found);
+		Unset();
+		fInitStatus = B_NO_MEMORY;
+		return fInitStatus;
+	}
+
+	state->device = found;
+	state->handle = NULL;
+	state->openStatus = B_ERROR;
+
+	libusb_device_handle *handle = NULL;
+	int openResult = libusb_open(found, &handle);
+	if (openResult == 0) {
+		state->handle = handle;
+		state->openStatus = B_OK;
+	} else
+		state->openStatus = usb_lib_error(openResult);
+
+	fLibusb = state;
+
+	// The configuration value is not necessarily the index; map it.
+	fActiveConfiguration = 0;
+	int configurationValue = 0;
+	_usb_lib_state *loaded = (_usb_lib_state *)fLibusb;
+	if (loaded->handle != NULL
+		&& libusb_get_configuration(loaded->handle, &configurationValue) == 0
+		&& configurationValue > 0) {
+		for (uint32 i = 0; i < fDescriptor.num_configurations; i++) {
+			struct libusb_config_descriptor *config = NULL;
+			if (libusb_get_config_descriptor(found, i, &config) != 0)
+				continue;
+
+			uint8 value = config->bConfigurationValue;
+			libusb_free_config_descriptor(config);
+
+			if (value == configurationValue) {
+				fActiveConfiguration = i;
+				break;
+			}
+		}
 	}
 
 	fConfigurations = new(std::nothrow) BUSBConfiguration *[
 		fDescriptor.num_configurations];
-	if (fConfigurations == NULL)
-		return B_NO_MEMORY;
+	if (fConfigurations == NULL) {
+		Unset();
+		fInitStatus = B_NO_MEMORY;
+		return fInitStatus;
+	}
 
 	for (uint32 i = 0; i < fDescriptor.num_configurations; i++) {
 		fConfigurations[i] = new(std::nothrow) BUSBConfiguration(this, i,
 			fRawFD);
+		if (fConfigurations[i] == NULL)
+			continue;
+
+		fConfigurations[i]->fLibusb = fLibusb;
+		fConfigurations[i]->_Load();
 	}
 
+	fInitStatus = B_OK;
 	return B_OK;
 }
 
@@ -89,9 +220,23 @@ BUSBDevice::SetTo(const char *path)
 void
 BUSBDevice::Unset()
 {
-	if (fRawFD >= 0)
-		close(fRawFD);
-	fRawFD = -1;
+	if (fConfigurations != NULL) {
+		for (uint32 i = 0; i < fDescriptor.num_configurations; i++)
+			delete fConfigurations[i];
+
+		delete[] fConfigurations;
+		fConfigurations = NULL;
+	}
+
+	_usb_lib_state *state = (_usb_lib_state *)fLibusb;
+	if (state != NULL) {
+		if (state->handle != NULL)
+			libusb_close(state->handle);
+		if (state->device != NULL)
+			libusb_unref_device(state->device);
+		delete state;
+	}
+	fLibusb = NULL;
 
 	free(fPath);
 	fPath = NULL;
@@ -99,24 +244,20 @@ BUSBDevice::Unset()
 	delete[] fManufacturerString;
 	delete[] fProductString;
 	delete[] fSerialNumberString;
-	fManufacturerString = fProductString = fSerialNumberString = NULL;
-
-	if (fConfigurations != NULL) {
-		for (int32 i = 0; i < fDescriptor.num_configurations; i++)
-			delete fConfigurations[i];
-
-		delete[] fConfigurations;
-		fConfigurations = NULL;
-	}
+	fManufacturerString = NULL;
+	fProductString = NULL;
+	fSerialNumberString = NULL;
 
 	memset(&fDescriptor, 0, sizeof(fDescriptor));
+	fActiveConfiguration = 0;
+	fInitStatus = B_NO_INIT;
 }
 
 
 const char *
 BUSBDevice::Location() const
 {
-	if (!fPath || strlen(fPath) < 12)
+	if (fPath == NULL || strlen(fPath) < 12)
 		return NULL;
 
 	return &fPath[12];
@@ -248,19 +389,29 @@ size_t
 BUSBDevice::GetStringDescriptor(uint32 index,
 	usb_string_descriptor *descriptor, size_t length) const
 {
-	if (!descriptor)
-		return B_BAD_VALUE;
+	if (descriptor == NULL)
+		return (size_t)B_BAD_VALUE;
 
-	usb_raw_command command;
-	command.string.descriptor = descriptor;
-	command.string.string_index = index;
-	command.string.length = length;
-
-	if (ioctl(fRawFD, B_USB_RAW_COMMAND_GET_STRING_DESCRIPTOR, &command,
-		sizeof(command)) || command.string.status != B_USB_RAW_STATUS_SUCCESS)
+	_usb_lib_state *state = (_usb_lib_state *)fLibusb;
+	if (state == NULL || state->handle == NULL)
 		return 0;
 
-	return command.string.length;
+	uint16 value = (USB_DESCRIPTOR_STRING << 8) | index;
+
+	// Most devices speak US English; some only answer the language list
+	// request, so fall back to index 0 before giving up.
+	int result = libusb_control_transfer(state->handle, USB_REQTYPE_DEVICE_IN,
+		USB_REQUEST_GET_DESCRIPTOR, value, 0x0409, (unsigned char *)descriptor,
+		length, USB_KIT_TIMEOUT_MS);
+	if (result < 0)
+		result = libusb_control_transfer(state->handle, USB_REQTYPE_DEVICE_IN,
+			USB_REQUEST_GET_DESCRIPTOR, value, 0, (unsigned char *)descriptor,
+			length, USB_KIT_TIMEOUT_MS);
+
+	if (result < 0)
+		return 0;
+
+	return result;
 }
 
 
@@ -268,43 +419,36 @@ char *
 BUSBDevice::DecodeStringDescriptor(uint32 index) const
 {
 	char buffer[300];
-	usb_string_descriptor *stringDescriptor;
-	stringDescriptor = (usb_string_descriptor *)&buffer;
+	usb_string_descriptor *stringDescriptor = (usb_string_descriptor *)buffer;
 
-	int32 stringLength = GetStringDescriptor(index, stringDescriptor,
-		sizeof(buffer) - sizeof(usb_string_descriptor)) - 1;
-
-	if (stringLength < 3)
+	size_t total = GetStringDescriptor(index, stringDescriptor, sizeof(buffer));
+	if (total < 4)
 		return NULL;
 
-	int32 resultLength = 0;
+	// The wire carries UTF-16 little endian after the two byte header.
+	int32 units = ((int32)total - 2) / 2;
+	const uint16 *wire = (const uint16 *)stringDescriptor->string;
 
-	// USB is always little-endian, UCS-2 is big-endian.
-	uint16* ustr = (uint16*)stringDescriptor->string;
-	for (int32 i = 0; i < (stringLength / 2); i++) {
-		// Increase size of result as needed by source character.
-		const uint16 character = B_LENDIAN_TO_HOST_INT16(ustr[i]);
-		resultLength++;
-		if (character >= 0x80)
-			resultLength++;
-		if (character >= 0x800)
-			resultLength++;
-
-		ustr[i] = B_SWAP_INT16(ustr[i]);
+	BString decoded;
+	for (int32 i = 0; i < units; i++) {
+		uint16 character = B_LENDIAN_TO_HOST_INT16(wire[i]);
+		if (character < 0x80)
+			decoded << (char)character;
+		else if (character < 0x800) {
+			decoded << (char)(0xc0 | (character >> 6));
+			decoded << (char)(0x80 | (character & 0x3f));
+		} else {
+			decoded << (char)(0xe0 | (character >> 12));
+			decoded << (char)(0x80 | ((character >> 6) & 0x3f));
+			decoded << (char)(0x80 | (character & 0x3f));
+		}
 	}
 
-	char *result = new(std::nothrow) char[resultLength + 1];
+	char *result = new(std::nothrow) char[decoded.Length() + 1];
 	if (result == NULL)
 		return NULL;
 
-	status_t status = convert_to_utf8(B_UNICODE_CONVERSION,
-		(const char*)stringDescriptor->string, &stringLength,
-		result, &resultLength, NULL);
-	if (status != B_OK) {
-		delete[] result;
-		return NULL;
-	}
-	result[resultLength] = 0;
+	memcpy(result, decoded.String(), decoded.Length() + 1);
 	return result;
 }
 
@@ -314,20 +458,19 @@ BUSBDevice::GetDescriptor(uint8 type, uint8 index, uint16 languageID,
 	void *data, size_t length) const
 {
 	if (length > 0 && data == NULL)
-		return B_BAD_VALUE;
+		return (size_t)B_BAD_VALUE;
 
-	usb_raw_command command;
-	command.descriptor.type = type;
-	command.descriptor.index = index;
-	command.descriptor.language_id = languageID;
-	command.descriptor.data = data;
-	command.descriptor.length = length;
-
-	if (ioctl(fRawFD, B_USB_RAW_COMMAND_GET_DESCRIPTOR, &command,
-		sizeof(command)) || command.descriptor.status != B_USB_RAW_STATUS_SUCCESS)
+	_usb_lib_state *state = (_usb_lib_state *)fLibusb;
+	if (state == NULL || state->handle == NULL)
 		return 0;
 
-	return command.descriptor.length;
+	int result = libusb_control_transfer(state->handle, USB_REQTYPE_DEVICE_IN,
+		USB_REQUEST_GET_DESCRIPTOR, (type << 8) | index, languageID,
+		(unsigned char *)data, length, USB_KIT_TIMEOUT_MS);
+	if (result < 0)
+		return 0;
+
+	return result;
 }
 
 
@@ -341,7 +484,7 @@ BUSBDevice::CountConfigurations() const
 const BUSBConfiguration *
 BUSBDevice::ConfigurationAt(uint32 index) const
 {
-	if (index >= fDescriptor.num_configurations || fConfigurations == NULL)
+	if (fConfigurations == NULL || index >= fDescriptor.num_configurations)
 		return NULL;
 
 	return fConfigurations[index];
@@ -351,7 +494,8 @@ BUSBDevice::ConfigurationAt(uint32 index) const
 const BUSBConfiguration *
 BUSBDevice::ActiveConfiguration() const
 {
-	if (fConfigurations == NULL)
+	if (fConfigurations == NULL
+		|| fActiveConfiguration >= fDescriptor.num_configurations)
 		return NULL;
 
 	return fConfigurations[fActiveConfiguration];
@@ -361,15 +505,18 @@ BUSBDevice::ActiveConfiguration() const
 status_t
 BUSBDevice::SetConfiguration(const BUSBConfiguration *configuration)
 {
-	if (!configuration || configuration->Index() >= fDescriptor.num_configurations)
+	if (configuration == NULL
+		|| configuration->Index() >= fDescriptor.num_configurations)
 		return B_BAD_VALUE;
 
-	usb_raw_command command;
-	command.config.config_index = configuration->Index();
+	_usb_lib_state *state = (_usb_lib_state *)fLibusb;
+	if (state == NULL || state->handle == NULL)
+		return usb_no_handle_status(state);
 
-	if (ioctl(fRawFD, B_USB_RAW_COMMAND_SET_CONFIGURATION, &command,
-		sizeof(command)) || command.config.status != B_USB_RAW_STATUS_SUCCESS)
-		return B_ERROR;
+	int result = libusb_set_configuration(state->handle,
+		configuration->Descriptor()->configuration_value);
+	if (result < 0)
+		return usb_lib_error(result);
 
 	fActiveConfiguration = configuration->Index();
 	return B_OK;
@@ -383,25 +530,44 @@ BUSBDevice::ControlTransfer(uint8 requestType, uint8 request, uint16 value,
 	if (length > 0 && data == NULL)
 		return B_BAD_VALUE;
 
-	usb_raw_command command;
-	command.control.request_type = requestType;
-	command.control.request = request;
-	command.control.value = value;
-	command.control.index = index;
-	command.control.length = length;
-	command.control.data = data;
+	_usb_lib_state *state = (_usb_lib_state *)fLibusb;
+	if (state == NULL || state->handle == NULL)
+		return usb_no_handle_status(state);
 
-	if (ioctl(fRawFD, B_USB_RAW_COMMAND_CONTROL_TRANSFER, &command,
-		sizeof(command)) || command.control.status != B_USB_RAW_STATUS_SUCCESS)
-		return B_ERROR;
+	int result = libusb_control_transfer(state->handle, requestType, request,
+		value, index, (unsigned char *)data, length, USB_KIT_TIMEOUT_MS);
+	if (result < 0)
+		return usb_lib_error(result);
 
-	return command.control.length;
+	return result;
 }
 
 
-// definition of reserved virtual functions
-void BUSBDevice::_ReservedUSBDevice1() {};
-void BUSBDevice::_ReservedUSBDevice2() {};
-void BUSBDevice::_ReservedUSBDevice3() {};
-void BUSBDevice::_ReservedUSBDevice4() {};
-void BUSBDevice::_ReservedUSBDevice5() {};
+void
+BUSBDevice::_ReservedUSBDevice1()
+{
+}
+
+
+void
+BUSBDevice::_ReservedUSBDevice2()
+{
+}
+
+
+void
+BUSBDevice::_ReservedUSBDevice3()
+{
+}
+
+
+void
+BUSBDevice::_ReservedUSBDevice4()
+{
+}
+
+
+void
+BUSBDevice::_ReservedUSBDevice5()
+{
+}

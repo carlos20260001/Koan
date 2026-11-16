@@ -1,11 +1,18 @@
 /*
  * Copyright 2009, Haiku, Inc. All rights reserved.
  * Distributed under the terms of the MIT License.
+ *
+ * Restored from the tree history (added by d8e0883a "Mass code update to
+ * hrev52990", removed by dd3e253a "Cleanup") and backed by a new evdev
+ * implementation in the Game Kit (src/kits/game/Joystick.cpp).
+ * IsCalibrationEnabled() was added to complete the API surface pinned by
+ * src/tests/kits/device/stickit_BJoystick.
  */
 #ifndef	_JOYSTICK_H
 #define	_JOYSTICK_H
 
 
+#include <Messenger.h>
 #include <OS.h>
 #include <SupportDefs.h>
 
@@ -16,6 +23,16 @@ class _BJoystickTweaker;
 struct entry_ref;
 struct _extended_joystick;
 struct _joystick_info;
+
+
+enum joystick_device_notification {
+	B_JOYSTICK_DEVICE_ADDED		= 0x0001,
+	B_JOYSTICK_DEVICE_REMOVED	= 0x0002
+};
+
+
+status_t	watch_joystick_devices(BMessenger target, bool start);
+			// Posts B_JOYSTICK_DEVICES_CHANGED to target while watching.
 
 
 class BJoystick {
@@ -42,10 +59,7 @@ public:
 								size_t bufSize = B_OS_NAME_LENGTH);
 
 			status_t		RescanDevices();
-								// Haiku extension. Updates the list of devices
-								// as enumerated by CountDevices() and
-								// GetDeviceName() with possibly newly plugged
-								// in devices.
+								// Legacy extension: refreshes the list reported by CountDevices() and GetDeviceName().
 
 			bool			EnterEnhancedMode(const entry_ref* ref = NULL);
 
@@ -68,12 +82,8 @@ public:
 								// each set bit indicates a pressed button.
 			status_t		GetButtonValues(bool* outButtons,
 								int32 forStick = 0);
-								// Haiku extension. Allows to retrieve the state
-								// of an arbitrary count of buttons. The
-								// outButtons argument is an array of boolean
-								// values with at least CountButtons() elements.
-								// True means the button is pressed and false
-								// means it is released.
+								// Legacy extension: reads an arbitrary number of buttons into outButtons,
+								// an array of at least CountButtons() booleans where true means pressed.
 			status_t		GetButtonNameAt(int32 index,
 								BString* outName);
 
@@ -105,6 +115,15 @@ public:
 			bool			IsCalibrationEnabled();
 			status_t		EnableCalibration(bool calibrates = true);
 
+			bool			SupportsRumble();
+								// True when the open device reports FF_RUMBLE.
+								// Every rumbling pad driver exposes it; no hidraw.
+			status_t		StartRumble(uint16 strongMagnitude,
+								uint16 weakMagnitude, bigtime_t duration);
+								// Magnitudes are 0..65535, duration in
+								// microseconds. Needs a read/write Open().
+			status_t		StopRumble();
+
 protected:
 	virtual	void			Calibrate(struct _extended_joystick*);
 
@@ -129,5 +148,6 @@ friend class _BJoystickTweaker;
 
 			uint32          _reserved_Joystick_[10];
 };
+
 
 #endif // _JOYSTICK_H

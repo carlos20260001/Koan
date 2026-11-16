@@ -1,258 +1,281 @@
 /*
- * Copyright 2007-2008, Haiku Inc. All rights reserved.
+ * BUSBRoster: udev hotplug roster for the USB kit.
+ *
+ * Copyright 2026, Dario Casalinuovo. All rights reserved.
  * Distributed under the terms of the MIT License.
  *
- * Authors:
- *		Michael Lotz <mmlr@mlotz.ch>
+ * Hooks run on the udev monitor thread (subsystem usb, devtype
+ * usb_device); Stop() joins it, then pairs removals with the adds.
  */
 
 #include <USBKit.h>
-#include <Directory.h>
-#include <Entry.h>
-#include <Looper.h>
-#include <Messenger.h>
-#include <Node.h>
-#include <NodeMonitor.h>
-#include <Path.h>
+
+#include <errno.h>
+#include <poll.h>
 #include <stdio.h>
 #include <string.h>
+#include <unistd.h>
+
 #include <new>
 
+#include <libudev.h>
 
-class WatchedEntry {
+#include <List.h>
+#include <OS.h>
+
+
+// Owns the udev context, the monitor and the devices whose DeviceAdded()
+// returned B_OK. Kept in BUSBRoster::fLooper, as the legacy layout did
+// with its looper.
+class RosterMonitor {
 public:
-							WatchedEntry(BUSBRoster *roster,
-								BMessenger *messenger, entry_ref *ref);
-							~WatchedEntry();
+							RosterMonitor(BUSBRoster *roster);
+							~RosterMonitor();
 
-		bool				EntryCreated(entry_ref *ref);
-		bool				EntryRemoved(ino_t node);
+			status_t		Run();
+			void			QuitAndWait();
 
 private:
-		BUSBRoster *		fRoster;
-		BMessenger *		fMessenger;
+			void			_Enumerate();
+			void			_HandleDevice(const char *action,
+								const char *node);
+			void			_AddDevice(const char *node);
+			void			_RemoveDevice(const char *node);
+			void			_DeliverRemovals();
+			static status_t	_MonitorThreadEntry(void *data);
+			void			_MonitorLoop();
 
-		node_ref			fNode;
-		bool				fIsDirectory;
-		BUSBDevice *		fDevice;
-
-		WatchedEntry *		fEntries;
-		WatchedEntry *		fLink;
+			BUSBRoster *	fRoster;
+			udev *			fUdev;
+			udev_monitor *	fMonitor;
+			thread_id		fThread;
+			bool			fQuit;
+			BList			fDevices;
 };
 
 
-class RosterLooper : public BLooper {
-public:
-							RosterLooper(BUSBRoster *roster);
-
-		void				Stop();
-
-virtual	void				MessageReceived(BMessage *message);
-
-private:
-		BUSBRoster *		fRoster;
-		WatchedEntry *		fRoot;
-		BMessenger *		fMessenger;
-};
-
-
-WatchedEntry::WatchedEntry(BUSBRoster *roster, BMessenger *messenger,
-	entry_ref *ref)
-	:	fRoster(roster),
-		fMessenger(messenger),
-		fIsDirectory(false),
-		fDevice(NULL),
-		fEntries(NULL),
-		fLink(NULL)
+RosterMonitor::RosterMonitor(BUSBRoster *roster)
+	:
+	fRoster(roster),
+	fUdev(NULL),
+	fMonitor(NULL),
+	fThread(-1),
+	fQuit(false)
 {
-	BEntry entry(ref);
-	entry.GetNodeRef(&fNode);
+	fUdev = udev_new();
+	if (fUdev == NULL) {
+		fprintf(stderr, "USBKit: udev unavailable\n");
+		return;
+	}
 
-	BDirectory directory;
-	if (entry.IsDirectory() && directory.SetTo(ref) >= B_OK) {
-		fIsDirectory = true;
+	fMonitor = udev_monitor_new_from_netlink(fUdev, "udev");
+	if (fMonitor == NULL) {
+		fprintf(stderr, "USBKit: udev monitor unavailable\n");
+		return;
+	}
 
-		while(directory.GetNextEntry(&entry) >= B_OK) {
-			if (entry.GetRef(ref) < B_OK)
+	udev_monitor_filter_add_match_subsystem_devtype(fMonitor, "usb",
+		"usb_device");
+	udev_monitor_enable_receiving(fMonitor);
+}
+
+
+RosterMonitor::~RosterMonitor()
+{
+	QuitAndWait();
+	_DeliverRemovals();
+
+	if (fMonitor != NULL)
+		udev_monitor_unref(fMonitor);
+	if (fUdev != NULL)
+		udev_unref(fUdev);
+}
+
+
+status_t
+RosterMonitor::Run()
+{
+	if (fMonitor == NULL)
+		return B_NO_INIT;
+
+	fThread = spawn_thread(_MonitorThreadEntry, "usb roster",
+		B_NORMAL_PRIORITY, this);
+	if (fThread < 0)
+		return B_ERROR;
+
+	resume_thread(fThread);
+	return B_OK;
+}
+
+
+void
+RosterMonitor::QuitAndWait()
+{
+	if (fThread < 0)
+		return;
+
+	fQuit = true;
+	status_t result;
+	wait_for_thread(fThread, &result);
+	fThread = -1;
+}
+
+
+status_t
+RosterMonitor::_MonitorThreadEntry(void *data)
+{
+	((RosterMonitor *)data)->_MonitorLoop();
+	return B_OK;
+}
+
+
+void
+RosterMonitor::_MonitorLoop()
+{
+	// Enable receiving before the first enumeration so nothing that shows
+	// up meanwhile is missed; duplicate paths are filtered on add.
+	_Enumerate();
+
+	int fd = udev_monitor_get_fd(fMonitor);
+	while (!fQuit) {
+		struct pollfd descriptor = { fd, POLLIN, 0 };
+		int result = poll(&descriptor, 1, 250);
+		if (result < 0) {
+			if (errno == EINTR)
 				continue;
-
-			WatchedEntry *child = new(std::nothrow) WatchedEntry(fRoster,
-				fMessenger, ref);
-			if (child == NULL)
-				continue;
-
-			child->fLink = fEntries;
-			fEntries = child;
+			break;
 		}
 
-		watch_node(&fNode, B_WATCH_DIRECTORY, *fMessenger);
-	} else {
-		// filter pseudoentry that only handles ioctls
-		if (strncmp(ref->name, "raw", 3) == 0)
+		if (result == 0 || (descriptor.revents & POLLIN) == 0)
+			continue;
+
+		udev_device *device = udev_monitor_receive_device(fMonitor);
+		if (device == NULL)
+			continue;
+
+		const char *action = udev_device_get_action(device);
+		const char *node = udev_device_get_devnode(device);
+		if (action != NULL && node != NULL)
+			_HandleDevice(action, node);
+
+		udev_device_unref(device);
+	}
+}
+
+
+void
+RosterMonitor::_Enumerate()
+{
+	udev_enumerate *enumerate = udev_enumerate_new(fUdev);
+	if (enumerate == NULL)
+		return;
+
+	udev_enumerate_add_match_subsystem(enumerate, "usb");
+	udev_enumerate_scan_devices(enumerate);
+
+	udev_list_entry *entry;
+	udev_list_entry_foreach(entry, udev_enumerate_get_list_entry(enumerate)) {
+		const char *syspath = udev_list_entry_get_name(entry);
+		udev_device *device = udev_device_new_from_syspath(fUdev, syspath);
+		if (device == NULL)
+			continue;
+
+		const char *node = udev_device_get_devnode(device);
+		if (node != NULL)
+			_HandleDevice("add", node);
+
+		udev_device_unref(device);
+	}
+
+	udev_enumerate_unref(enumerate);
+}
+
+
+void
+RosterMonitor::_HandleDevice(const char *action, const char *node)
+{
+	if (strcmp(action, "add") == 0)
+		_AddDevice(node);
+	else if (strcmp(action, "remove") == 0)
+		_RemoveDevice(node);
+}
+
+
+// The kit exposes a device's location as the tail of its devnode
+// ("/001/002"), which is what the roster matches on.
+static const char *
+location_of(const char *node)
+{
+	if (strlen(node) < 12)
+		return node;
+
+	return node + 12;
+}
+
+
+void
+RosterMonitor::_AddDevice(const char *node)
+{
+	const char *location = location_of(node);
+	for (int32 i = 0; i < fDevices.CountItems(); i++) {
+		BUSBDevice *device = (BUSBDevice *)fDevices.ItemAt(i);
+		const char *known = device->Location();
+		if (known != NULL && strcmp(known, location) == 0)
 			return;
-
-		BPath path;
-		entry.GetPath(&path);
-		fDevice = new(std::nothrow) BUSBDevice(path.Path());
-		if (fDevice != NULL) {
-			if (fRoster->DeviceAdded(fDevice) != B_OK) {
-				delete fDevice;
-				fDevice = NULL;
-			}
-		}
-	}
-}
-
-
-WatchedEntry::~WatchedEntry()
-{
-	if (fIsDirectory) {
-		watch_node(&fNode, B_STOP_WATCHING, *fMessenger);
-
-		WatchedEntry *child = fEntries;
-		while (child) {
-			WatchedEntry *next = child->fLink;
-			delete child;
-			child = next;
-		}
 	}
 
-	if (fDevice) {
-		fRoster->DeviceRemoved(fDevice);
-		delete fDevice;
-	}
-}
+	BUSBDevice *device = new(std::nothrow) BUSBDevice(node);
+	if (device == NULL)
+		return;
 
-
-bool
-WatchedEntry::EntryCreated(entry_ref *ref)
-{
-	if (!fIsDirectory)
-		return false;
-
-	if (ref->directory != fNode.node) {
-		WatchedEntry *child = fEntries;
-		while (child) {
-			if (child->EntryCreated(ref))
-				return true;
-			child = child->fLink;
-		}
-
-		return false;
-	}
-
-	WatchedEntry *child = new(std::nothrow) WatchedEntry(fRoster, fMessenger,
-		ref);
-	if (child == NULL)
-		return false;
-
-	child->fLink = fEntries;
-	fEntries = child;
-	return true;
-}
-
-
-bool
-WatchedEntry::EntryRemoved(ino_t node)
-{
-	if (!fIsDirectory)
-		return false;
-
-	WatchedEntry *child = fEntries;
-	WatchedEntry *lastChild = NULL;
-	while (child) {
-		if (child->fNode.node == node) {
-			if (lastChild)
-				lastChild->fLink = child->fLink;
-			else
-				fEntries = child->fLink;
-
-			delete child;
-			return true;
-		}
-
-		if (child->EntryRemoved(node))
-			return true;
-
-		lastChild = child;
-		child = child->fLink;
-	}
-
-	return false;
-}
-
-
-RosterLooper::RosterLooper(BUSBRoster *roster)
-	:	BLooper("BUSBRoster looper"),
-		fRoster(roster),
-		fRoot(NULL),
-		fMessenger(NULL)
-{
-	BEntry entry("/dev/bus/usb");
-	if (!entry.Exists()) {
-		fprintf(stderr, "USBKit: usb_raw not published\n");
+	if (device->InitCheck() != B_OK) {
+		delete device;
 		return;
 	}
 
-	Run();
-	fMessenger = new(std::nothrow) BMessenger(this);
-	if (fMessenger == NULL)
-		return;
+	if (fRoster->DeviceAdded(device) == B_OK)
+		fDevices.AddItem(device);
+	else
+		delete device;
+}
 
-	if (Lock()) {
-		entry_ref ref;
-		entry.GetRef(&ref);
-		fRoot = new(std::nothrow) WatchedEntry(fRoster, fMessenger, &ref);
-		Unlock();
+
+void
+RosterMonitor::_RemoveDevice(const char *node)
+{
+	const char *location = location_of(node);
+	for (int32 i = 0; i < fDevices.CountItems(); i++) {
+		BUSBDevice *device = (BUSBDevice *)fDevices.ItemAt(i);
+		const char *known = device->Location();
+		if (known == NULL || strcmp(known, location) != 0)
+			continue;
+
+		fDevices.RemoveItem(i);
+		fRoster->DeviceRemoved(device);
+		delete device;
+		return;
 	}
 }
 
 
 void
-RosterLooper::Stop()
+RosterMonitor::_DeliverRemovals()
 {
-	Lock();
-	delete fRoot;
-	Quit();
-}
+	while (fDevices.CountItems() > 0) {
+		BUSBDevice *device = (BUSBDevice *)fDevices.RemoveItem(
+			fDevices.CountItems() - 1);
+		if (device == NULL)
+			continue;
 
-
-void
-RosterLooper::MessageReceived(BMessage *message)
-{
-	int32 opcode;
-	if (message->FindInt32("opcode", &opcode) < B_OK)
-		return;
-
-	switch (opcode) {
-		case B_ENTRY_CREATED: {
-			dev_t device;
-			ino_t directory;
-			const char *name;
-			if (message->FindInt32("device", &device) < B_OK
-				|| message->FindInt64("directory", &directory) < B_OK
-				|| message->FindString("name", &name) < B_OK)
-				break;
-
-			entry_ref ref(device, directory, name);
-			fRoot->EntryCreated(&ref);
-			break;
-		}
-
-		case B_ENTRY_REMOVED: {
-			ino_t node;
-			if (message->FindInt64("node", &node) < B_OK)
-				break;
-
-			fRoot->EntryRemoved(node);
-			break;
-		}
+		fRoster->DeviceRemoved(device);
+		delete device;
 	}
 }
 
 
 BUSBRoster::BUSBRoster()
-	:	fLooper(NULL)
+	:
+	fLooper(NULL)
 {
 }
 
@@ -266,27 +289,62 @@ BUSBRoster::~BUSBRoster()
 void
 BUSBRoster::Start()
 {
-	if (fLooper)
+	if (fLooper != NULL)
 		return;
 
-	fLooper = new(std::nothrow) RosterLooper(this);
+	RosterMonitor *monitor = new(std::nothrow) RosterMonitor(this);
+	if (monitor == NULL)
+		return;
+
+	if (monitor->Run() != B_OK) {
+		delete monitor;
+		return;
+	}
+
+	fLooper = monitor;
 }
 
 
 void
 BUSBRoster::Stop()
 {
-	if (!fLooper)
+	if (fLooper == NULL)
 		return;
 
-	((RosterLooper *)fLooper)->Stop();
+	RosterMonitor *monitor = (RosterMonitor *)fLooper;
 	fLooper = NULL;
+
+	// The destructor joins the thread and delivers the removals for every
+	// device whose DeviceAdded() returned B_OK.
+	delete monitor;
 }
 
 
-// definition of reserved virtual functions
-void BUSBRoster::_ReservedUSBRoster1() {};
-void BUSBRoster::_ReservedUSBRoster2() {};
-void BUSBRoster::_ReservedUSBRoster3() {};
-void BUSBRoster::_ReservedUSBRoster4() {};
-void BUSBRoster::_ReservedUSBRoster5() {};
+void
+BUSBRoster::_ReservedUSBRoster1()
+{
+}
+
+
+void
+BUSBRoster::_ReservedUSBRoster2()
+{
+}
+
+
+void
+BUSBRoster::_ReservedUSBRoster3()
+{
+}
+
+
+void
+BUSBRoster::_ReservedUSBRoster4()
+{
+}
+
+
+void
+BUSBRoster::_ReservedUSBRoster5()
+{
+}

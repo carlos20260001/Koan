@@ -1,33 +1,32 @@
 /*
- * Copyright 2007-2008, Haiku Inc. All rights reserved.
+ * BUSBEndpoint: USB kit endpoint side, libusb-1.0 backend.
+ *
+ * Copyright 2026, Dario Casalinuovo. All rights reserved.
  * Distributed under the terms of the MIT License.
  *
- * Authors:
- *		Michael Lotz <mmlr@mlotz.ch>
+ * Bulk and interrupt run synchronously through libusb; isochronous has
+ * no packet scheduling here and reports B_NOT_SUPPORTED.
  */
 
 #include <USBKit.h>
 
-#include <errno.h>
-#include <usb_raw.h>
-#include <unistd.h>
 #include <string.h>
 
+#include <new>
 
-BUSBEndpoint::BUSBEndpoint(BUSBInterface *interface, uint32 index, int rawFD)
-	:	fInterface(interface),
-		fIndex(index),
-		fRawFD(rawFD)
+#include "USBPriv.h"
+
+
+BUSBEndpoint::BUSBEndpoint(BUSBInterface *interface, uint32 index,
+	int rawFD)
+	:
+	fInterface(interface),
+	fIndex(index),
+	fRawFD(rawFD),
+	fLibusb(NULL)
 {
-	usb_raw_command command;
-	command.endpoint_etc.descriptor = &fDescriptor;
-	command.endpoint_etc.config_index = fInterface->Configuration()->Index();
-	command.endpoint_etc.interface_index = fInterface->Index();
-	command.endpoint_etc.alternate_index = fInterface->AlternateIndex();
-	command.endpoint_etc.endpoint_index = fIndex;
-	if (ioctl(fRawFD, B_USB_RAW_COMMAND_GET_ENDPOINT_DESCRIPTOR_ETC, &command,
-		sizeof(command)) || command.endpoint_etc.status != B_USB_RAW_STATUS_SUCCESS)
-		memset(&fDescriptor, 0, sizeof(fDescriptor));
+	memset(&fDescriptor, 0, sizeof(fDescriptor));
+	memset(fReserved, 0, sizeof(fReserved));
 }
 
 
@@ -137,22 +136,10 @@ ssize_t
 BUSBEndpoint::ControlTransfer(uint8 requestType, uint8 request, uint16 value,
 	uint16 index, uint16 length, void *data) const
 {
-	if (length > 0 && data == NULL)
-		return B_BAD_VALUE;
-
-	usb_raw_command command;
-	command.control.request_type = requestType;
-	command.control.request = request;
-	command.control.value = value;
-	command.control.index = index;
-	command.control.length = length;
-	command.control.data = data;
-
-	if (ioctl(fRawFD, B_USB_RAW_COMMAND_CONTROL_TRANSFER, &command,
-		sizeof(command)) || command.control.status != B_USB_RAW_STATUS_SUCCESS)
-		return B_ERROR;
-
-	return command.control.length;
+	// Control transfers always ride the default pipe, so the device sees
+	// the same request the endpoint object would have sent itself.
+	return Device()->ControlTransfer(requestType, request, value, index,
+		length, data);
 }
 
 
@@ -162,17 +149,18 @@ BUSBEndpoint::InterruptTransfer(void *data, size_t length) const
 	if (length > 0 && data == NULL)
 		return B_BAD_VALUE;
 
-	usb_raw_command command;
-	command.transfer.interface = fInterface->Index();
-	command.transfer.endpoint = fIndex;
-	command.transfer.data = data;
-	command.transfer.length = length;
+	_usb_lib_state *state = (_usb_lib_state *)fLibusb;
+	if (state == NULL || state->handle == NULL)
+		return usb_no_handle_status(state);
 
-	if (ioctl(fRawFD, B_USB_RAW_COMMAND_INTERRUPT_TRANSFER, &command,
-		sizeof(command)) || command.transfer.status != B_USB_RAW_STATUS_SUCCESS)
-		return B_ERROR;
+	int transferred = 0;
+	int result = libusb_interrupt_transfer(state->handle,
+		fDescriptor.endpoint_address, (unsigned char *)data, length,
+		&transferred, USB_KIT_TIMEOUT_MS);
+	if (result < 0)
+		return usb_lib_error(result);
 
-	return command.transfer.length;
+	return transferred;
 }
 
 
@@ -182,109 +170,30 @@ BUSBEndpoint::BulkTransfer(void *data, size_t length) const
 	if (length > 0 && data == NULL)
 		return B_BAD_VALUE;
 
-	usb_raw_command command;
-	command.transfer.interface = fInterface->Index();
-	command.transfer.endpoint = fIndex;
-	command.transfer.data = data;
-	command.transfer.length = length;
+	_usb_lib_state *state = (_usb_lib_state *)fLibusb;
+	if (state == NULL || state->handle == NULL)
+		return usb_no_handle_status(state);
 
-	if (ioctl(fRawFD, B_USB_RAW_COMMAND_BULK_TRANSFER, &command,
-		sizeof(command)) || command.transfer.status != B_USB_RAW_STATUS_SUCCESS)
-		return B_ERROR;
+	int transferred = 0;
+	int result = libusb_bulk_transfer(state->handle,
+		fDescriptor.endpoint_address, (unsigned char *)data, length,
+		&transferred, USB_KIT_TIMEOUT_MS);
+	if (result < 0)
+		return usb_lib_error(result);
 
-	return command.transfer.length;
+	return transferred;
 }
 
 
 ssize_t
 BUSBEndpoint::IsochronousTransfer(void *data, size_t length,
-	usb_iso_packet_descriptor *packetDescriptors, uint32 packetCount) const
+	usb_iso_packet_descriptor * /*packetDescriptors*/,
+	uint32 /*packetCount*/) const
 {
 	if (length > 0 && data == NULL)
 		return B_BAD_VALUE;
 
-	usb_raw_command command;
-	command.isochronous.interface = fInterface->Index();
-	command.isochronous.endpoint = fIndex;
-	command.isochronous.data = data;
-	command.isochronous.length = length;
-	command.isochronous.packet_descriptors = packetDescriptors;
-	command.isochronous.packet_count = packetCount;
-
-	if (ioctl(fRawFD, B_USB_RAW_COMMAND_ISOCHRONOUS_TRANSFER, &command,
-		sizeof(command)) || command.isochronous.status != B_USB_RAW_STATUS_SUCCESS)
-		return B_ERROR;
-
-	return command.isochronous.length;
-}
-
-
-status_t
-BUSBEndpoint::StartIsochronousStream(size_t packetSize,
-	uint32 packetsPerTransfer, uint32 transferCount, size_t bufferSize) const
-{
-	usb_raw_command command;
-	command.stream_start.interface = fInterface->Index();
-	command.stream_start.endpoint = fIndex;
-	command.stream_start.packet_size = packetSize;
-	command.stream_start.packets_per_transfer = packetsPerTransfer;
-	command.stream_start.transfer_count = transferCount;
-	command.stream_start.buffer_size = bufferSize;
-
-	if (ioctl(fRawFD, B_USB_RAW_COMMAND_ISOCHRONOUS_STREAM_START, &command,
-			sizeof(command)) != 0) {
-		return errno;
-	}
-
-	switch (command.stream_start.status) {
-		case B_USB_RAW_STATUS_SUCCESS:
-			return B_OK;
-		case B_USB_RAW_STATUS_NO_MEMORY:
-			return B_NO_MEMORY;
-		case B_USB_RAW_STATUS_INVALID_ENDPOINT:
-		case B_USB_RAW_STATUS_INVALID_INTERFACE:
-			return B_BAD_VALUE;
-		default:
-			return B_ERROR;
-	}
-}
-
-
-ssize_t
-BUSBEndpoint::ReadIsochronousStream(void *data, size_t length,
-	bigtime_t timeout) const
-{
-	usb_raw_command command;
-	command.stream_read.data = data;
-	command.stream_read.length = length;
-	command.stream_read.timeout = timeout;
-
-	if (ioctl(fRawFD, B_USB_RAW_COMMAND_ISOCHRONOUS_STREAM_READ, &command,
-			sizeof(command)) != 0) {
-		return errno;
-	}
-
-	switch (command.stream_read.status) {
-		case B_USB_RAW_STATUS_SUCCESS:
-			return command.stream_read.length;
-		case B_USB_RAW_STATUS_TIMEOUT:
-			return B_TIMED_OUT;
-		default:
-			return B_DEV_NOT_READY;
-	}
-}
-
-
-status_t
-BUSBEndpoint::StopIsochronousStream() const
-{
-	usb_raw_command command;
-	if (ioctl(fRawFD, B_USB_RAW_COMMAND_ISOCHRONOUS_STREAM_STOP, &command,
-			sizeof(command)) != 0) {
-		return errno;
-	}
-
-	return B_OK;
+	return B_NOT_SUPPORTED;
 }
 
 
@@ -292,9 +201,12 @@ bool
 BUSBEndpoint::IsStalled() const
 {
 	uint16 status = 0;
-	Device()->ControlTransfer(USB_REQTYPE_ENDPOINT_IN,
+	ssize_t result = Device()->ControlTransfer(USB_REQTYPE_ENDPOINT_IN,
 		USB_REQUEST_GET_STATUS, USB_FEATURE_ENDPOINT_HALT,
 		fDescriptor.endpoint_address, sizeof(status), &status);
+	if (result < 0)
+		return false;
+
 	return status != 0;
 }
 
@@ -302,7 +214,11 @@ BUSBEndpoint::IsStalled() const
 status_t
 BUSBEndpoint::ClearStall() const
 {
-	return Device()->ControlTransfer(USB_REQTYPE_ENDPOINT_OUT,
+	ssize_t result = Device()->ControlTransfer(USB_REQTYPE_ENDPOINT_OUT,
 		USB_REQUEST_CLEAR_FEATURE, USB_FEATURE_ENDPOINT_HALT,
 		fDescriptor.endpoint_address, 0, NULL);
+	if (result < 0)
+		return (status_t)result;
+
+	return B_OK;
 }
