@@ -599,7 +599,7 @@ HeaderView::BuildContextMenu(BMenu* parent)
 			BVolume boot;
 			BVolumeRoster().GetBootVolume(&boot);
 			BVolume volume;
-			volume.SetTo(fModel->NodeRef()->device);
+			volume.SetTo(fModel->NodeRef()->device());
 			if (volume == boot)
 				item->SetEnabled(false);
 		}

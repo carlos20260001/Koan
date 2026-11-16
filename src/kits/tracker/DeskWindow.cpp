@@ -238,6 +238,12 @@ BDeskWindow::~BDeskWindow()
 		// prevent double-saving, this would slow down quitting
 	PoseView()->StopSettingsWatch();
 	stop_watching(this);
+	// ApplyShortcutPreferences() registers a BPathMonitor watch on the
+	// settings directory targeting "this". stop_watching() only tears
+	// down direct watch_node() registrations, not BPathMonitor's, so
+	// without this the messenger stays registered and the looper keeps
+	// dispatching to a deleted window.
+	BPathMonitor::StopWatching(this);
 }
 
 
@@ -258,7 +264,7 @@ BDeskWindow::Init(const BMessage*)
 	InitAddOnsList(false);
 	ApplyShortcutPreferences(false);
 
-	_inherited::Init();
+	_inherited::Init(NULL);
 
 	entry_ref ref;
 	BPath path;
@@ -298,10 +304,8 @@ BDeskWindow::Init(const BMessage*)
 			BMessage message;
 			message.what = B_NODE_MONITOR;
 			message.AddInt32("opcode", B_ENTRY_CREATED);
-			message.AddInt32("device", model.NodeRef()->device);
-			message.AddInt64("node", model.NodeRef()->node);
-			message.AddInt64("directory", model.EntryRef()->directory);
-			message.AddString("name", model.EntryRef()->name);
+			message.AddNodeRef("virtual:node", model.NodeRef());
+			message.AddRef("virtual:directory", model.EntryRef());
 
 			PostMessage(&message, PoseView());
 		}
@@ -343,7 +347,8 @@ BDeskWindow::ApplyShortcutPreferences(bool update)
 		BPath path;
 		if (find_directory(B_USER_SETTINGS_DIRECTORY, &path) == B_OK) {
 			path.Append(kShortcutsSettings);
-			BPathMonitor::StartWatching(path.Path(), B_WATCH_STAT | B_WATCH_FILES_ONLY, this);
+			BPathMonitor::StartWatching(path.Path(),
+				B_WATCH_STAT | B_WATCH_FILES_ONLY, this);
 			fShortcutsSettings = new char[strlen(path.Path()) + 1];
 			strcpy(fShortcutsSettings, path.Path());
 		}

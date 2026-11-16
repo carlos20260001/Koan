@@ -1,4 +1,7 @@
 /*
+ * Copyright 2026, Dario Casalinuovo. All rights reserved.
+ */
+/*
 Open Tracker License
 
 Terms and Conditions
@@ -37,6 +40,8 @@ All rights reserved.
 
 #include <string.h>
 
+#include <set>
+
 #include <Alert.h>
 #include <Application.h>
 #include <Button.h>
@@ -47,6 +52,7 @@ All rights reserved.
 #include <FindDirectory.h>
 #include <GridView.h>
 #include <Locale.h>
+#include <Locker.h>
 #include <MenuBar.h>
 #include <MenuField.h>
 #include <MenuItem.h>
@@ -190,6 +196,11 @@ TFilePanel::TFilePanel(file_panel_mode mode, BMessenger* target, const BEntry* s
 {
 	InitIconPreloader();
 
+	{
+		AutoLock<BLocker> registryLock(sLiveWindowsLock);
+		sLiveWindows.insert(this);
+	}
+
 	fIsSavePanel = (mode == B_SAVE_PANEL);
 
 	const float labelSpacing = be_control_look->DefaultLabelSpacing();
@@ -292,10 +303,44 @@ TFilePanel::TFilePanel(file_panel_mode mode, BMessenger* target, const BEntry* s
 
 TFilePanel::~TFilePanel()
 {
+	{
+		AutoLock<BLocker> registryLock(sLiveWindowsLock);
+		sLiveWindows.erase(this);
+	}
+
 	BMessenger tracker(kTrackerSignature);
 	BHandler::StopWatching(tracker, kDesktopFilePanelRootChanged);
 
 	delete fMessage;
+}
+
+
+BLocker TFilePanel::sLiveWindowsLock("file panel registry");
+std::set<const BWindow*> TFilePanel::sLiveWindows;
+
+
+void
+TFilePanel::Quit()
+{
+	// Mark this window gone before BContainerWindow::Quit() runs (and
+	// eventually self-deletes via BLooper::Quit()), so a racing
+	// BFilePanel::~BFilePanel() -- e.g. when the app's shutdown sequence
+	// quits this window ahead of the client's own teardown -- knows not
+	// to touch it again.
+	{
+		AutoLock<BLocker> registryLock(sLiveWindowsLock);
+		sLiveWindows.erase(this);
+	}
+
+	_inherited::Quit();
+}
+
+
+bool
+TFilePanel::IsLive(const BWindow* window)
+{
+	AutoLock<BLocker> registryLock(sLiveWindowsLock);
+	return sLiveWindows.find(window) != sLiveWindows.end();
 }
 
 
@@ -398,21 +443,16 @@ TFilePanel::FSFilter(BMessage* message, BHandler**, BMessageFilter* filter)
 		case B_ENTRY_MOVED:
 		{
 			node_ref itemNode;
-			message->FindInt64("node", (int64*)&itemNode.node);
+			message->FindNodeRef("virtual:node", &itemNode);
 
-			node_ref dirNode;
-			message->FindInt32("device", &dirNode.device);
-			itemNode.device = dirNode.device;
-			message->FindInt64("to directory", (int64*)&dirNode.node);
+			entry_ref dirRef;
+			message->FindRef("virtual:to directory", &dirRef);
 
-			const char* name;
-			if (message->FindString("name", &name) != B_OK)
-				break;
-
+			node_ref dirNode = node_ref(dirRef.vdevice(), dirRef.vdirectory());
 			// if current directory moved, update entry ref and menu
 			// but not wind title
 			if (*(panel->TargetModel()->NodeRef()) == itemNode) {
-				panel->TargetModel()->UpdateEntryRef(&dirNode, name);
+				panel->TargetModel()->UpdateEntryRef(&dirNode, dirRef.name);
 				panel->SwitchDirectory(panel->TargetModel()->EntryRef());
 				return B_SKIP_MESSAGE;
 			}
@@ -422,8 +462,7 @@ TFilePanel::FSFilter(BMessage* message, BHandler**, BMessageFilter* filter)
 		case B_ENTRY_REMOVED:
 		{
 			node_ref itemNode;
-			message->FindInt32("device", &itemNode.device);
-			message->FindInt64("node", (int64*)&itemNode.node);
+			message->FindNodeRef("virtual:node", &itemNode);
 
 			// if folder we're watching is deleted, switch to root
 			// or Desktop
@@ -435,10 +474,8 @@ TFilePanel::FSFilter(BMessage* message, BHandler**, BMessageFilter* filter)
 				BDirectory root;
 				volume.GetRootDirectory(&root);
 
-				BEntry entry;
 				entry_ref ref;
-				root.GetEntry(&entry);
-				entry.GetRef(&ref);
+				root.GetRef(&ref);
 
 				panel->SwitchDirectory(&ref);
 				return B_SKIP_MESSAGE;
@@ -1496,11 +1533,14 @@ TFilePanel::SwitchDirToDesktopIfNeeded(entry_ref &ref)
 
 	BDirectory desktopDir;
 	FSGetDeskDir(&desktopDir);
-	if (FSIsDeskDir(&entry) || (!settings.ShowDisksIcon() && FSIsRootDir(&entry))) {
+	if (FSIsDeskDir(&entry)
+#ifndef __VOS__
+		|| (!settings.ShowDisksIcon() && FSIsRootDir(&entry))
+#endif
+		) {
 		// navigated into desktop folder or hit "root" level, switch to Desktop
 
-		desktopDir.GetEntry(&entry);
-		entry.GetRef(&ref);
+		desktopDir.GetRef(&ref);
 		return true;
 	}
 
@@ -1537,14 +1577,12 @@ TFilePanel::ShowCenteredAlert(const char* text, const char* button1,
 		B_WIDTH_AS_USUAL, B_WARNING_ALERT);
 	alert->MoveTo(Frame().left + 10, Frame().top + 10);
 
-#if 0
 	if (button1 != NULL && !strncmp(button1, "Cancel", 7))
 		alert->SetShortcut(0, B_ESCAPE);
 	else if (button2 != NULL && !strncmp(button2, "Cancel", 7))
 		alert->SetShortcut(1, B_ESCAPE);
 	else if (button3 != NULL && !strncmp(button3, "Cancel", 7))
 		alert->SetShortcut(2, B_ESCAPE);
-#endif
 
 	return alert->Go();
 }
@@ -1826,9 +1864,8 @@ BFilePanelPoseView::AdaptToVolumeChange(BMessage* message)
 		else
 			monitorMsg.AddInt32("opcode", B_ENTRY_REMOVED);
 
-		monitorMsg.AddInt32("device", model.NodeRef()->device);
-		monitorMsg.AddInt64("node", model.NodeRef()->node);
-		monitorMsg.AddInt64("directory", model.EntryRef()->directory);
+		monitorMsg.AddNodeRef("virtual:node", model.NodeRef());
+		monitorMsg.AddRef("virtual:directory", model.EntryRef());
 		monitorMsg.AddString("name", model.EntryRef()->name);
 
 		TrackerSettings().SetShowDisksIcon(showDisksIcon);

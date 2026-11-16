@@ -485,6 +485,7 @@ BContainerWindow::BContainerWindow(LockingList<BWindow>* list, uint32 openFlags,
 		tracker->StartWatching(this, kWindowsShowFullPathChanged);
 		tracker->StartWatching(this, kSingleWindowBrowseChanged);
 		tracker->StartWatching(this, kShowNavigatorChanged);
+		tracker->StartWatching(this, kSnapToGridChanged);
 		tracker->Unlock();
 	}
 
@@ -505,6 +506,7 @@ BContainerWindow::~BContainerWindow()
 		tracker->StopWatching(this, kWindowsShowFullPathChanged);
 		tracker->StopWatching(this, kSingleWindowBrowseChanged);
 		tracker->StopWatching(this, kShowNavigatorChanged);
+		tracker->StopWatching(this, kSnapToGridChanged);
 		tracker->Unlock();
 	}
 
@@ -2506,6 +2508,12 @@ BContainerWindow::MessageReceived(BMessage* message)
 						SetSingleWindowBrowseShortcuts(settings.SingleWindowBrowse());
 						break;
 
+					case kSnapToGridChanged:
+						// the Desktop's pose view watches this itself
+						if (!PoseView()->IsDesktopView())
+							PoseView()->AdaptToSnapToGridChange(message);
+						break;
+
 					default:
 						_inherited::MessageReceived(message);
 						break;
@@ -2533,14 +2541,18 @@ BContainerWindow::MessageReceived(BMessage* message)
 bool
 BContainerWindow::IsShowing(const node_ref* node) const
 {
-	return PoseView()->Represents(node);
+	// PoseView can be NULL if window failed to initialize (e.g., BDeskWindow)
+	BPoseView* poseView = PoseView();
+	return poseView != NULL && poseView->Represents(node);
 }
 
 
 bool
 BContainerWindow::IsShowing(const entry_ref* entry) const
 {
-	return PoseView()->Represents(entry);
+	// PoseView can be NULL if window failed to initialize (e.g., BDeskWindow)
+	BPoseView* poseView = PoseView();
+	return poseView != NULL && poseView->Represents(entry);
 }
 
 
@@ -2918,8 +2930,13 @@ BContainerWindow::SetupNavigationMenu(BMenu* parent, const entry_ref* ref)
 
 	// always build a fresh navigation menu
 	delete fNavigationItem;
-	fNavigationItem
-		= new ModelMenuItem(&model, new BNavMenu(model.Name(), B_REFS_RECEIVED, be_app, this));
+	fNavigationItem = NULL;
+	try {
+		fNavigationItem = new ModelMenuItem(&model,
+			new BNavMenu(model.Name(), B_REFS_RECEIVED, be_app, this));
+	} catch (...) {
+		return;
+	}
 
 	// setup a navigation menu item which will dynamically load items
 	// as menu items are traversed
@@ -3167,7 +3184,7 @@ BContainerWindow::PopulateMoveCopyNavMenu(BNavMenu* navMenu, uint32 what, const 
 	BEntry entry;
 	BPath path;
 	Model model;
-	dev_t device = ref->device;
+	dev_t device = ref->device();
 
 	int32 volumeCount = 0;
 

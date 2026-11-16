@@ -139,7 +139,13 @@ BDirMenu::Populate(const BEntry* startEntry, BWindow* source,
 		BEntry trashEntry;
 		trashDir.GetEntry(&trashEntry);
 
+		int loopDepth = 0;
+		const int kMaxDirDepth = 256;
+
 		for (;;) {
+			if (++loopDepth > kMaxDirDepth)
+				break;
+
 			BNode node(&entry);
 			ThrowOnInitCheckError(&node);
 
@@ -173,6 +179,15 @@ BDirMenu::Populate(const BEntry* startEntry, BWindow* source,
 					// Disks appears to be on Desktop
 					if (showDisksIcon)
 						AddItemToDirMenu(&rootEntry, source, reverse, addShortcuts, navMenuEntries);
+#ifdef __VOS__
+					else {
+						// On Vitruvian "/" is the real boot fs (not a virtual
+						// Disks pseudo-root), so add it as a named volume entry
+						// in the path chain even when ShowDisksIcon is off.
+						AddBootVolumeToMenu(reverse, source, addShortcuts,
+							navMenuEntries);
+					}
+#endif
 					entry = desktopEntry;
 						// warp from "/" to Desktop
 				}
@@ -273,3 +288,14 @@ BDirMenu::AddItemToDirMenu(const BEntry* entry, BWindow* source,
 		}
 	}
 }
+
+
+#ifdef __VOS__
+void
+BDirMenu::AddBootVolumeToMenu(bool atEnd, BWindow* source, bool addShortcuts,
+	bool navMenuEntries)
+{
+	BEntry entry("/");
+	AddItemToDirMenu(&entry, source, atEnd, addShortcuts, navMenuEntries);
+}
+#endif

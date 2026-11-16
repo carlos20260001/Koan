@@ -178,6 +178,11 @@ public:
 	bool SaveStateIsEnabled() const;
 	void SetSaveStateEnabled(bool);
 
+	virtual void UpdateBackgroundImage();
+		// public: V's BPoseView calls this after switching directories
+		// (upstream r1beta6 keeps it protected; V's PoseView.cpp has
+		// called it since hrev52990, so it stays reachable).
+
 	static status_t GetLayoutState(BNode*, BMessage*);
 	static status_t SetLayoutState(BNode*, const BMessage*);
 		// calls for inheriting window size, attribute layout, etc.
@@ -246,8 +251,6 @@ protected:
 	virtual void SetupDefaultState();
 		// these two virtuals control setting up a new folder that
 		// does not have any state settings yet with the default
-
-	virtual void UpdateBackgroundImage();
 
 	virtual void AddMenus();
 	virtual void AddShortcuts();

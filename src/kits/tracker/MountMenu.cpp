@@ -42,10 +42,13 @@ All rights reserved.
 #include <Debug.h>
 #include <Locale.h>
 #include <MenuItem.h>
+#include <Messenger.h>
 #include <Mime.h>
 #include <InterfaceDefs.h>
 #include <VolumeRoster.h>
 #include <Volume.h>
+
+#include <MountServer.h>
 
 #include <fs_info.h>
 
@@ -58,6 +61,7 @@ All rights reserved.
 
 #include <DiskDevice.h>
 #include <DiskDeviceList.h>
+#include <tracker_private.h>
 
 #define SHOW_NETWORK_VOLUMES
 
@@ -137,7 +141,8 @@ AddMenuItemVisitor::Visit(BPartition* partition, int32 level)
 
 	BMessage* message = new BMessage(partition->IsMounted() ?
 		kUnmountVolume : kMountVolume);
-	message->AddInt32("id", partition->ID());
+	// partition_id is dev_t (8 bytes on this port), so Int64 not Int32.
+	message->AddInt64("id", partition->ID());
 
 	// TODO: for now, until we actually have disk device icons
 	BMenuItem* item;
@@ -212,7 +217,8 @@ MountMenu::AddDynamicItem(add_state)
 			}
 
 			BMessage* message = new BMessage(kUnmountVolume);
-			message->AddInt32("device_id", volume.Device());
+			// volume.Device() is dev_t; match AutoMounter's FindInt64.
+			message->AddInt64("device_id", (int64)volume.Device());
 			char volumeName[B_FILE_NAME_LENGTH];
 			volume.GetName(volumeName);
 
@@ -265,7 +271,21 @@ MountMenu::AddDynamicItem(add_state)
 		new BMessage(kRunAutomounterSettings));
 	AddItem(mountSettings);
 
-	SetTargetForItems(be_app);
+	// These messages are handled by mount_server's AutoMounter, a separate
+	// process, so route by signature rather than to the local be_app.
+	// Unmount goes through Tracker instead: mount_server is headless and
+	// replies busy, and Tracker owns the force-unmount dialog.
+	SetTargetForItems(BMessenger(kMountServerSignature));
+
+	BMessenger tracker(kTrackerSignature);
+	for (int32 index = 0; index < CountItems(); index++) {
+		BMenuItem* item = ItemAt(index);
+		if (item == NULL || item->Message() == NULL)
+			continue;
+
+		if (item->Message()->what == kUnmountVolume)
+			item->SetTarget(tracker);
+	}
 
 	return false;
 }

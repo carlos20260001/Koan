@@ -402,7 +402,7 @@ WidgetAttributeText::AttrAsString(const Model* model, BString* outString,
 			if (strcmp(attrName, kAttrStatModified) == 0)
 				value = model->StatBuf()->st_mtime;
 			else if (strcmp(attrName, kAttrStatCreated) == 0)
-				value = model->StatBuf()->st_crtime;
+				value = model->CreationTime();
 			else {
 				TRESPASS();
 				// not yet supported
@@ -1011,7 +1011,7 @@ SizeAttributeText::ReadValue()
 	// get the size
 
 	if (fModel->IsVolume()) {
-		BVolume volume(fModel->NodeRef()->device);
+		BVolume volume(fModel->NodeRef()->device());
 		fValueIsDefined = volume.Capacity() != 0;
 		return volume.Capacity();
 	}
@@ -1132,7 +1132,7 @@ CreationTimeAttributeText::ReadValue()
 {
 	fValueDirty = false;
 	fValueIsDefined = true;
-	return fModel->StatBuf()->st_crtime;
+	return fModel->CreationTime();
 }
 
 

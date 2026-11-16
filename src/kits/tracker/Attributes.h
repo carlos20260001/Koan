@@ -99,6 +99,11 @@ namespace BPrivate {
 
 #define kAttrPoseInfo_be					"_trk/pinfo"
 #define kAttrPoseInfo_le					"_trk/pinfo_le"
+// Pose's parent-directory path, separate from the raw PoseInfo blob so it
+// survives a reboot (PoseInfo's vnode ids don't).
+#define kAttrPoseInfoDir					"_trk/pinfo_dir"
+
+#define kAttrHidden							"SYS:HIDDEN"
 #define kAttrDisksPoseInfo_be				"_trk/d_pinfo"
 #define kAttrDisksPoseInfo_le				"_trk/d_pinfo_le"
 #define kAttrTrashPoseInfo_be				"_trk/t_pinfo"
