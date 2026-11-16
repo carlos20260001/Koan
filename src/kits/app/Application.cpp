@@ -1,4 +1,5 @@
 /*
+ * Copyright 2026, Dario Casalinuovo. All rights reserved.
  * Copyright 2001-2015 Haiku, inc. All rights reserved.
  * Distributed under the terms of the MIT License.
  *
@@ -228,8 +229,13 @@ fill_argv_message(BMessage &message)
 	int32 argc = __libc_argc;
 	const char* const *argv = __libc_argv;
 
-	// add argc
-	message.AddInt32("argc", argc);
+	// The program may have compacted argv already; count what is left.
+	int32 count = 0;
+	for (int32 i = 0; i < argc; i++) {
+		if (argv[i] != NULL)
+			count++;
+	}
+	message.AddInt32("argc", count);
 
 	// add argv
 	for (int32 i = 0; i < argc; i++) {
@@ -264,10 +270,19 @@ BApplication::BApplication(const char* signature, status_t* _error)
 }
 
 
+BApplication::BApplication(const char* signature, status_t* _error,
+	uint32 appFlags)
+	:
+	BLooper(kDefaultLooperName)
+{
+	_InitData(signature, true, _error, &appFlags);
+}
+
+
 BApplication::BApplication(const char* signature, const char* looperName,
 	port_id port, bool initGUI, status_t* _error)
 	:
-	BLooper(B_NORMAL_PRIORITY + 1, port < 0 ? _GetPort(signature) : port,
+	BLooper(B_NORMAL_PRIORITY + 1, port /*< 0 ? _GetPort(signature) : port*/,
 		looperName != NULL ? looperName : kDefaultLooperName)
 {
 	_InitData(signature, initGUI, _error);
@@ -355,7 +370,8 @@ BApplication::~BApplication()
 
 
 void
-BApplication::_InitData(const char* signature, bool initGUI, status_t* _error)
+BApplication::_InitData(const char* signature, bool initGUI, status_t* _error,
+	const uint32* flags)
 {
 	DBG(OUT("BApplication::InitData(`%s', %p)\n", signature, _error));
 	// check whether there exists already an application
@@ -380,7 +396,10 @@ BApplication::_InitData(const char* signature, bool initGUI, status_t* _error)
 #ifndef RUN_WITHOUT_REGISTRAR
 	bool registerApp = signature == NULL
 		|| (strcasecmp(signature, B_REGISTRAR_SIGNATURE) != 0
-			&& strcasecmp(signature, kLaunchDaemonSignature) != 0);
+		#ifndef __VOS__
+			&& strcasecmp(signature, kLaunchDaemonSignature) != 0
+		#endif
+		);
 	// get team and thread
 	team_id team = Team();
 	thread_id thread = BPrivate::main_thread_for(team);
@@ -404,6 +423,8 @@ BApplication::_InitData(const char* signature, bool initGUI, status_t* _error)
 		fInitError = fileInfo.SetTo(&file);
 		if (fInitError == B_OK) {
 			fileInfo.GetAppFlags(&appFlags);
+			if (flags != NULL)
+				appFlags = *flags;
 			char appFileSignature[B_MIME_TYPE_LENGTH];
 			// compare the file signature and the supplied signature
 			if (fileInfo.GetSignature(appFileSignature) == B_OK
@@ -446,6 +467,9 @@ BApplication::_InitData(const char* signature, bool initGUI, status_t* _error)
 		// check the signature and correct it, if necessary, also the case
 		if (strcmp(appInfo.signature, fAppName))
 			BRoster::Private().SetSignature(team, fAppName);
+		// The launcher registered the file's flags.
+		if (flags != NULL && appInfo.flags != *flags)
+			BRoster::Private().SetAppFlags(team, *flags);
 		// complete the registration
 		fInitError = BRoster::Private().CompleteRegistration(team, thread,
 						appInfo.port);
@@ -514,6 +538,16 @@ BApplication::_InitData(const char* signature, bool initGUI, status_t* _error)
 #endif	// ifndef RUN_WITHOUT_REGISTRAR
 
 	if (fInitError == B_OK) {
+		const char* readyFdEnv = getenv("JANUS_READY_FD");
+		if (readyFdEnv != NULL && readyFdEnv[0] != '\0') {
+			int readyFd = atoi(readyFdEnv);
+			if (readyFd >= 0) {
+				write(readyFd, &fMsgPort, sizeof(port_id));
+				close(readyFd);
+				unsetenv("JANUS_READY_FD");
+			}
+		}
+
 		// TODO: Not completely sure about the order, but this should be close.
 
 		// init be_app and be_app_messenger
@@ -1060,14 +1094,24 @@ BApplication::DispatchMessage(BMessage* message, BHandler* handler)
 				if (entry.IsDirectory())
 					BRoster().AddToRecentFolders(&ref);
 				else {
-					// filter out applications, we only want to have documents
-					// in the recent files list
-					BNode node(&entry);
-					BNodeInfo info(&node);
+					// Recent files: filter out apps (their BEOS:TYPE is
+					// the app's own signature, not B_APP_MIME_TYPE).
+					BFile file(&entry, B_READ_ONLY);
+					BAppFileInfo appInfo(&file);
+					char sig[B_MIME_TYPE_LENGTH];
+					bool isApp = appInfo.InitCheck() == B_OK
+						&& appInfo.GetSignature(sig) == B_OK;
 
-					char mimeType[B_MIME_TYPE_LENGTH];
-					if (info.GetType(mimeType) != B_OK
-						|| strcasecmp(mimeType, B_APP_MIME_TYPE))
+					if (!isApp) {
+						BNode node(&entry);
+						BNodeInfo info(&node);
+						char mimeType[B_MIME_TYPE_LENGTH];
+						if (info.GetType(mimeType) == B_OK
+							&& strcasecmp(mimeType, B_APP_MIME_TYPE) == 0)
+							isApp = true;
+					}
+
+					if (!isApp)
 						BRoster().AddToRecentDocuments(&ref);
 				}
 			}

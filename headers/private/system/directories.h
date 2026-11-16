@@ -14,13 +14,8 @@
 #define kGlobalTempDirectory 			"/tmp"
 #define kGlobalVarDirectory 			"/var"
 
-#ifndef __VOS__
-#define kAppsDirectory 					"/boot/system/apps"
-#define kPreferencesDirectory 			"/boot/system/preferences"
-#else /* __VOS__ */
 #define kAppsDirectory 					"/system/apps"
 #define kPreferencesDirectory 			"/system/preferences"
-#endif /* __VOS__ */
 
 #define kAppLocalAddonsDirectory 		"%A/add-ons"
 #define kAppLocalLibDirectory 			"%A/lib"
@@ -33,42 +28,6 @@
 	"home/config/non-packaged/add-ons/kernel"
 #define kVolumeLocalUserKernelAddonsDirectory	"home/config/add-ons/kernel"
 
-#ifndef __VOS__
-#define kSystemDirectory 				"/boot/system"
-#define kSystemAddonsDirectory 			"/boot/system/add-ons"
-#define kSystemAppsDirectory 			"/boot/system/apps"
-#define kSystemBinDirectory 			"/boot/system/bin"
-#define kSystemDataDirectory 			"/boot/system/data"
-#define kSystemDevelopDirectory 		"/boot/system/develop"
-#define kSystemLibDirectory 			"/boot/system/lib"
-#define kSystemPackagesDirectory 		"/boot/system/packages"
-#define kSystemPackageLinksDirectory 		"/boot/system/package-links"
-#define kSystemPreferencesDirectory 	"/boot/system/preferences"
-#define kSystemServersDirectory 		"/boot/system/servers"
-#define kSystemSettingsDirectory 		"/boot/system/settings"
-
-#define kSystemEtcDirectory 			"/boot/system/settings/etc"
-#define kSystemTempDirectory 			"/boot/system/cache/tmp"
-#define kSystemVarDirectory 			"/boot/system/var"
-#define kSystemLogDirectory 			"/boot/system/var/log"
-#define kSystemNonpackagedDirectory		"/boot/system/non-packaged"
-#define kSystemNonpackagedAddonsDirectory	"/boot/system/non-packaged/add-ons"
-#define kSystemNonpackagedBinDirectory 	"/boot/system/non-packaged/bin"
-#define kSystemNonpackagedLibDirectory 	"/boot/system/non-packaged/lib"
-
-#define kUserDirectory 					"/boot/home"
-#define kUserConfigDirectory 			"/boot/home/config"
-#define kUserAddonsDirectory 			"/boot/home/config/add-ons"
-#define kUserBinDirectory 				"/boot/home/config/bin"
-#define kUserLibDirectory 				"/boot/home/config/lib"
-#define kUserPackagesDirectory	 		"/boot/home/config/packages"
-#define kUserSettingsDirectory 			"/boot/home/config/settings"
-#define kUserSettingsGlobalDirectory 	"/boot/home/config/settings/global"
-#define kUserNonpackagedDirectory		"/boot/home/config/non-packaged"
-#define kUserNonpackagedAddonsDirectory "/boot/home/config/non-packaged/add-ons"
-#define kUserNonpackagedBinDirectory 	"/boot/home/config/non-packaged/bin"
-#define kUserNonpackagedLibDirectory 	"/boot/home/config/non-packaged/lib"
-#else /* __VOS__ */
 #define kSystemDirectory 				"/system"
 #define kSystemAddonsDirectory 			"/system/add-ons"
 #define kSystemAppsDirectory 			"/system/apps"
@@ -103,7 +62,6 @@
 #define kUserNonpackagedAddonsDirectory "/home/config/non-packaged/add-ons"
 #define kUserNonpackagedBinDirectory 	"/home/config/non-packaged/bin"
 #define kUserNonpackagedLibDirectory 	"/home/config/non-packaged/lib"
-#endif /* __VOS__ */
 
 
 #endif	// _SYSTEM_DIRECTORIES_H

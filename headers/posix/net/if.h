@@ -81,6 +81,10 @@ struct ifaliasreq {
 #define IFF_CONFIGURING		0x4000
 #define IFF_MULTICAST		0x8000	/* supports multicast */
 
+/* Vitruvian addition: not in upstream Haiku, used by NMBackend-derived
+ * BNetworkInterface::HasLink() alongside IFF_UP. */
+#define IFF_RUNNING			0x10000
+
 /* interface alias flags */
 #define IFAF_AUTO_CONFIGURED	0x0001	/* has been automatically configured */
 #define IFAF_CONFIGURING		0x0002	/* auto configuration in progress */

@@ -1,9 +1,7 @@
 /*
- * Copyright 2015-2017 Haiku, Inc. All rights reserved.
- * Distributed under the terms of the MIT License.
- *
- * Authors:
- *		Axel Dörfler, axeld@pinc-software.de
+ * Copyright 2015-2017, Haiku, Inc. All rights reserved.
+ * Copyright 2026, Dario Casalinuovo. All rights reserved.
+ * Distributed under the terms of the GPL License.
  */
 
 
@@ -13,13 +11,18 @@
 #include <String.h>
 #include <StringList.h>
 
-#include <launch.h>
+#include <AppMisc.h>
 #include <LaunchDaemonDefs.h>
 #include <LaunchRosterPrivate.h>
 #include <MessengerPrivate.h>
 
+#include <unistd.h>
+
 
 using namespace BPrivate;
+
+
+// #pragma mark - BLaunchRoster::Private
 
 
 BLaunchRoster::Private::Private(BLaunchRoster* roster)
@@ -46,11 +49,8 @@ BLaunchRoster::Private::RegisterSessionDaemon(const BMessenger& daemon)
 	if (status != B_OK)
 		return status;
 
-	// send the request
 	BMessage result;
 	status = fRoster->fMessenger.SendMessage(&request, &result);
-
-	// evaluate the reply
 	if (status == B_OK)
 		status = result.what;
 
@@ -58,7 +58,7 @@ BLaunchRoster::Private::RegisterSessionDaemon(const BMessenger& daemon)
 }
 
 
-// #pragma mark -
+// #pragma mark - BLaunchRoster
 
 
 BLaunchRoster::BLaunchRoster()
@@ -294,7 +294,6 @@ BLaunchRoster::GetTargets(BStringList& targets)
 	if (status != B_OK)
 		return status;
 
-	// send the request
 	BMessage result;
 	status = _SendRequest(request, result);
 	if (status == B_OK)
@@ -321,7 +320,6 @@ BLaunchRoster::GetJobs(const char* target, BStringList& jobs)
 	if (status != B_OK)
 		return status;
 
-	// send the request
 	BMessage result;
 	status = _SendRequest(request, result);
 	if (status == B_OK)
@@ -355,14 +353,11 @@ BLaunchRoster::GetLog(const BMessage& filter, BMessage& info)
 void
 BLaunchRoster::_InitMessenger()
 {
-#ifdef TEST_MODE
+	// Locate janus's launch daemon port by its well-known name.
 	port_id daemonPort = find_port(B_LAUNCH_DAEMON_PORT_NAME);
-#else
-	// find the launch_daemon port
-	port_id daemonPort = BPrivate::get_launch_daemon_port();
-#endif
 	port_info info;
-	if (daemonPort >= 0 && get_port_info(daemonPort, &info) == B_OK) {
+	if (daemonPort >= 0 && get_port_info(daemonPort, &info) == B_OK
+		&& info.team != current_team()) {
 		BMessenger::Private(fMessenger).SetTo(info.team, daemonPort,
 			B_PREFERRED_TOKEN);
 	}
@@ -380,7 +375,6 @@ BLaunchRoster::_SendRequest(BMessage& request)
 status_t
 BLaunchRoster::_SendRequest(BMessage& request, BMessage& result)
 {
-	// Send the request, and evaluate the reply
 	status_t status = fMessenger.SendMessage(&request, &result);
 	if (status == B_OK)
 		status = result.what;

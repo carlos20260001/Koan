@@ -1,4 +1,5 @@
 /*
+ * Copyright 2026, Dario Casalinuovo. All rights reserved.
  * Copyright 2001-2005, Haiku.
  * Distributed under the terms of the MIT License.
  *
@@ -12,6 +13,7 @@
 #include <ByteOrder.h>
 
 #include <MessageUtils.h>
+#include <Node.h>
 
 namespace BPrivate {
 
@@ -36,58 +38,55 @@ CalculateChecksum(const uint8 *buffer, int32 size)
 }
 
 
-/* entry_ref support functions */
-status_t
-entry_ref_flatten(char *buffer, size_t *size, const entry_ref *ref)
+status_t entry_ref_flatten(char *buffer, size_t *size, const entry_ref *ref)
 {
-	if (*size < sizeof(ref->device) + sizeof(ref->directory))
+	if (*size < sizeof(dev_t) + sizeof(ino_t))
 		return B_BUFFER_OVERFLOW;
 
-	memcpy((void *)buffer, (const void *)&ref->device, sizeof(ref->device));
-	buffer += sizeof(ref->device);
-	memcpy((void *)buffer, (const void *)&ref->directory, sizeof(ref->directory));
-	buffer += sizeof(ref->directory);
-	*size -= sizeof(ref->device) + sizeof(ref->directory);
+	dev_t dev = ref->vdevice();
+	ino_t dir = ref->vdirectory();
+	memcpy((void *)buffer, (const void *)&dev, sizeof(dev));
+	buffer += sizeof(dev);
+	memcpy((void *)buffer, (const void *)&dir, sizeof(dir));
+	buffer += sizeof(dir);
+	*size -= sizeof(dev) + sizeof(dir);
 
 	size_t nameLength = 0;
 	if (ref->name) {
 		nameLength = strlen(ref->name) + 1;
 		if (*size < nameLength)
 			return B_BUFFER_OVERFLOW;
-
 		memcpy((void *)buffer, (const void *)ref->name, nameLength);
 	}
-
-	*size = sizeof(ref->device) + sizeof(ref->directory) + nameLength;
-
+	*size = sizeof(dev) + sizeof(dir) + nameLength;
 	return B_OK;
 }
 
 
-status_t
-entry_ref_unflatten(entry_ref *ref, const char *buffer, size_t size)
+status_t entry_ref_unflatten(entry_ref *ref, const char *buffer, size_t size)
 {
-	if (size < sizeof(ref->device) + sizeof(ref->directory)) {
+	if (size < sizeof(dev_t) + sizeof(ino_t)) {
 		*ref = entry_ref();
 		return B_BAD_VALUE;
 	}
 
-	memcpy((void *)&ref->device, (const void *)buffer, sizeof(ref->device));
-	buffer += sizeof(ref->device);
-	memcpy((void *)&ref->directory, (const void *)buffer,
-		sizeof(ref->directory));
-	buffer += sizeof(ref->directory);
+	dev_t dev;
+	ino_t dir;
+	memcpy(&dev, buffer, sizeof(dev));
+	buffer += sizeof(dev);
+	memcpy(&dir, buffer, sizeof(dir));
+	buffer += sizeof(dir);
 
-	if (ref->device != ~(dev_t)0 && size > sizeof(ref->device)
-			+ sizeof(ref->directory)) {
-		ref->set_name(buffer);
-		if (ref->name == NULL) {
-			*ref = entry_ref();
-			return B_NO_MEMORY;
-		}
-	} else
-		ref->set_name(NULL);
-
+	if (dev != B_INVALID_DEV && size > sizeof(dev) + sizeof(dir))
+		*ref = entry_ref(dev, dir, buffer);
+	else
+		*ref = entry_ref(dev, dir, NULL);
+	
+	if (ref->name == NULL && size > sizeof(dev) + sizeof(dir)) {
+		*ref = entry_ref();
+		return B_NO_MEMORY;
+	}
+	
 	return B_OK;
 }
 
@@ -98,63 +97,51 @@ entry_ref_swap(char *buffer, size_t size)
 	if (size < sizeof(dev_t) + sizeof(ino_t))
 		return B_BAD_VALUE;
 
+	// dev_t is 64-bit on this port; a 32-bit swap would corrupt it.
 	dev_t *dev = (dev_t *)buffer;
-	*dev = B_SWAP_INT32(*dev);
+	*dev = (dev_t)B_SWAP_INT64((uint64)*dev);
 	buffer += sizeof(dev_t);
 
 	ino_t *ino = (ino_t *)buffer;
-	*ino = B_SWAP_INT64(*ino);
+	*ino = (ino_t)B_SWAP_INT64((uint64)*ino);
 
 	return B_OK;
 }
 
-
-/* node_ref support functions */
-status_t
-node_ref_flatten(char *buffer, size_t *size, const node_ref *ref)
+status_t node_ref_flatten(char* buffer, size_t* size, const node_ref* ref)
 {
 	if (*size < sizeof(dev_t) + sizeof(ino_t))
 		return B_BUFFER_OVERFLOW;
 
-	memcpy((void *)buffer, (const void *)&ref->device, sizeof(ref->device));
-	buffer += sizeof(ref->device);
-	memcpy((void *)buffer, (const void *)&ref->node, sizeof(ref->node));
-	buffer += sizeof(ref->node);
+	// Store device/node as-is, including vref_dev + vref_id for virtual refs.
+	// Vrefs are kernel-global objects; _HandleMessageVRefs manages acquire/
+	// release so the vref stays valid across process boundaries.
+	dev_t dev = ref->vdevice();
+	ino_t ino = ref->vnode();
 
+	memcpy(buffer, &dev, sizeof(dev));
+	buffer += sizeof(dev);
+	memcpy(buffer, &ino, sizeof(ino));
+
+	*size = sizeof(dev) + sizeof(ino);
 	return B_OK;
 }
 
 
-status_t
-node_ref_unflatten(node_ref *ref, const char *buffer, size_t size)
+status_t node_ref_unflatten(node_ref* ref, const char* buffer, size_t size)
 {
 	if (size < sizeof(dev_t) + sizeof(ino_t)) {
 		*ref = node_ref();
 		return B_BAD_VALUE;
 	}
 
-	memcpy((void *)&ref->device, (const void *)buffer, sizeof(dev_t));
-	buffer += sizeof(dev_t);
-	memcpy((void *)&ref->node, (const void *)buffer, sizeof(ino_t));
-	buffer += sizeof(ino_t);
+	dev_t dev;
+	ino_t ino;
+	memcpy(&dev, buffer, sizeof(dev));
+	buffer += sizeof(dev);
+	memcpy(&ino, buffer, sizeof(ino));
 
-	return B_OK;
-}
-
-
-status_t
-node_ref_swap(char *buffer, size_t size)
-{
-	if (size < sizeof(dev_t) + sizeof(ino_t))
-		return B_BAD_VALUE;
-
-	dev_t *dev = (dev_t *)buffer;
-	*dev = B_SWAP_INT32(*dev);
-	buffer += sizeof(dev_t);
-
-	ino_t *ino = (ino_t *)buffer;
-	*ino = B_SWAP_INT64(*ino);
-
+	*ref = node_ref(dev, ino);
 	return B_OK;
 }
 

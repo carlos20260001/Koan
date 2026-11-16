@@ -23,9 +23,7 @@
 #define B_SAFEMODE_DISABLE_SMP				"disable_smp"
 #define B_SAFEMODE_DISABLE_X2APIC			"disable_x2apic"
 
-#ifdef __VOS__
 #define B_SAFEMODE_RECOVERY			"recovery"
 
-#endif /* __VOS__ */
 
 #endif	/* _SYSTEM_SAFEMODE_DEFS_H */

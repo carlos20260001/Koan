@@ -38,12 +38,10 @@ delete_mapping(const area_mapping& mapping)
 {
 	if (mapping.local_area >= B_OK)
 		delete_area(mapping.local_area);
-#ifndef HAIKU_TARGET_PLATFORM_LIBBE_TEST
-	if (mapping.reserved) {
-		_kern_unreserve_address_range((addr_t)mapping.local_base,
-			kReservedSize);
-	}
-#endif
+	// TODO(air/OS merge): air/OS releases the address range reserved for
+	// the clone here (_kern_unreserve_address_range(), 121ded7106);
+	// libroot2 reserves with a PROT_NONE mmap and has no unreserve yet, so
+	// the reservation stays, as it always did on VitruvianOS.
 }
 
 

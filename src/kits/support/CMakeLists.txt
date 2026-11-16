@@ -1,15 +1,65 @@
-# ported subset: the be_bootstrap sources that root (libroot2) needs,
-# BList, BLocker and BString (with BStringList, which BString::Split
-# returns, and its base BFlattenable), plus the user_sem BLocker is built on.
-# Upstream also adds the rest of the support kit to be_bootstrap and to "be".
+target_sources(be PRIVATE
+	#Architecture.cpp
+	Archivable.cpp
+	ArchivingManagers.cpp
+	Base64.cpp
+	Beep.cpp
+	BlockCache.cpp
+	BufferedDataIO.cpp
+	BufferIO.cpp
+	ByteOrder.cpp
+	CompressionAlgorithm.cpp
+	DataIO.cpp
+	DataPositionIOWrapper.cpp
+	DateTime.cpp
+	Flattenable.cpp
+	Job.cpp
+	JobQueue.cpp
+	List.cpp
+	Locker.cpp
+	UserSemaphore.cpp
+	BFutexLocker.cpp
+	SharedLocker.cpp
+	SharedEvent.cpp
+	SharedLiveness.cpp
+	SharedRWLocker.cpp
+	PointerList.cpp
+	Referenceable.cpp
+	StopWatch.cpp
+	String.cpp
+	StringList.cpp
+	Url.cpp
+	Uuid.cpp
+	ZlibCompressionAlgorithm.cpp
+	ZstdCompressionAlgorithm.cpp
+)
+
+UsePrivateHeaders(be support shared)
+
 target_sources(be_bootstrap PRIVATE
+	#Architecture.cpp
+	Base64.cpp
+	BlockCache.cpp
+	BufferedDataIO.cpp
+	BufferIO.cpp
+	ByteOrder.cpp
+	CompressionAlgorithm.cpp
+	DataIO.cpp
+	DataPositionIOWrapper.cpp
+	Flattenable.cpp
+	Job.cpp
+	JobQueue.cpp
 	List.cpp
 	Locker.cpp
 	UserSemaphore.cpp
 	PointerList.cpp
+	Referenceable.cpp
+	StopWatch.cpp
 	String.cpp
 	StringList.cpp
-	Flattenable.cpp
+	Uuid.cpp
+	ZlibCompressionAlgorithm.cpp
+	ZstdCompressionAlgorithm.cpp
 )
 
-UsePrivateHeaders(be_bootstrap support)
+UsePrivateHeaders(be support)

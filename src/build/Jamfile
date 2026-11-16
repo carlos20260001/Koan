@@ -1,9 +1,7 @@
 SubDir HAIKU_TOP src build ;
 
-SubInclude HAIKU_TOP src build libbe ;
 SubInclude HAIKU_TOP src build libicon ;
 SubInclude HAIKU_TOP src build libpackage ;
-SubInclude HAIKU_TOP src build libroot ;
 SubInclude HAIKU_TOP src build libshared ;
 SubInclude HAIKU_TOP src build libsolv ;
 SubInclude HAIKU_TOP src build libuuid ;

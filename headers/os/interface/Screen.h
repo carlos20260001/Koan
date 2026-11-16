@@ -116,6 +116,8 @@ public:
 
 			status_t			GetScanTiming(BRect frame,
 									display_scan_timing* timing);
+			status_t			GetTemperature(float* kelvin);
+			status_t			SetTemperature(float kelvin);
 
 private:
 	// Forbidden and deprecated methods

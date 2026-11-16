@@ -38,8 +38,18 @@ class BRoster::Private {
 
 		status_t ShutDown(bool reboot, bool confirm, bool synchronous)
 			{ return fRoster->_ShutDown(reboot, confirm, synchronous); }
+		status_t LogOut(bool confirm)
+			{ return fRoster->_ShutDown(false, confirm, false, true); }
 		status_t IsShutDownInProgress(bool* inProgress)
 			{ return fRoster->_IsShutDownInProgress(inProgress); }
+		status_t Suspend()
+			{ return fRoster->_RequestSleep("suspend"); }
+		status_t Hibernate()
+			{ return fRoster->_RequestSleep("hibernate"); }
+		status_t CanSuspend(bool* available)
+			{ return fRoster->_IsSleepAvailable("suspend", available); }
+		status_t CanHibernate(bool* available)
+			{ return fRoster->_IsSleepAvailable("hibernate", available); }
 
 		// needed by BApplication
 
@@ -52,6 +62,8 @@ class BRoster::Private {
 
 		status_t SetSignature(team_id team, const char *mimeSig) const
 			{ return fRoster->_SetSignature(team, mimeSig); }
+		void SetAppFlags(team_id team, uint32 flags) const
+			{ fRoster->_SetAppFlags(team, flags); }
 
 		status_t CompleteRegistration(team_id team, thread_id thread,
 					port_id port) const

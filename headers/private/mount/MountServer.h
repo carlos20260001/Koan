@@ -14,6 +14,9 @@ const uint32 kSetAutomounterParams 	= 'pmst';
 const uint32 kGetAutomounterParams 	= 'gpms';
 const uint32 kVolumeMounted			= 'vmtd';
 const uint32 kUnmountVolume			= 'umnt';
+// Reply to kUnmountVolume: "error", "name", "mountPoint", "busyProcesses"
+// ("pid: name", when busy), and the request's "id"/"device_id" echoed.
+const uint32 kUnmountVolumeReply		= 'umnr';
 
 // Network shares, which the mount server keeps a list of and mounts when the
 // system starts. The password of a share is in the key store, and never in a

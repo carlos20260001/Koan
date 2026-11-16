@@ -6,6 +6,8 @@
 
 #include <FileIO.h>
 
+#include <unistd.h>
+
 #include <errno.h>
 #include <stdio.h>
 
@@ -83,7 +85,7 @@ off_t
 BFileIO::Seek(off_t position, uint32 seekMode)
 {
 	if (fseeko(fFile, position, seekMode) < 0)
-		return errno;
+		return -errno;
 
 	return BFileIO::Position();
 }
@@ -100,7 +102,16 @@ BFileIO::Position() const
 status_t
 BFileIO::SetSize(off_t size)
 {
-	return B_UNSUPPORTED;
+	if (size < 0)
+		return B_BAD_VALUE;
+
+	if (fflush(fFile) != 0)
+		return errno;
+
+	if (ftruncate(fileno(fFile), size) != 0)
+		return errno;
+
+	return B_OK;
 }
 
 
@@ -128,11 +139,11 @@ BFileIO::_Seek(off_t position, uint32 seekMode) const
 	// save the current position
 	off_t oldPosition = ftello(fFile);
 	if (oldPosition < 0)
-		return errno;
+		return -errno;
 
 	// seek to the requested position
 	if (fseeko(fFile, position, seekMode) < 0)
-		return errno;
+		return -errno;
 
 	return oldPosition;
 }

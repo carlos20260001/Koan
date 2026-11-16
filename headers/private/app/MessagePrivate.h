@@ -1,9 +1,11 @@
 /*
  * Copyright 2005-2015, Haiku Inc. All rights reserved.
+ * Copyright 2026, Dario Casalinuovo.
  * Distributed under the terms of the MIT License.
  *
  * Authors:
  *		Michael Lotz <mmlr@mlotz.ch>
+ *		Dario Casalinuovo
  */
 #ifndef _MESSAGE_PRIVATE_H_
 #define _MESSAGE_PRIVATE_H_
@@ -32,7 +34,11 @@ enum {
 	MESSAGE_FLAG_HAS_SPECIFIERS = 0x0020,
 	MESSAGE_FLAG_WAS_DROPPED = 0x0040,
 	MESSAGE_FLAG_PASS_BY_AREA = 0x0080,
-	MESSAGE_FLAG_REPLY_AS_KMESSAGE = 0x0100
+	MESSAGE_FLAG_REPLY_AS_KMESSAGE = 0x0100,
+	MESSAGE_FLAG_OWNS_VREFS = 0x0200,
+	// Caps were adopted via AdoptCaps; Unflatten skips its OWNS_VREFS
+	// acquire pass. _Clear's release still runs to balance AdoptCaps.
+	MESSAGE_FLAG_CAPS_ADOPTED = 0x0400
 };
 
 
@@ -132,6 +138,12 @@ class BMessage::Private {
 		}
 
 		void
+		SetSenderUid(uid_t uid)
+		{
+			fMessage->fSenderUid = uid;
+		}
+
+		void
 		SetWasDropped(bool wasDropped)
 		{
 			if (wasDropped)
@@ -213,6 +225,28 @@ class BMessage::Private {
 		{
 			return BMessage::_SendFlattenedMessage(data, size,
 				port, token, timeout);
+		}
+
+		void
+		AcquireVRefsAsReceived()
+		{
+			fMessage->_AcquireVRefsAsReceived();
+		}
+
+		static status_t
+		CollectSendBufferCaps(char* buffer, port_cap_in** outCaps,
+			size_t* outCount)
+		{
+			return BMessage::_CollectSendBufferCaps(buffer, outCaps,
+				outCount);
+		}
+
+		static void
+		RegisterAdoptedTickets(BMessage* message,
+			const port_cap_out* caps, size_t count,
+			const BPrivate::vref_ticket* tickets)
+		{
+			BMessage::_RegisterAdoptedTickets(message, caps, count, tickets);
 		}
 
 		static void

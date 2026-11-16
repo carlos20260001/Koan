@@ -35,10 +35,8 @@ class BStringList;
 struct entry_ref;
 struct rgb_color;
 
-#ifdef __VOS__
 namespace BPrivate { typedef uint64 vref_ticket; }
 
-#endif /* __VOS__ */
 
 // Name lengths and Scripting specifiers
 #define B_FIELD_NAME_LENGTH			255
@@ -94,10 +92,8 @@ public:
 			bool				WasDelivered() const;
 			bool				IsSourceWaiting() const;
 			bool				IsSourceRemote() const;
-#ifdef __VOS__
 			// Kernel-attested writer uid; (uid_t)-1 if never traversed a port.
 			uid_t				SenderUid() const;
-#endif /* __VOS__ */
 			BMessenger			ReturnAddress() const;
 			const BMessage*		Previous() const;
 			bool				WasDropped() const;
@@ -289,9 +285,6 @@ public:
 			status_t			FindData(const char* name, type_code type,
 									int32 index, const void** data,
 									ssize_t* numBytes) const;
-#ifndef __VOS__
-
-#endif /* ! __VOS__ */
 	// Replacing data
 			status_t			ReplaceAlignment(const char* name,
 									const BAlignment& alignment);
@@ -510,9 +503,6 @@ public:
 									const BSize& defaultValue) const;
 			BSize				GetSize(const char* name,
 									const BSize& defaultValue) const;
-#ifndef __VOS__
-
-#endif /* ! __VOS__ */
 	// fixed size fields only
 			status_t			SetBool(const char* name, bool value);
 			status_t			SetInt8(const char* name, int8 value);
@@ -546,7 +536,6 @@ public:
 private:
 	friend class Private;
 	friend class BMessageQueue;
-#ifdef __VOS__
 	friend void _HandleMessageVRefs(BMessage*, bool);
 
 	// Buffer-walking cap collector for raw-buffer transports
@@ -562,7 +551,6 @@ private:
 									const port_cap_out* caps, size_t count,
 									const BPrivate::vref_ticket* tickets);
 #endif
-#endif /* __VOS__ */
 
 			status_t			_InitCommon(bool initHeader);
 			status_t			_InitHeader();
@@ -607,13 +595,11 @@ private:
 									port_id port, int32 token,
 									bigtime_t timeout);
 
-#ifdef __VOS__
 			// Take a ticket per embedded vref id. For transports that
 			// pre-grant slots without AdoptCaps (kernel node_monitor).
 			void				_AcquireVRefsAsReceived();
 			void				_TrackOwnedVRef(vref_id id);
 
-#endif /* __VOS__ */
 	static	void				_StaticInit();
 	static	void				_StaticReInitForkedChild();
 	static	void				_StaticCleanup();
@@ -635,9 +621,6 @@ private:
 
 			void*				fArchivingPointer;
 
-#ifndef __VOS__
-			uint32				fReserved[8];
-#else /* __VOS__ */
 			// VRefCache tickets per held vref id. Opaque
 			// std::map<vref_id, vref_ticket>*; NULL when none held.
 			void*				fVrefTickets;
@@ -645,7 +628,6 @@ private:
 			uid_t				fSenderUid;
 
 			uint32				fReserved[5];
-#endif /* __VOS__ */
 
 			enum				{ sNumReplyPorts = 3 };
 	static	port_id				sReplyPorts[sNumReplyPorts];

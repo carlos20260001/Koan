@@ -1,5 +1,6 @@
 /*
  * Copyright 2001-2008, Haiku, Inc. All Rights Reserved.
+ * Copyright 2026, Dario Casalinuovo <b.vitruvio@gmail.com>.
  * Distributed under the terms of the MIT License.
  */
 #ifndef _KB_MOUSE_SETTINGS_H
@@ -33,6 +34,8 @@ typedef struct {
 } mouse_settings;
 
 static const bigtime_t kDefaultClickSpeed = 500000;
+// Upper bound for persisted click_speed (UI slider: value = (1000000 - ClickSpeed()) / 1000)
+static const bigtime_t kMaxClickSpeed = 1000000;
 static const int32 kDefaultMouseSpeed = 65536;
 static const int32 kDefaultMouseType = 3;	// 3 button mouse
 static const int32 kDefaultAccelerationFactor = 65536;

@@ -10,13 +10,9 @@
 
 #include <sys/types.h>
 #include <sys/stat.h>
-#ifdef __VOS__
 #include <Node.h>
-#endif /* __VOS__ */
 #include <SupportDefs.h>
-#ifdef __VOS__
 #include <OS.h>
-#endif /* __VOS__ */
 
 #include <Statable.h>
 
@@ -24,29 +20,19 @@
 class BDirectory;
 class BPath;
 
-#ifdef __VOS__
 namespace BPrivate { class VRefTrackAccess; }
 
-#endif /* __VOS__ */
 
 struct entry_ref {
 								entry_ref();
-#ifndef __VOS__
-								entry_ref(dev_t dev, ino_t dir,
-									const char* name);
-#else /* __VOS__ */
 								entry_ref(dev_t dev, ino_t dir, const char* name);
 								//entry_ref(vref_id id, const char* name, uint32 flags);
 								entry_ref(int entryFd, const char* name);
 								entry_ref(const node_ref& node, const char* name);
-#endif /* __VOS__ */
 								entry_ref(const entry_ref& ref);
-#ifdef __VOS__
 
-#endif /* __VOS__ */
 								~entry_ref();
 
-#ifdef __VOS__
 			//bool				is_valid() const;
 			status_t			init_check() const;
 
@@ -58,31 +44,22 @@ struct entry_ref {
 
 			void				set_to(dev_t dev, ino_t dir, const char* name = NULL);
 
-#endif /* __VOS__ */
 			status_t			set_name(const char* name);
 
-#ifdef __VOS__
 			vref_id				id() const;
 			bool				is_virtual() const;
 			void				unset();
 
-#endif /* __VOS__ */
 			bool				operator==(const entry_ref& ref) const;
 			bool				operator!=(const entry_ref& ref) const;
 			entry_ref&			operator=(const entry_ref& ref);
 
-#ifndef __VOS__
-			dev_t				device;
-			ino_t				directory;
-#else /* __VOS__ */
 protected:
 			dev_t				virtual_device;
 			ino_t				virtual_directory;
 
 public:
-#endif /* __VOS__ */
 			char*				name;
-#ifdef __VOS__
 
 			friend class		node_ref;
 			friend class 		BPath;
@@ -102,7 +79,6 @@ private:
 			void				_ReleaseDirSlot();
 
 			team_id				team;
-#endif /* __VOS__ */
 };
 
 
@@ -123,9 +99,7 @@ public:
 			const char*			Name() const;
 
 	virtual status_t			GetStat(struct stat* stat) const;
-#ifdef __VOS__
 	virtual status_t			GetStatX(struct statx* stx) const;
-#endif /* __VOS__ */
 
 			status_t			SetTo(const BDirectory* dir, const char* path,
 								   bool traverse = false);
@@ -139,9 +113,7 @@ public:
 			status_t			GetParent(BEntry* entry) const;
 			status_t			GetParent(BDirectory* dir) const;
 			status_t			GetName(char* buffer) const;
-#ifdef __VOS__
 			status_t			GetNodeRef(node_ref* ref) const;
-#endif /* __VOS__ */
 
 			status_t			Rename(const char* path, bool clobber = false);
 			status_t			MoveTo(BDirectory* dir, const char* path = NULL,
@@ -181,9 +153,7 @@ private:
 
 private:
 			int					fDirFd;
-#ifdef __VOS__
 			node_ref			fDirRef;
-#endif /* __VOS__ */
 			char*				fName;
 			status_t			fCStatus;
 

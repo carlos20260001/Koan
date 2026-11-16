@@ -7,16 +7,10 @@
 
 
 #include <SupportDefs.h>
-#ifdef __VOS__
 #include <StorageDefs.h>
-#endif /* __VOS__ */
 
 
-#ifndef __VOS__
-typedef int32 partition_id;
-#else /* __VOS__ */
 typedef dev_t partition_id;
-#endif /* __VOS__ */
 typedef int32 disk_system_id;
 typedef int32 disk_job_id;
 

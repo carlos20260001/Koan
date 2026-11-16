@@ -422,14 +422,6 @@ typedef struct {
 #define STB_WEAK 2
 #define STB_LOPROC 13
 #define STB_HIPROC 15
-#ifdef __VOS__
-
-/* symbol visibility */
-#define STV_DEFAULT 0
-#define STV_INTERNAL 1
-#define STV_HIDDEN 2
-#define STV_PROTECTED 3
-#endif /* __VOS__ */
 
 /* symbol visibility */
 #define STV_DEFAULT 0

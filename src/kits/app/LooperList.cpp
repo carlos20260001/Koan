@@ -10,8 +10,13 @@
 //! Maintains a global list of all loopers in a given team.
 
 
+// TODO(air/OS merge): air/OS (Haiku b6441edfac) guards the looper list with
+// a user rw_lock (__rw_lock_* in Haiku's libroot); libroot2 has no rw_lock
+// yet, so this stays VitruvianOS's BLocker version.
+
 #include "LooperList.h"
 
+#include <Autolock.h>
 #include <Looper.h>
 
 #include <algorithm>
@@ -26,36 +31,37 @@ BLooperList gLooperList;
 
 
 BLooperList::BLooperList()
+	:
+	fLock("BLooperList lock")
 {
-	rw_lock_init(&fLock, "BLooperList rwlock");
 }
 
 
 bool
 BLooperList::Lock()
 {
-	return rw_lock_write_lock(&fLock) == B_OK;
+	return fLock.Lock();
 }
 
 
 void
 BLooperList::Unlock()
 {
-	rw_lock_write_unlock(&fLock);
+	fLock.Unlock();
 }
 
 
 bool
 BLooperList::IsLocked()
 {
-	return fLock.holder == find_thread(NULL);
+	return fLock.IsLocked();
 }
 
 
 void
 BLooperList::AddLooper(BLooper* looper)
 {
-	WriteLocker locker(fLock);
+	BAutolock locker(fLock);
 	AssertLocked();
 	if (!IsLooperValid(looper)) {
 		LooperDataIterator i
@@ -74,7 +80,9 @@ BLooperList::AddLooper(BLooper* looper)
 bool
 BLooperList::IsLooperValid(const BLooper* looper)
 {
-	ReadLocker locker(fLock);
+	BAutolock locker(fLock);
+	AssertLocked();
+
 	return find_if(fData.begin(), fData.end(),
 		FindLooperPred(looper)) != fData.end();
 }
@@ -83,7 +91,7 @@ BLooperList::IsLooperValid(const BLooper* looper)
 bool
 BLooperList::RemoveLooper(BLooper* looper)
 {
-	WriteLocker locker(fLock);
+	BAutolock locker(fLock);
 	AssertLocked();
 
 	LooperDataIterator i = find_if(fData.begin(), fData.end(),
@@ -100,7 +108,8 @@ BLooperList::RemoveLooper(BLooper* looper)
 void
 BLooperList::GetLooperList(BList* list)
 {
-	ReadLocker locker(fLock);
+	BAutolock locker(fLock);
+	AssertLocked();
 
 	for (uint32 i = 0; i < fData.size(); ++i) {
 		if (fData[i].looper)
@@ -112,7 +121,8 @@ BLooperList::GetLooperList(BList* list)
 int32
 BLooperList::CountLoopers()
 {
-	ReadLocker locker(fLock);
+	BAutolock locker(fLock);
+	AssertLocked();
 	return (int32)fData.size();
 }
 
@@ -120,7 +130,8 @@ BLooperList::CountLoopers()
 BLooper*
 BLooperList::LooperAt(int32 index)
 {
-	ReadLocker locker(fLock);
+	BAutolock locker(fLock);
+	AssertLocked();
 
 	BLooper* looper = NULL;
 	if (index < (int32)fData.size())
@@ -133,7 +144,8 @@ BLooperList::LooperAt(int32 index)
 BLooper*
 BLooperList::LooperForThread(thread_id thread)
 {
-	ReadLocker locker(fLock);
+	BAutolock locker(fLock);
+	AssertLocked();
 
 	BLooper* looper = NULL;
 	LooperDataIterator i
@@ -148,7 +160,8 @@ BLooperList::LooperForThread(thread_id thread)
 BLooper*
 BLooperList::LooperForName(const char* name)
 {
-	ReadLocker locker(fLock);
+	BAutolock locker(fLock);
+	AssertLocked();
 
 	BLooper* looper = NULL;
 	LooperDataIterator i
@@ -163,7 +176,8 @@ BLooperList::LooperForName(const char* name)
 BLooper*
 BLooperList::LooperForPort(port_id port)
 {
-	ReadLocker locker(fLock);
+	BAutolock locker(fLock);
+	AssertLocked();
 
 	BLooper* looper = NULL;
 	LooperDataIterator i
@@ -178,7 +192,8 @@ BLooperList::LooperForPort(port_id port)
 void
 BLooperList::InitAfterFork()
 {
-	rw_lock_init(&fLock, "BLooperList lock");
+	// We need to reinitialize the locker to get a new semaphore
+	new (&fLock) BLocker("BLooperList lock");
 	fData.clear();
 }
 

@@ -22,6 +22,7 @@ struct entry_ref;
 */
 struct node_ref {
 	node_ref();
+	node_ref(dev_t device, ino_t node);
 	node_ref(const node_ref &ref);
 
 	bool operator==(const node_ref &ref) const;
@@ -29,6 +30,13 @@ struct node_ref {
 	node_ref& operator=(const node_ref &ref);
 
 	bool operator<(const node_ref &ref) const;
+
+	dev_t dev() { return device; }
+	dev_t ino() { return node; }
+
+	// Host build has no vref layer: virtual identity == the plain fields.
+	dev_t vdevice() const { return device; }
+	ino_t vnode() const { return node; }
 
 	dev_t device;
 	ino_t node;

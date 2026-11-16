@@ -86,7 +86,6 @@ static const char* const __kdebug_level_marker_reference
 		}																	\
 	} while (0)
 
-#ifdef __VOS__
 // headers/os/support/Debug.h may have defined these already; keep its
 // no-op forms rather than warning about the redefinition.
 #if KDEBUG
@@ -106,17 +105,6 @@ static const char* const __kdebug_level_marker_reference
 #	endif
 #	define ASSERT_UNREACHABLE()				__builtin_unreachable()
 #endif
-#else	/* !__VOS__ */
-#if KDEBUG
-#	define ASSERT(x)						ASSERT_ALWAYS(x)
-#	define ASSERT_PRINT(x, format, args...)	ASSERT_ALWAYS_PRINT(x, format, args)
-#	define ASSERT_UNREACHABLE()				panic("ASSERT UNREACHABLE (%s:%d)", __FILE__, __LINE__)
-#else
-#	define ASSERT(x)						do { } while(0)
-#	define ASSERT_PRINT(x, format, args...)	do { } while(0)
-#	define ASSERT_UNREACHABLE()				__builtin_unreachable()
-#endif
-#endif	/* __VOS__ */
 
 #if __GNUC__ >= 5 && !defined(__cplusplus)
 #	define STATIC_ASSERT(x) _Static_assert(x, "static assert failed!")
@@ -279,7 +267,6 @@ extern bool debug_is_debugged_team(team_id teamID);
 extern struct arch_debug_registers* debug_get_debug_registers(int32 cpu);
 
 extern status_t _user_kernel_debugger(const char *message);
-extern void _user_register_syslog_daemon(port_id port);
 extern void	_user_debug_output(const char *userString);
 
 #ifdef __cplusplus

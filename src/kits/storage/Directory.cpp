@@ -1,4 +1,5 @@
 /*
+ * Copyright 2026, Dario Casalinuovo. All rights reserved.
  * Copyright 2002-2009, Haiku Inc.
  * Distributed under the terms of the MIT License.
  *
@@ -12,6 +13,7 @@
 #include "storage_support.h"
 
 #include <fcntl.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include <compat/sys/stat.h>
@@ -23,20 +25,43 @@
 #include <Path.h>
 #include <SymLink.h>
 
+#include <sys/stat.h>
 #include <syscalls.h>
 #include <umask.h>
 
 
+// Linux's open() doesn't enforce O_DIRECTORY here; fstat to match
+// Haiku's _kern_open_dir_entry_ref semantics.
+static status_t
+_validate_directory_fd(int fd)
+{
+	struct stat st;
+	if (fstat(fd, &st) != 0)
+		return B_FILE_ERROR;
+	if (!S_ISDIR(st.st_mode))
+		return B_NOT_A_DIRECTORY;
+	return B_OK;
+}
+
+
 BDirectory::BDirectory()
 	:
-	fDirFd(-1)
+	fDentLastOffset(0),
+	fDirFd(-1),
+	fDentBuffer(NULL),
+	fDentBytes(0),
+	fDentPos(0)
 {
 }
 
 
 BDirectory::BDirectory(const BDirectory& dir)
 	:
-	fDirFd(-1)
+	fDentLastOffset(0),
+	fDirFd(-1),
+	fDentBuffer(NULL),
+	fDentBytes(0),
+	fDentPos(0)
 {
 	*this = dir;
 }
@@ -44,7 +69,11 @@ BDirectory::BDirectory(const BDirectory& dir)
 
 BDirectory::BDirectory(const entry_ref* ref)
 	:
-	fDirFd(-1)
+	fDentLastOffset(0),
+	fDirFd(-1),
+	fDentBuffer(NULL),
+	fDentBytes(0),
+	fDentPos(0)
 {
 	SetTo(ref);
 }
@@ -52,7 +81,11 @@ BDirectory::BDirectory(const entry_ref* ref)
 
 BDirectory::BDirectory(const node_ref* nref)
 	:
-	fDirFd(-1)
+	fDentLastOffset(0),
+	fDirFd(-1),
+	fDentBuffer(NULL),
+	fDentBytes(0),
+	fDentPos(0)
 {
 	SetTo(nref);
 }
@@ -60,7 +93,11 @@ BDirectory::BDirectory(const node_ref* nref)
 
 BDirectory::BDirectory(const BEntry* entry)
 	:
-	fDirFd(-1)
+	fDentLastOffset(0),
+	fDirFd(-1),
+	fDentBuffer(NULL),
+	fDentBytes(0),
+	fDentPos(0)
 {
 	SetTo(entry);
 }
@@ -68,7 +105,11 @@ BDirectory::BDirectory(const BEntry* entry)
 
 BDirectory::BDirectory(const char* path)
 	:
-	fDirFd(-1)
+	fDentLastOffset(0),
+	fDirFd(-1),
+	fDentBuffer(NULL),
+	fDentBytes(0),
+	fDentPos(0)
 {
 	SetTo(path);
 }
@@ -76,7 +117,11 @@ BDirectory::BDirectory(const char* path)
 
 BDirectory::BDirectory(const BDirectory* dir, const char* path)
 	:
-	fDirFd(-1)
+	fDentLastOffset(0),
+	fDirFd(-1),
+	fDentBuffer(NULL),
+	fDentBytes(0),
+	fDentPos(0)
 {
 	SetTo(dir, path);
 }
@@ -101,15 +146,21 @@ BDirectory::SetTo(const entry_ref* ref)
 	if (error != B_OK)
 		return error;
 
-	// open dir
-	fDirFd = _kern_open_dir_entry_ref(ref->device, ref->directory, ref->name);
+	// reuse the fd _SetTo already opened — dup so fFd and fDirFd are independent
+	fDirFd = _kern_dup(fFd);
 	if (fDirFd < 0) {
-		status_t error = fDirFd;
+		Unset();
+		return (fCStatus = fDirFd);
+	}
+
+	error = _validate_directory_fd(fDirFd);
+	if (error != B_OK) {
 		Unset();
 		return (fCStatus = error);
 	}
 
-	// set close on exec flag on dir FD
+	fDirRef = node_ref(fDirFd);
+	fCStatus = B_OK;
 	fcntl(fDirFd, F_SETFD, FD_CLOEXEC);
 
 	return B_OK;
@@ -122,7 +173,7 @@ BDirectory::SetTo(const node_ref* nref)
 	Unset();
 	status_t error = (nref ? B_OK : B_BAD_VALUE);
 	if (error == B_OK) {
-		entry_ref ref(nref->device, nref->node, ".");
+		entry_ref ref(nref->vdevice(), nref->vnode(), ".");
 		error = SetTo(&ref);
 	}
 	set_status(error);
@@ -143,15 +194,19 @@ BDirectory::SetTo(const BEntry* entry)
 	if (error != B_OK)
 		return error;
 
-	// open dir
-	fDirFd = _kern_open_dir(entry->fDirFd, entry->fName);
+	fDirFd = _kern_dup(fFd);
 	if (fDirFd < 0) {
-		status_t error = fDirFd;
+		Unset();
+		return (fCStatus = fDirFd);
+	}
+
+	error = _validate_directory_fd(fDirFd);
+	if (error != B_OK) {
 		Unset();
 		return (fCStatus = error);
 	}
 
-	// set close on exec flag on dir FD
+	fDirRef = node_ref(fDirFd);
 	fcntl(fDirFd, F_SETFD, FD_CLOEXEC);
 
 	return B_OK;
@@ -166,15 +221,19 @@ BDirectory::SetTo(const char* path)
 	if (error != B_OK)
 		return error;
 
-	// open dir
-	fDirFd = _kern_open_dir(AT_FDCWD, path);
+	fDirFd = _kern_dup(fFd);
 	if (fDirFd < 0) {
-		status_t error = fDirFd;
+		Unset();
+		return (fCStatus = fDirFd);
+	}
+
+	error = _validate_directory_fd(fDirFd);
+	if (error != B_OK) {
 		Unset();
 		return (fCStatus = error);
 	}
 
-	// set close on exec flag on dir FD
+	fDirRef = node_ref(fDirFd);
 	fcntl(fDirFd, F_SETFD, FD_CLOEXEC);
 
 	return B_OK;
@@ -200,20 +259,22 @@ BDirectory::SetTo(const BDirectory* dir, const char* path)
 	if (error != B_OK)
 		return error;
 
-	// open dir
-	fDirFd = _kern_open_dir(dirFD, path);
+	if (dir == this)
+		_kern_close(dirFD);
+
+	fDirFd = _kern_dup(fFd);
 	if (fDirFd < 0) {
-		status_t error = fDirFd;
+		Unset();
+		return (fCStatus = fDirFd);
+	}
+
+	error = _validate_directory_fd(fDirFd);
+	if (error != B_OK) {
 		Unset();
 		return (fCStatus = error);
 	}
 
-	if (dir == this) {
-		// cleanup after _SetTo()
-		_kern_close(dirFD);
-	}
-
-	// set close on exec flag on dir FD
+	fDirRef = node_ref(fDirFd);
 	fcntl(fDirFd, F_SETFD, FD_CLOEXEC);
 
 	return B_OK;
@@ -227,20 +288,43 @@ BDirectory::GetEntry(BEntry* entry) const
 		return B_BAD_VALUE;
 	if (InitCheck() != B_OK)
 		return B_NO_INIT;
-	return entry->SetTo(this, ".", false);
+
+	entry_ref ref(fDirRef, NULL);
+	return entry->SetTo(&ref);
+}
+
+
+status_t
+BDirectory::GetRef(entry_ref* ref) const
+{
+	if (!ref)
+		return B_BAD_VALUE;
+	if (InitCheck() != B_OK)
+		return B_NO_INIT;
+
+	char name[B_FILE_NAME_LENGTH];
+	int parentFd = _kern_open_parent_dir(fDirFd, name, sizeof(name));
+	if (parentFd < 0)
+		return parentFd;
+
+	node_ref parentRef(parentFd);
+	close(parentFd);
+
+	*ref = entry_ref(parentRef, name);
+	return B_OK;
 }
 
 
 bool
 BDirectory::IsRootDirectory() const
 {
-	// compare the directory's node ID with the ID of the root node of the FS
-	bool result = false;
 	node_ref ref;
+	if (GetNodeRef(&ref) != B_OK)
+		return false;
 	fs_info info;
-	if (GetNodeRef(&ref) == B_OK && fs_stat_dev(ref.device, &info) == 0)
-		result = (ref.node == info.root);
-	return result;
+	if (fs_stat_dev(ref.device(), &info) != 0)
+		return false;
+	return ref.node() == info.root;
 }
 
 
@@ -340,7 +424,8 @@ BDirectory::GetNextEntry(BEntry* entry, bool traverse)
 		entry->Unset();
 		return status;
 	}
-	return entry->SetTo(&ref, traverse);
+
+ 	return entry->SetTo(&ref, traverse);
 }
 
 
@@ -352,20 +437,34 @@ BDirectory::GetNextRef(entry_ref* ref)
 	if (InitCheck() != B_OK)
 		return B_FILE_ERROR;
 
-	BPrivate::Storage::LongDirEntry longEntry;
-	struct dirent* entry = longEntry.dirent();
-	bool next = true;
-	while (next) {
-		if (GetNextDirents(entry, sizeof(longEntry), 1) != 1)
-			return B_ENTRY_NOT_FOUND;
+	static const size_t kDentBufSize = 8192;
 
-		next = (!strcmp(entry->d_name, ".")
-			|| !strcmp(entry->d_name, ".."));
+	if (fDentBuffer == NULL) {
+		fDentBuffer = (char*)malloc(kDentBufSize);
+		if (fDentBuffer == NULL)
+			return B_NO_MEMORY;
 	}
 
-	ref->device = entry->d_pdev;
-	ref->directory = entry->d_pino;
-	return ref->set_name(entry->d_name);
+	for (;;) {
+		if (fDentPos >= (size_t)fDentBytes) {
+			fDentBytes = _kern_read_dents(fDirFd, fDentBuffer, kDentBufSize);
+			if (fDentBytes < 0)
+				return (status_t)fDentBytes;
+			if (fDentBytes == 0)
+				return B_ENTRY_NOT_FOUND;
+			fDentPos = 0;
+		}
+
+		linux_dirent64* entry = (linux_dirent64*)(fDentBuffer + fDentPos);
+		fDentPos += entry->d_reclen;
+		fDentLastOffset = entry->d_off;
+
+		if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0)
+			continue;
+
+		*ref = entry_ref(fDirRef, entry->d_name);
+		return B_OK;
+	}
 }
 
 
@@ -376,6 +475,11 @@ BDirectory::GetNextDirents(dirent* buf, size_t bufSize, int32 count)
 		return B_BAD_VALUE;
 	if (InitCheck() != B_OK)
 		return B_FILE_ERROR;
+	if (fDentPos < (size_t)fDentBytes) {
+		_kern_seek(fDirFd, fDentLastOffset, SEEK_SET);
+		fDentBytes = 0;
+		fDentPos = 0;
+	}
 	return _kern_read_dir(fDirFd, buf, bufSize, count);
 }
 
@@ -385,6 +489,8 @@ BDirectory::Rewind()
 {
 	if (InitCheck() != B_OK)
 		return B_FILE_ERROR;
+	fDentBytes = 0;
+	fDentPos = 0;
 	return _kern_rewind_dir(fDirFd);
 }
 
@@ -536,7 +642,12 @@ BDirectory::close_fd()
 	if (fDirFd >= 0) {
 		_kern_close(fDirFd);
 		fDirFd = -1;
+		fDirRef = node_ref();
 	}
+	free(fDentBuffer);
+	fDentBuffer = NULL;
+	fDentBytes = 0;
+	fDentPos = 0;
 	BNode::close_fd();
 }
 
@@ -606,9 +717,35 @@ create_directory(const char* path, mode_t mode)
 }
 
 
+#ifdef __VOS__
+status_t
+BDirectory::GetStatFor(const char* path, struct stat* st) const
+{
+	return _GetStatFor(path, st);
+}
+
+
+status_t
+BDirectory::GetStatXFor(const char* path, struct statx* stx) const
+{
+	if (stx == NULL)
+		return B_BAD_VALUE;
+	if (InitCheck() != B_OK)
+		return B_NO_INIT;
+	if (path != NULL) {
+		if (path[0] == '\0')
+			return B_ENTRY_NOT_FOUND;
+		return _kern_read_statx(fDirFd, path, false,
+			STATX_BASIC_STATS | STATX_BTIME, stx);
+	}
+	return GetStatX(stx);
+}
+#endif
+
+
 // #pragma mark - symbol versions
 
-
+#ifndef __VOS__
 #ifdef HAIKU_TARGET_PLATFORM_LIBBE_TEST
 #	if __GNUC__ == 2	// gcc 2
 
@@ -644,3 +781,4 @@ create_directory(const char* path, mode_t mode)
 
 #	endif	// gcc 4
 #endif	// !HAIKU_TARGET_PLATFORM_LIBBE_TEST
+#endif

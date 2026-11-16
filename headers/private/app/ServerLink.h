@@ -1,4 +1,5 @@
 /*
+ * Copyright 2026, Dario Casalinuovo. All rights reserved.
  * Copyright 2001-2007, Haiku.
  * Distributed under the terms of the MIT License.
  *
@@ -62,6 +63,11 @@ public:
 			status_t			AttachGradient(const BGradient& gradient);
 			status_t			AttachAffineTransform(const BAffineTransform& transform);
 
+			status_t			AttachVRefCap(const port_cap_in& cap);
+			status_t			AttachVRefCaps(const port_cap_in* caps,
+									size_t count);
+			bool				HasVRefCaps() const;
+
 			template <class Type>
 			status_t			Attach(const Type& data);
 
@@ -83,6 +89,11 @@ public:
 			status_t			ReadShape(BShape* shape);
 			status_t			ReadGradient(BGradient** _gradient);
 			status_t			ReadAffineTransform(BAffineTransform* transform);
+
+			void				SetReceiverCapAware(bool aware);
+			size_t				HasReceivedVRefCaps() const;
+			status_t			TakeVRefCaps(port_cap_out** outCaps,
+									size_t* outCount);
 
 			template <class Type>
 			status_t			Read(Type* data);
@@ -200,6 +211,27 @@ ServerLink::AttachAffineTransform(const BAffineTransform& transform)
 }
 
 
+inline status_t
+ServerLink::AttachVRefCap(const port_cap_in& cap)
+{
+	return fSender->AttachVRefCap(cap);
+}
+
+
+inline status_t
+ServerLink::AttachVRefCaps(const port_cap_in* caps, size_t count)
+{
+	return fSender->AttachVRefCaps(caps, count);
+}
+
+
+inline bool
+ServerLink::HasVRefCaps() const
+{
+	return fSender->HasVRefCaps();
+}
+
+
 template<class Type> status_t
 ServerLink::Attach(const Type& data)
 {
@@ -291,6 +323,27 @@ inline status_t
 ServerLink::ReadAffineTransform(BAffineTransform* transform)
 {
 	return fReceiver->ReadAffineTransform(transform);
+}
+
+
+inline void
+ServerLink::SetReceiverCapAware(bool aware)
+{
+	fReceiver->SetCapAware(aware);
+}
+
+
+inline size_t
+ServerLink::HasReceivedVRefCaps() const
+{
+	return fReceiver->HasVRefCaps();
+}
+
+
+inline status_t
+ServerLink::TakeVRefCaps(port_cap_out** outCaps, size_t* outCount)
+{
+	return fReceiver->TakeVRefCaps(outCaps, outCount);
 }
 
 

@@ -19,6 +19,7 @@ get_user_thread()
 }
 
 
+#ifndef __VOS__
 static void inline
 defer_signals()
 {
@@ -36,6 +37,7 @@ undefer_signals()
 		is_computer_on();
 	}
 }
+#endif
 
 
 #endif	/* _LIBROOT_USER_THREAD_H */

@@ -1,5 +1,6 @@
 /*
  * Copyright 2001-2015 Haiku, Inc. All rights reserved
+ * Copyright 2026, Dario Casalinuovo.
  * Distributed under the terms of the MIT License.
  *
  * Authors:
@@ -7,6 +8,7 @@
  *		Axel Dörfler, axeld@pinc-software.de
  *		Erik Jaesler, erik@cgsoftware.com
  *		Ingo Weinhold, bonefish@@users.sf.net
+ *		Dario Casalinuovo
  */
 
 
@@ -32,7 +34,9 @@
 #include <DirectMessageTarget.h>
 #include <LooperList.h>
 #include <MessagePrivate.h>
+#include <VRefCache.h>
 #include <TokenSpace.h>
+#include <UserSemaphore.h>
 
 
 // debugging
@@ -50,6 +54,24 @@ using BPrivate::gLooperList;
 using BPrivate::BLooperList;
 
 port_id _get_looper_port_(const BLooper* looper);
+
+// The lock outlives the looper while a thread still waits on it.
+struct looper_lock {
+	user_sem	sem;
+	int32		refs;
+};
+
+static_assert(sizeof(BLooper) == 240 || sizeof(void*) != 8,
+	"BLooper layout is fixed");
+
+
+static void
+_PutLock(looper_lock* lock)
+{
+	if (atomic_add(&lock->refs, -1) == 1)
+		delete lock;
+}
+
 
 enum {
 	BLOOPER_PROCESS_INTERNALLY = 0,
@@ -112,7 +134,9 @@ BLooper::~BLooper()
 			"once it is running.");
 	}
 
-	Lock();
+	// Lock() can fail during process shutdown (e.g. when gLooperList is already
+	// destroyed). Guard all AssertLocked() callers against this case.
+	bool locked = Lock();
 
 	// In case the looper thread calls Quit() fLastMessage is not deleted.
 	if (fLastMessage) {
@@ -138,17 +162,19 @@ BLooper::~BLooper()
 		do {
 			delete ReadMessageFromPort(0);
 				// msg will automagically post generic reply
-		} while (IsMessageWaiting());
+		} while (locked && IsMessageWaiting());
 
 		delete_port(fMsgPort);
 	}
 	fDirectTarget->Release();
 
 	// Clean up our filters
-	SetCommonFilterList(NULL);
+	if (locked)
+		SetCommonFilterList(NULL);
 
 	AutoLocker<BLooperList> ListLock(gLooperList);
-	RemoveHandler(this);
+	if (locked)
+		RemoveHandler(this);
 
 	// Remove all the "child" handlers
 	int32 count = fHandlers.CountItems();
@@ -159,9 +185,15 @@ BLooper::~BLooper()
 	}
 	fHandlers.MakeEmpty();
 
-	Unlock();
+	if (locked)
+		Unlock();
 	gLooperList.RemoveLooper(this);
-	delete_sem(fLockSem);
+	if (fLock != NULL) {
+		looper_lock* lock = fLock;
+		fLock = NULL;
+		user_sem_delete(&lock->sem);
+		_PutLock(lock);
+	}
 }
 
 
@@ -608,9 +640,11 @@ PRINT(("  fAtomicCount now: %ld\n", fAtomicCount));
 
 		// Check if anyone is waiting for a lock
 		// and release if it's the case
-		if (atomicCount > 1)
+		if (atomicCount > 1 && fLock != NULL)
+#else
+		if (fLock != NULL)
 #endif
-			release_sem(fLockSem);
+			user_sem_release(&fLock->sem);
 	}
 PRINT(("BLooper::Unlock() done\n"));
 }
@@ -682,7 +716,7 @@ BLooper::CountLockRequests() const
 sem_id
 BLooper::Sem() const
 {
-	return fLockSem;
+	return B_ERROR;
 }
 
 
@@ -924,7 +958,7 @@ BLooper::_Lock(BLooper* looper, port_id port, bigtime_t timeout)
 
 	thread_id currentThread = find_thread(NULL);
 	int32 oldCount;
-	sem_id sem;
+	looper_lock* lock;
 
 	{
 		AutoLocker<BLooperList> ListLock(gLooperList);
@@ -951,25 +985,29 @@ BLooper::_Lock(BLooper* looper, port_id port, bigtime_t timeout)
 			return B_OK;
 		}
 
-		// Cache the semaphore, so that we can safely access it after having
-		// unlocked the looper list
-		sem = looper->fLockSem;
-		if (sem < 0) {
+		// Take a reference on the lock, so that we can safely access it
+		// after having unlocked the looper list
+		lock = looper->fLock;
+		if (lock == NULL) {
 			PRINT(("BLooper::_Lock() done 6\n"));
 			return B_BAD_VALUE;
 		}
+		atomic_add(&lock->refs, 1);
 
 		// Bump the requested lock count (using fAtomicCount for this)
 		oldCount = atomic_add(&looper->fAtomicCount, 1);
 	}
 
-	return _LockComplete(looper, oldCount, currentThread, sem, timeout);
+	status_t status = _LockComplete(looper, oldCount, currentThread, lock,
+		timeout);
+	_PutLock(lock);
+	return status;
 }
 
 
 status_t
 BLooper::_LockComplete(BLooper* looper, int32 oldCount, thread_id thread,
-	sem_id sem, bigtime_t timeout)
+	looper_lock* lock, bigtime_t timeout)
 {
 	status_t err = B_OK;
 
@@ -977,7 +1015,7 @@ BLooper::_LockComplete(BLooper* looper, int32 oldCount, thread_id thread,
 	if (oldCount > 0) {
 #endif
 		do {
-			err = acquire_sem_etc(sem, 1, B_RELATIVE_TIMEOUT, timeout);
+			err = user_sem_acquire(&lock->sem, timeout);
 		} while (err == B_INTERRUPTED);
 #if DEBUG < 1
 	}
@@ -1013,11 +1051,16 @@ BLooper::_InitData(const char* name, int32 priority, port_id port,
 	if (name == NULL)
 		name = "anonymous looper";
 
+	fLockSem = B_ERROR;
+	fLock = new(std::nothrow) looper_lock;
+	if (fLock != NULL) {
+		fLock->refs = 1;
 #if DEBUG
-	fLockSem = create_sem(1, name);
+		user_sem_init(&fLock->sem, 1);
 #else
-	fLockSem = create_sem(0, name);
+		user_sem_init(&fLock->sem, 0);
 #endif
+	}
 
 	if (portCapacity <= 0)
 		portCapacity = B_LOOPER_PORT_DEFAULT_CAPACITY;
@@ -1082,57 +1125,108 @@ BLooper::_task0_(void* arg)
 }
 
 
-void*
-BLooper::ReadRawFromPort(int32* msgCode, bigtime_t timeout)
-{
-	PRINT(("BLooper::ReadRawFromPort()\n"));
-	uint8* buffer = NULL;
-	ssize_t bufferSize;
-
-	do {
-		bufferSize = port_buffer_size_etc(fMsgPort, B_RELATIVE_TIMEOUT, timeout);
-	} while (bufferSize == B_INTERRUPTED);
-
-	if (bufferSize < B_OK) {
-		PRINT(("BLooper::ReadRawFromPort(): failed: %ld\n", bufferSize));
-		return NULL;
-	}
-
-	if (bufferSize > 0)
-		buffer = (uint8*)malloc(bufferSize);
-
-	// we don't want to wait again here, since that can only mean
-	// that someone else has read our message and our bufferSize
-	// is now probably wrong
-	PRINT(("read_port()...\n"));
-	bufferSize = read_port_etc(fMsgPort, msgCode, buffer, bufferSize,
-		B_RELATIVE_TIMEOUT, 0);
-
-	if (bufferSize < B_OK) {
-		free(buffer);
-		return NULL;
-	}
-
-	PRINT(("BLooper::ReadRawFromPort() read: %.4s, %p (%d bytes)\n",
-		(char*)msgCode, buffer, bufferSize));
-
-	return buffer;
-}
-
-
 BMessage*
 BLooper::ReadMessageFromPort(bigtime_t timeout)
 {
 	PRINT(("BLooper::ReadMessageFromPort()\n"));
-	int32 msgCode;
-	BMessage* message = NULL;
 
-	void* buffer = ReadRawFromPort(&msgCode, timeout);
-	if (buffer == NULL)
+	ssize_t bufferSize;
+	do {
+		bufferSize = port_buffer_size_etc(fMsgPort, B_RELATIVE_TIMEOUT,
+			timeout);
+	} while (bufferSize == B_INTERRUPTED);
+	if (bufferSize < B_OK) {
+		PRINT(("BLooper::ReadMessageFromPort(): port_buffer_size_etc "
+			"failed: %ld\n", bufferSize));
 		return NULL;
+	}
 
-	message = ConvertToMessage(buffer, msgCode);
+	void* buffer = NULL;
+	if (bufferSize > 0)
+		buffer = malloc(bufferSize);
+
+	port_cap_out stackCaps[8];
+	port_cap_out* caps = stackCaps;
+	size_t capsCapacity = sizeof(stackCaps) / sizeof(stackCaps[0]);
+	size_t actualBytes = 0;
+	size_t actualCaps = 0;
+	int32 msgCode;
+	ssize_t readResult;
+	port_message_info senderInfo;
+	memset(&senderInfo, 0, sizeof(senderInfo));
+	senderInfo.sender = (uid_t)-1;
+	for (;;) {
+		actualBytes = bufferSize;
+		actualCaps = capsCapacity;
+		readResult = read_port_with_caps_etc(fMsgPort, &msgCode, buffer,
+			&actualBytes, caps, &actualCaps, B_RELATIVE_TIMEOUT, 0,
+			&senderInfo);
+		if (readResult == B_INTERRUPTED)
+			continue;
+		if (readResult != B_BUFFER_OVERFLOW)
+			break;
+
+		if (actualCaps > capsCapacity) {
+			if (caps != stackCaps)
+				free(caps);
+			caps = (port_cap_out*)malloc(actualCaps * sizeof(port_cap_out));
+			if (caps == NULL) {
+				free(buffer);
+				return NULL;
+			}
+			capsCapacity = actualCaps;
+		}
+		if (actualBytes > (size_t)bufferSize) {
+			free(buffer);
+			buffer = malloc(actualBytes);
+			if (buffer == NULL) {
+				if (caps != stackCaps)
+					free(caps);
+				return NULL;
+			}
+			bufferSize = (ssize_t)actualBytes;
+		}
+	}
+
+	if (readResult < B_OK) {
+		free(buffer);
+		if (caps != stackCaps)
+			free(caps);
+		return NULL;
+	}
+
+	// Adopt the kernel-minted caps. Do NOT stamp CAPS_ADOPTED on the
+	// buffer — copies must run their own acquire pass; RegisterAdoptedTickets
+	// dedups by keeping the kernel-minted ticket.
+	std::vector<BPrivate::vref_ticket> adoptedTickets;
+	if (actualCaps > 0)
+		adoptedTickets.resize(actualCaps);
+	BPrivate::VRefCache::AdoptCaps(caps, actualCaps,
+		actualCaps > 0 ? adoptedTickets.data() : NULL);
+
+	BMessage* message = ConvertToMessage(buffer, msgCode);
+	if (message != NULL)
+		BMessage::Private(message).SetSenderUid(senderInfo.sender);
+
+	if (actualCaps > 0) {
+		if (message != NULL) {
+			BMessage::Private::RegisterAdoptedTickets(message,
+				caps, actualCaps, adoptedTickets.data());
+		} else {
+			for (size_t i = 0; i < actualCaps; i++) {
+				if (caps[i].kind == B_PORT_CAP_VREF
+						&& adoptedTickets[i]
+							!= BPrivate::B_INVALID_VREF_TICKET) {
+					BPrivate::VRefCache::Release(caps[i].vref_id_,
+						adoptedTickets[i]);
+				}
+			}
+		}
+	}
+
 	free(buffer);
+	if (caps != stackCaps)
+		free(caps);
 
 	PRINT(("BLooper::ReadMessageFromPort() done: %p\n", message));
 	return message;
@@ -1173,13 +1267,9 @@ BLooper::task_looper()
 	// loop: As long as we are not terminating.
 	while (!fTerminating) {
 		PRINT(("LOOPER: outer loop\n"));
-		// TODO: timeout determination algo
-		//	Read from message port (how do we determine what the timeout is?)
-		PRINT(("LOOPER: MessageFromPort()...\n"));
 		BMessage* msg = MessageFromPort();
 		PRINT(("LOOPER: ...done\n"));
 
-		//	Did we get a message?
 		if (msg)
 			_AddMessagePriv(msg);
 
@@ -1482,9 +1572,11 @@ BLooper::UnlockFully()
 #if DEBUG < 1
 	// There is now one less thread holding a lock on this looper
 	int32 atomicCount = atomic_add(&fAtomicCount, -1);
-	if (atomicCount > 1)
+	if (atomicCount > 1 && fLock != NULL)
+#else
+	if (fLock != NULL)
 #endif
-		release_sem(fLockSem);
+		user_sem_release(&fLock->sem);
 }
 
 

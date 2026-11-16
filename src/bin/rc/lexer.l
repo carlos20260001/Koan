@@ -65,6 +65,7 @@ static void close_include();
 %}
 
 %option noyywrap
+%option nounput
 %option yylineno
 
 LETTER      [a-zA-Z]
@@ -170,6 +171,7 @@ $\"                      BEGIN(RAWDATA); resetbuf();
 <COMMENT><<EOF>>         LEXERROR("forgot to close /*..*/ comment")
 
 "//"[^\n]*               /* eat single-line comment */
+"#"[ \t#][^\n]*        /* eat legacy hash comment */
 {WSPACE}+                /* eat whitespace */
 
 \#include[ \t]+\"        BEGIN(INCLUDE);

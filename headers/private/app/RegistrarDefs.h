@@ -24,11 +24,7 @@ extern const char* kRAppLooperPortName;
 
 
 #ifndef HAIKU_TARGET_PLATFORM_LIBBE_TEST
-#ifndef __VOS__
 #	define B_REGISTRAR_SIGNATURE "application/x-vnd.vos-registrar"
-#else /* __VOS__ */
-#	define B_REGISTRAR_SIGNATURE "application/x-vnd.vos-registrar"
-#endif /* __VOS__ */
 #	define B_REGISTRAR_PORT_NAME "system:roster"
 #else
 #	define B_REGISTRAR_SIGNATURE "application/x-vnd.test-registrar"
@@ -51,10 +47,8 @@ enum {
 	B_REG_GET_DISK_DEVICE_MESSENGER			= 'rgdm',
 	B_REG_SHUT_DOWN							= 'rgsh',
 	B_REG_IS_SHUT_DOWN_IN_PROGRESS			= 'rgsi',
-#ifdef __VOS__
 	B_REG_REQUEST_SLEEP						= 'rgsl',
 	B_REG_IS_SLEEP_AVAILABLE				= 'rgsa',
-#endif /* __VOS__ */
 	B_REG_QUIT_USER_APPS					= 'rgqu',
 		// the first phase of a shutdown only: the user's applications quit
 		// (each may ask to save its work, or refuse), the sender keeps
@@ -168,13 +162,6 @@ enum {
   B_REG_DEVICE_UPDATE_DEVICE_CHANGED,
 };
 
-#ifndef __VOS__
-// type constants
-enum {
-	B_REG_APP_INFO_TYPE				= 'rgai',	// app_info
-};
-
-#endif /* ! __VOS__ */
 // error constants
 #define B_REGISTRAR_ERROR_BASE		(B_ERRORS_END + 1)
 
@@ -190,23 +177,6 @@ enum {
 	B_REG_DEFAULT_APP_FLAGS			= B_MULTIPLE_LAUNCH,
 	B_REG_APP_LOOPER_PORT_CAPACITY	= 100,
 };
-#ifndef __VOS__
-
-// structs
-
-// a flat app_info -- to be found in B_REG_APP_INFO_TYPE message fields
-struct flat_app_info {
-	thread_id	thread;
-	team_id		team;
-	port_id		port;
-	uint32		flags;
-	dev_t		ref_device;
-	ino_t		ref_directory;
-	char		signature[B_MIME_TYPE_LENGTH];
-	char		ref_name[B_FILE_NAME_LENGTH + 1];
-} _PACKED;
-
-#endif /* ! __VOS__ */
 
 }	// namespace BPrivate
 

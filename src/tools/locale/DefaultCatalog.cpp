@@ -1,4 +1,5 @@
 /*
+ * Copyright 2026, Dario Casalinuovo. All rights reserved.
  * Copyright 2003-2009, Haiku.
  * Distributed under the terms of the MIT License.
  *
@@ -225,6 +226,7 @@ DefaultCatalog::WriteToResource(const entry_ref &appOrAddOnRef)
 {
 	return B_NOT_SUPPORTED;
 }
+
 
 
 /*!	Writes mimetype, language-name and signature of catalog into the

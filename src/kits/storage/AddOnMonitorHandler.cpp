@@ -22,6 +22,7 @@
 #include <driver_settings.h>
 #include <safemode_defs.h>
 #include <syscalls.h>
+#include <sys/stat.h>
 
 
 #ifndef ADD_ON_STABLE_SECONDS
@@ -64,6 +65,7 @@ AddOnMonitorHandler::MessageReceived(BMessage* msg)
 status_t
 AddOnMonitorHandler::AddDirectory(const node_ref* nref, bool sync)
 {
+	printf("add directory\n");
 	// Keep the looper thread locked, since this method is likely to be called
 	// in a thread other than the looper thread. Otherwise we may access the
 	// lists concurrently with the looper thread, when node monitor
@@ -80,10 +82,14 @@ AddOnMonitorHandler::AddDirectory(const node_ref* nref, bool sync)
 			return B_OK;
 	}
 
+	printf("load dir\n");
+
 	BDirectory directory(nref);
 	status_t status = directory.InitCheck();
 	if (status != B_OK)
 		return status;
+
+	printf("continue dir\n");
 
 	status = watch_node(nref, B_WATCH_DIRECTORY, this);
 	if (status != B_OK)
@@ -96,13 +102,15 @@ AddOnMonitorHandler::AddDirectory(const node_ref* nref, bool sync)
 	add_on_entry_info entryInfo;
 	entryInfo.dir_nref = *nref;
 
+	printf("continue entries\n");
 	BEntry entry;
 	while (directory.GetNextEntry(&entry) == B_OK) {
 		if (entry.GetName(entryInfo.name) != B_OK
 			|| entry.GetNodeRef(&entryInfo.nref) != B_OK) {
 			continue;
+			printf("err entry\n");
 		}
-
+		printf("ok entry\n");
 		fPendingEntries.push_back(entryInfo);
 	}
 
@@ -152,6 +160,7 @@ AddOnMonitorHandler::AddAddOnDirectories(const char* leafPath)
 		BDirectory directory;
 		node_ref nodeRef;
 		BPath path;
+		printf("try to add dir\n");
 		if (find_directory(addOnDirectories[i], &path) == B_OK
 			&& path.Append(leafPath) == B_OK
 			&& directory.SetTo(path.Path()) == B_OK
@@ -512,6 +521,7 @@ AddOnMonitorHandler::_HandlePendingEntries()
 	BDirectory directory;
 	EntryList::iterator iter = fPendingEntries.begin();
 	while (iter != fPendingEntries.end()) {
+		printf("process entry\n");
 		add_on_entry_info info = *iter;
 
 		// Initialize directory, or re-use from previous iteration, if
@@ -527,8 +537,8 @@ AddOnMonitorHandler::_HandlePendingEntries()
 			dirNodeRef = info.dir_nref;
 		}
 
-		struct stat st;
-		if (directory.GetStatFor(info.name, &st) != B_OK) {
+		struct statx stx;
+		if (directory.GetStatXFor(info.name, &stx) != B_OK) {
 			// invalid file name, discard this pending entry
 			iter = fPendingEntries.erase(iter);
 			continue;
@@ -538,7 +548,7 @@ AddOnMonitorHandler::_HandlePendingEntries()
 		// from the future means the clock is not set (e.g. a machine without
 		// a battery backed clock), not an entry that is still being written,
 		// which would otherwise never be taken
-		time_t age = real_time_clock() - st.st_mtime;
+		time_t age = real_time_clock() - (time_t)stx.stx_mtime.tv_sec;
 		if (age >= 0 && age < ADD_ON_STABLE_SECONDS) {
 			// entry not stable, skip the entry for this pulse
 			iter++;

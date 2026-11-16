@@ -380,8 +380,7 @@ BAppFileInfo::SetSupportedTypes(const BMessage* types, bool updateMimeDB,
 	if (error == B_OK)
 		error = GetMetaMime(&mimeType);
 
-	if (error == B_OK || error == B_ENTRY_NOT_FOUND) {
-		error = B_OK;
+	if (error == B_OK) {
 		if (types) {
 			// check param -- supported types must be valid
 			const char* type;
@@ -673,7 +672,7 @@ BAppFileInfo::GetIconForType(const char* type, BBitmap* icon, icon_size size)
 		bytesRead, &allocatedBuffer);
 	if (error == B_OK) {
 		error = BIconUtils::GetVectorIcon((uint8*)allocatedBuffer,
-										  bytesRead, icon);
+			bytesRead, icon);
 		free(allocatedBuffer);
 		return error;
 	}

@@ -11,7 +11,6 @@
 
 using namespace std;
 
-static map<int, int> sToHaikuErrorMap;
 static map<int, int> sToHostErrorMap;
 static bool sErrorMapsInitialized = false;
 
@@ -23,7 +22,6 @@ init_error_map()
 		return;
 
 	#define ADD_ERROR(error) \
-		sToHaikuErrorMap[error] = HAIKU_##error; \
 		sToHostErrorMap[HAIKU_##error] = error;
 
 	ADD_ERROR(E2BIG);
@@ -163,19 +161,6 @@ to_host_error(int error)
 	return (it != sToHostErrorMap.end() ? it->second : error);
 }
 
-// to_haiku_error
-static int
-to_haiku_error(int error)
-{
-	init_error_map();
-
-	map<int, int>::iterator it = sToHaikuErrorMap.find(error);
-	if (it != sToHaikuErrorMap.end())
-		return it->second;
-
-	return (error > 0 ? -error : error);
-}
-
 // _haiku_build_strerror
 char *
 _haiku_build_strerror(int errnum)
@@ -183,38 +168,16 @@ _haiku_build_strerror(int errnum)
 	return strerror(to_host_error(errnum));
 }
 
+// _haiku_build_errno
+int *
+_haiku_build_errno()
+{
+	return NULL;
+}
+
 // _haiku_to_host_error
 int
 _haiku_to_host_error(int error)
 {
 	return to_host_error(error);
-}
-
-
-// #pragma mark - errno handling
-
-
-BuildErrnoWrapper build_errno;
-static int sPreviousErrno = 0;
-static int sLocalErrno = 0;
-
-
-const int
-_haiku_build_errno()
-{
-	int currentErrno = errno;
-	if (currentErrno != sPreviousErrno) {
-		sPreviousErrno = currentErrno;
-		sLocalErrno = to_haiku_error(currentErrno);
-	}
-
-	return sLocalErrno;
-}
-
-
-void
-_haiku_build_set_errno(int error)
-{
-	sLocalErrno = error;
-	errno = sPreviousErrno = to_host_error(error);
 }

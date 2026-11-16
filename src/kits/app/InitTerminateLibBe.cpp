@@ -11,6 +11,9 @@
 
 #include <stdio.h>
 #include <stdlib.h>
+#ifdef __VOS__
+#include <pthread.h>
+#endif
 
 #include <Application.h>
 #include <AppMisc.h>
@@ -29,6 +32,9 @@ extern void __initialize_locale_kit();
 #define OUT	printf
 
 
+// TODO maybe it would be good to just centralize libraries init
+// so we initialize from a single constructor (maybe with a subscription
+// mechanism. E.g. see locale kit.
 static void
 initialize_forked_child()
 {
@@ -46,7 +52,10 @@ initialize_forked_child()
 }
 
 
-extern "C" void
+// Priority <100 is reserved: libroot must init before user constructors.
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wprio-ctor-dtor"
+extern "C" void __attribute__ ((constructor(99)))
 initialize_before(image_id)
 {
 	DBG(OUT("initialize_before()\n"));
@@ -54,13 +63,20 @@ initialize_before(image_id)
 	BMessage::Private::StaticInit();
 	BRoster::Private::InitBeRoster();
 
+#ifdef __VOS__
+	pthread_atfork(NULL, NULL, initialize_forked_child);
+#else
 	atfork(initialize_forked_child);
+#endif	
 
 	DBG(OUT("initialize_before() done\n"));
 }
 
 
-extern "C" void
+#pragma GCC diagnostic pop
+
+
+extern "C" void __attribute__ ((constructor(200)))
 initialize_after(image_id)
 {
 	DBG(OUT("initialize_after()\n"));
@@ -71,7 +87,7 @@ initialize_after(image_id)
 }
 
 
-extern "C" void
+extern "C" void __attribute__ ((destructor))
 terminate_after(image_id)
 {
 	DBG(OUT("terminate_after()\n"));

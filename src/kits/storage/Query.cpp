@@ -22,6 +22,7 @@
 
 #include <MessengerPrivate.h>
 #include <syscalls.h>
+#include <query_private.h>
 
 #include "QueryPredicate.h"
 #include "storage_support.h"
@@ -369,9 +370,12 @@ BQuery::GetNextRef(entry_ref* ref)
 			}
 		}
 		if (error == B_OK) {
+			*ref = entry_ref(fQueryFd, entry->d_name);
+			#ifndef __VOS__
 			ref->device = entry->d_pdev;
 			ref->directory = entry->d_pino;
 			error = ref->set_name(entry->d_name);
+			#endif
 		}
 	}
 	return error;
