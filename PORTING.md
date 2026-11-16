@@ -195,13 +195,60 @@ scroll phases), so this is a three-way merge, not a copy.
       external trees left as they are; no length-based prefix checks found;
       `libroot.so` still builds. No install migration (`vos-signature-migrate`
       not ported: no existing installs)
-- [ ] D1: delete the other Haiku-kernel-only trees — `src/system/boot`,
-      `src/system/runtime_loader`, `src/system/glue`, `src/system/ldscripts`,
-      `src/add-ons/kernel` (drivers), Haiku libroot sources under
-      `src/system/libroot/{os,posix/*}` not used by CMake; 66 Jamfiles/jam rules
-      still reference `src system kernel`
-- [ ] D2: drop the dead `#else // !__VOS__` Haiku branches in the keyboard and
-      mouse add-ons, and `movement_maker.*`, now that nothing builds them
+- [x] D1: Haiku-kernel-only trees deleted, each replaced by its Linux/VitruvianOS
+      equivalent — `d61de85d04`: `src/system/boot` (→ GRUB + bake images),
+      `runtime_loader` (→ glibc `ld.so`), `glue` + `ldscripts` (→ glibc crt,
+      toolchain link scripts), Haiku libroot sources (→ libroot2; only
+      VitruvianOS's 5 files remain under `src/system/libroot`),
+      `src/add-ons/kernel` (→ Linux + Nexus). **Kept untouched:**
+      `src/add-ons/kernel/drivers/graphics` (GPU drivers, ported Linux DRM pieces)
+      and `src/add-ons/accelerants`. Splash sources moved to
+      `src/system/boot_splash/` for M7
+- [x] D2: keyboard/mouse keep only the Linux path — `252ff7be13`; the 8 files and
+      `libroot/posix/user_group_common.cpp` are byte-identical to VitruvianOS
+      `4d8c5ed719`; `movement_maker.*` and its `touchpad_scroll_test` deleted
+- Known fallout (Jam only, nothing CMake builds): 73 userland files include
+  kernel add-on sources/headers (BFS tools, disk systems, network bits). They
+  are replaced when VitruvianOS's versions of those directories are ported.
+- Still open: the `#ifdef __VOS__` branches M4 added to shared headers
+  (`OS.h`, `Errors.h`, `SupportDefs.h`, ...) keep their Haiku halves. They can
+  be resolved the same way once nothing builds the Haiku side
+
+### M7 - air/OS boot splash on Linux (replaces Plymouth) — planned
+Port the original Haiku splash code, not a Plymouth theme. VitruvianOS
+images install no Plymouth: GRUB passes `quiet splash` and nothing draws
+until app_server starts. This milestone fills that gap.
+
+Sources (kept in `src/system/boot_splash/`, see its README): the boot loader's
+`video_splash.cpp` (decompress images, draw logo and empty icon row) and the
+kernel's `boot_splash.cpp` (light one icon per stage); headers in
+`headers/private/kernel/` (`boot_splash.h`, `boot/platform/generic/video_splash.h`,
+`video_blitter.h`); image headers from `src/tools/generate_boot_screen.cpp`.
+
+**Trademarks:** only the air/OS artwork (`data/artwork/boot_splash/airos_splash_*.png`,
+`headers/private/kernel/boot/images-airos.h`). The Haiku logo images
+(`splash_logo*`, `images-tm*.h`) are Haiku trademarks and must never ship.
+
+- [ ] `vos-splash`: a small static userspace program built from the two
+      sources. Replace the boot loader framebuffer and `kernel_args` with a DRM
+      dumb buffer (`/dev/dri/card0`, the same technique as app_server's
+      `linux/drm/modeset.c`) with fbdev (`/dev/fb0`) as fallback; keep the
+      blitter and zlib image decoding as they are
+- [ ] Stage control: `vos-splash --stage N` (or a FIFO the daemon reads) maps
+      Haiku's seven `BOOT_SPLASH_STAGE_*` to Linux boot points: initramfs
+      start, root mounted, `sysinit.target`, udev settled, `basic.target`,
+      registrar up, app_server about to take the display
+- [ ] initramfs-tools hook + `init-top` script so the logo shows before the
+      root mount; systemd units (`vos-splash-stage@.service`) for the later stages
+- [ ] Handoff: the splash drops DRM master and exits when app_server starts
+      (app_server's DRM backend must succeed in `drmSetMaster` right after);
+      no flicker to the text console in between; `quiet splash` only, the
+      verbose/recovery GRUB entries keep the text console
+- [ ] Packaging: install in the image through `build/profiles` + `bake`; CMake
+      target under `src/system/boot_splash/CMakeLists.txt`
+- [ ] Verify in QEMU (`docker/run-qemu.sh`, virtio-gpu DRM and `nomodeset`
+      fbdev) and on one real GPU; tests for the stage-to-icon mapping and the
+      image decoding on the host
 
 ### Not started (later milestones)
 - Kits (`libbe`) and `input_server` on CMake, needed before M5 can link
@@ -220,3 +267,4 @@ scroll phases), so this is a three-way merge, not a copy.
 | 2026-11-15 | | Integrated check on the merged tree (`vitruvian_build` container, Koan buildtools mounted): `vos-configure` "Configured correctly!", `ninja root` → `libroot.so` (620680 bytes), `ninja nexus` → `nexus-dkms_0.3.0+git0.unknown_all.deb` |
 | 2026-11-16 | `c96ff2222f` | M6: Haiku kernel and the replaced Jamfiles deleted; root + nexus still build |
 | 2026-11-16 | `4385f4ca1b` | Dispatcher reverted (`vos-configure` only); signatures renamed to `x-vnd.vos-*` |
+| 2026-11-16 | `252ff7be13` | D1: Haiku-kernel-only trees deleted (graphics drivers, accelerants kept); D2: Linux-only input add-ons; M7 splash planned |
