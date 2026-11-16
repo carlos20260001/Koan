@@ -1,4 +1,5 @@
 /*
+ * Copyright 2026, Dario Casalinuovo. All rights reserved.
  * Copyright 2002-2013 Haiku, Inc. All rights reserved.
  * Distributed under the terms of the MIT license.
  *
@@ -36,12 +37,15 @@
 #include <MenuItem.h>
 #include <MenuBar.h>
 #include <Menu.h>
+#include <Messenger.h>
+#include <MountServer.h>
 #include <Path.h>
 #include <Partition.h>
 #include <PartitioningInfo.h>
 #include <Roster.h>
 #include <Screen.h>
 #include <ScrollBar.h>
+#include <NodeMonitor.h>
 #include <Volume.h>
 #include <VolumeRoster.h>
 
@@ -52,9 +56,27 @@
 #include "ColumnListView.h"
 #include "CreateParametersPanel.h"
 #include "DiskView.h"
+#include "FeaturesWindow.h"
+#include "FlagsPanel.h"
 #include "InitParametersPanel.h"
 #include "PartitionList.h"
+#include "ProgressWindow.h"
+#include "RenamePanel.h"
+#include "ResizeMoveWindow.h"
 #include "Support.h"
+
+#include "DefragmentJob.h"
+#include "DiskDeviceJobQueue.h"
+#include "MoveJob.h"
+#include "PartitionCapabilities.h"
+#include "PartitionPlanBuilder.h"
+#include "PartitionReference.h"
+#include "RepairJob.h"
+#include "ResizeJob.h"
+#include "SetFlagsJob.h"
+#include "SetStringJob.h"
+#include "UninitializeJob.h"
+#include "WipeJob.h"
 
 
 #undef B_TRANSLATION_CONTEXT
@@ -68,6 +90,14 @@ enum {
 	MSG_FORMAT					= 'frmt',
 	MSG_CREATE					= 'crtp',
 	MSG_CHANGE					= 'chgp',
+	MSG_RESIZE_MOVE				= 'rszm',
+	MSG_SET_FLAGS				= 'sflg',
+	MSG_CHECK					= 'chck',
+	MSG_DEFRAG					= 'dfrg',
+	MSG_ERASE					= 'eras',
+	MSG_WIPE					= 'wipe',
+	MSG_RENAME					= 'renm',
+	MSG_RENAME_GPT				= 'rngp',
 	MSG_INITIALIZE				= 'init',
 	MSG_DELETE					= 'delt',
 	MSG_EJECT					= 'ejct',
@@ -79,6 +109,8 @@ enum {
 	MSG_SAVE					= 'save',
 	MSG_WRITE					= 'writ',
 	MSG_COMPLETE				= 'comp',
+	MSG_SHOW_FEATURES			= 'sftr',
+	MSG_MOVE_RECOVERY			= 'mvrc',
 
 	MSG_PARTITION_ROW_SELECTED	= 'prsl',
 };
@@ -94,7 +126,7 @@ public:
 		fSpaceIDMap(spaceIDMap)
 	{
 		fDiskCount = 0;
-		fSpaceIDMap.Clear();
+		// Deliberately not cleared; see _ScanDrives().
 		// start with an empty list
 		int32 rows = fPartitionList->CountRows();
 		for (int32 i = rows - 1; i >= 0; i--) {
@@ -127,6 +159,21 @@ private:
 		// add the partition itself
 		fPartitionList->AddPartition(partition);
 
+		if (getenv("VOS_DEBUG_MENUS") != NULL) {
+			BPath path;
+			partition->GetPath(&path);
+			fprintf(stderr, "[DriveSetup rows] %-12s id=%" B_PRIdDEV
+				" parentID=%" B_PRIdDEV " contentType=%s isDevice=%d "
+				"containsPS=%d containsFS=%d\n",
+				path.Path() ? path.Path() : "(no path)",
+				partition->ID(),
+				partition->Parent() ? partition->Parent()->ID() : (partition_id)-1,
+				partition->ContentType() ? partition->ContentType() : "(null)",
+				partition->IsDevice(),
+				partition->ContainsPartitioningSystem(),
+				partition->ContainsFileSystem());
+		}
+
 		// add any available space on it
 		BPartitioningInfo info;
 		status_t status = partition->GetPartitioningInfo(&info);
@@ -142,6 +189,11 @@ private:
 					continue;
 				//
 				partition_id id = fSpaceIDMap.SpaceIDFor(parentID, offset);
+				if (getenv("VOS_DEBUG_MENUS") != NULL) {
+					fprintf(stderr, "[DriveSetup rows]   space id=%" B_PRIdDEV
+						" parentID=%" B_PRIdDEV " offset=%" B_PRIdOFF
+						" size=%" B_PRIdOFF "\n", id, parentID, offset, size);
+				}
 				fPartitionList->AddSpace(parentID, id, offset, size);
 			}
 		}
@@ -151,31 +203,6 @@ private:
 	int32&				fDiskCount;
 	SpaceIDMap&			fSpaceIDMap;
 	BDiskDevice*		fLastPreparedDevice;
-};
-
-
-class MountAllVisitor : public BDiskDeviceVisitor {
-public:
-	MountAllVisitor()
-	{
-	}
-
-	virtual bool Visit(BDiskDevice* device)
-	{
-		if (device->ContainsFileSystem())
-			device->Mount();
-
-		return false; // Don't stop yet!
-	}
-
-	virtual bool Visit(BPartition* partition, int32 level)
-	{
-		partition->Mount();
-		return false; // Don't stop yet!
-	}
-
-private:
-	PartitionListView* fPartitionList;
 };
 
 
@@ -196,9 +223,10 @@ public:
 	{
 		return fModificationStatus;
 	}
-	status_t CommitModifications()
+	status_t CommitModifications(BMessage* outResult = NULL)
 	{
-		status_t status = fDisk->CommitModifications();
+		status_t status = fDisk->CommitModifications(true, BMessenger(),
+			true, outResult);
 		if (status == B_OK)
 			fModificationStatus = B_ERROR;
 
@@ -225,8 +253,8 @@ MainWindow::MainWindow()
 	fMenuBar = new BMenuBar("root menu");
 
 	// create all the menu items
-	fWipeMenuItem = new BMenuItem(B_TRANSLATE("Wipe (not implemented)"),
-		new BMessage(MSG_FORMAT));
+	fWipeMenuItem = new BMenuItem(B_TRANSLATE("Wipe" B_UTF8_ELLIPSIS),
+		new BMessage(MSG_WIPE));
 	fEjectMenuItem = new BMenuItem(B_TRANSLATE("Eject"),
 		new BMessage(MSG_EJECT), 'E');
 	fOpenDiskProbeMenuItem = new BMenuItem(B_TRANSLATE("Open with DiskProbe"),
@@ -243,6 +271,27 @@ MainWindow::MainWindow()
 	fChangeMenuItem = new BMenuItem(
 		B_TRANSLATE("Change parameters" B_UTF8_ELLIPSIS),
 		new BMessage(MSG_CHANGE));
+	fResizeMenuItem = new BMenuItem(
+		B_TRANSLATE("Resize/Move" B_UTF8_ELLIPSIS),
+		new BMessage(MSG_RESIZE_MOVE));
+	fFlagsMenuItem = new BMenuItem(
+		B_TRANSLATE("Flags" B_UTF8_ELLIPSIS),
+		new BMessage(MSG_SET_FLAGS));
+	fCheckMenuItem = new BMenuItem(
+		B_TRANSLATE("Check filesystem"),
+		new BMessage(MSG_CHECK));
+	fDefragMenuItem = new BMenuItem(
+		B_TRANSLATE("Defragment"),
+		new BMessage(MSG_DEFRAG));
+	fEraseMenuItem = new BMenuItem(
+		B_TRANSLATE("Erase filesystem"),
+		new BMessage(MSG_ERASE));
+	fRenameMenuItem = new BMenuItem(
+		B_TRANSLATE("Rename" B_UTF8_ELLIPSIS),
+		new BMessage(MSG_RENAME));
+	fRenameGptMenuItem = new BMenuItem(
+		B_TRANSLATE("Rename partition" B_UTF8_ELLIPSIS),
+		new BMessage(MSG_RENAME_GPT));
 	fDeleteMenuItem = new BMenuItem(B_TRANSLATE("Delete"),
 		new BMessage(MSG_DELETE), 'D');
 
@@ -266,10 +315,16 @@ MainWindow::MainWindow()
 		B_TRANSLATE("Write image" B_UTF8_ELLIPSIS),
 		new BMessage(MSG_WRITE));
 
+	fFeaturesMenuItem = new BMenuItem(
+		B_TRANSLATE("Filesystem features" B_UTF8_ELLIPSIS),
+		new BMessage(MSG_SHOW_FEATURES));
+	fMoveRecoveryMenuItem = new BMenuItem(
+		B_TRANSLATE("Partition move recovery" B_UTF8_ELLIPSIS),
+		new BMessage(MSG_MOVE_RECOVERY));
+
 	// Disk menu
 	fDiskMenu = new BMenu(B_TRANSLATE("Disk"));
 
-	// fDiskMenu->AddItem(fWipeMenuItem);
 	fDiskInitMenu = new BMenu(B_TRANSLATE("Initialize"));
 	fDiskMenu->AddItem(fDiskInitMenu);
 
@@ -289,6 +344,12 @@ MainWindow::MainWindow()
 	fPartitionMenu->AddItem(fFormatMenu);
 
 	fPartitionMenu->AddItem(fChangeMenuItem);
+	fPartitionMenu->AddItem(fResizeMenuItem);
+	fPartitionMenu->AddItem(fRenameMenuItem);
+	fPartitionMenu->AddItem(fCheckMenuItem);
+	fPartitionMenu->AddItem(fDefragMenuItem);
+	fPartitionMenu->AddItem(fEraseMenuItem);
+	fPartitionMenu->AddItem(fWipeMenuItem);
 	fPartitionMenu->AddItem(fDeleteMenuItem);
 
 	fPartitionMenu->AddSeparatorItem();
@@ -303,6 +364,8 @@ MainWindow::MainWindow()
 	fPartitionMenu->AddSeparatorItem();
 
 	fPartitionMenu->AddItem(fOpenDiskProbeMenuItem);
+	fPartitionMenu->AddItem(fFlagsMenuItem);
+	fPartitionMenu->AddItem(fMoveRecoveryMenuItem);
 	fMenuBar->AddItem(fPartitionMenu);
 
 	// Disk image menu
@@ -317,6 +380,10 @@ MainWindow::MainWindow()
 	fDiskImageMenu->AddItem(fWriteMenuItem);
 
 	fMenuBar->AddItem(fDiskImageMenu);
+
+	fToolsMenu = new BMenu(B_TRANSLATE("Tools"));
+	fToolsMenu->AddItem(fFeaturesMenuItem);
+	fMenuBar->AddItem(fToolsMenu);
 
 	BGroupLayout* layout = new BGroupLayout(B_VERTICAL, 0);
 	layout->SetInsets(-1, 0, -1, -1);
@@ -385,8 +452,18 @@ MainWindow::MainWindow()
 			strerror(status));
 	}
 
+	// Mounts are not device events; B_WATCH_MOUNT is a separate registration.
+	status = watch_node(NULL, B_WATCH_MOUNT, BMessenger(this));
+	if (status != B_OK) {
+		fprintf(stderr, "Failed to start watching for mount changes: %s\n",
+			strerror(status));
+	}
+
 	// visit all disks in the system and show their contents
 	_ScanDrives();
+
+	// A killed partition Move leaves a journal; show recovery on startup.
+	PostMessage(MSG_MOVE_RECOVERY);
 
 	// If DeskBar isn't running, DriveSetup was probably started from Installer.
 	// Make sure to show on all workspaces, so the window doesn't disappear when using the
@@ -436,6 +513,14 @@ MainWindow::MessageReceived(BMessage* message)
 			_Create(fCurrentDisk, fCurrentPartitionID);
 			break;
 
+		case MSG_SHOW_FEATURES:
+			_ShowFeatures();
+			break;
+
+		case MSG_MOVE_RECOVERY:
+			_CheckMoveRecovery();
+			break;
+
 		case MSG_INITIALIZE: {
 			BString diskSystemName;
 			if (message->FindString("disk system", &diskSystemName) != B_OK)
@@ -446,6 +531,38 @@ MainWindow::MessageReceived(BMessage* message)
 
 		case MSG_CHANGE:
 			_ChangeParameters(fCurrentDisk, fCurrentPartitionID);
+			break;
+
+		case MSG_RESIZE_MOVE:
+			_ResizeMove(fCurrentDisk, fCurrentPartitionID);
+			break;
+
+		case MSG_SET_FLAGS:
+			_SetFlags(fCurrentDisk, fCurrentPartitionID);
+			break;
+
+		case MSG_CHECK:
+			_CheckFilesystem(fCurrentDisk, fCurrentPartitionID);
+			break;
+
+		case MSG_DEFRAG:
+			_Defragment(fCurrentDisk, fCurrentPartitionID);
+			break;
+
+		case MSG_ERASE:
+			_Erase(fCurrentDisk, fCurrentPartitionID);
+			break;
+
+		case MSG_WIPE:
+			_Wipe(fCurrentDisk, fCurrentPartitionID);
+			break;
+
+		case MSG_RENAME:
+			_Rename(fCurrentDisk, fCurrentPartitionID);
+			break;
+
+		case MSG_RENAME_GPT:
+			_RenameGpt(fCurrentDisk, fCurrentPartitionID);
 			break;
 
 		case MSG_DELETE:
@@ -476,6 +593,17 @@ MainWindow::MessageReceived(BMessage* message)
 			printf("MSG_SURFACE_TEST\n");
 			break;
 
+		case B_NODE_MONITOR:
+		{
+			int32 opcode;
+			if (message->FindInt32("opcode", &opcode) == B_OK
+				&& (opcode == B_DEVICE_MOUNTED
+					|| opcode == B_DEVICE_UNMOUNTED)) {
+				_ScanDrives();
+			}
+			break;
+		}
+
 		// TODO: this could probably be done better!
 		case B_DEVICE_UPDATE:
 			printf("B_DEVICE_UPDATE\n");
@@ -498,9 +626,9 @@ MainWindow::MessageReceived(BMessage* message)
 		}
 		case MSG_SELECTED_PARTITION_ID: {
 			// selection of partitions via disk view
-			partition_id id;
-			if (message->FindInt32("partition_id", &id) == B_OK) {
-				if (BRow* row = fListView->FindRow(id)) {
+			int64 id;
+			if (message->FindInt64("partition_id", &id) == B_OK) {
+				if (BRow* row = fListView->FindRow((partition_id)id)) {
 					fListView->DeselectAll();
 					fListView->AddToSelection(row);
 					_AdaptToSelectedPartition();
@@ -622,7 +750,8 @@ MainWindow::MessageReceived(BMessage* message)
 
 			msg->AddString("source", row->DevicePath());
 			msg->AddString("target", path.Path());
-			msg->AddInt32("partitionID", row->ID());
+			// partition_id is dev_t; keep the full width across threads.
+			msg->AddInt64("partitionID", (int64)row->ID());
 			msg->AddMessenger("messenger", BMessenger(this));
 
 			thread_id save_thread = spawn_thread(SaveDiskImage, "SaveDiskImage",
@@ -796,7 +925,7 @@ MainWindow::RegisterFileDiskDevice(const char* fileName)
 	// register the file
 	BDiskDeviceRoster roster;
 	partition_id id = roster.RegisterFileDevice(fileName);
-	if (id < 0) {
+	if ((int64)id < 0) {
 		FileErrorAlert(B_TRANSLATE("Failed to register file disk device: %s"),
 			fileName, B_STOP_ALERT);
 		return id;
@@ -820,7 +949,7 @@ MainWindow::UnRegisterFileDiskDevice(const char* fileNameOrID)
 	char* numberEnd;
 	partition_id id = strtol(fileNameOrID, &numberEnd, 0);
 	BDiskDeviceRoster roster;
-	if (id >= 0 && numberEnd != fileNameOrID && *numberEnd == '\0') {
+	if ((int64)id >= 0 && numberEnd != fileNameOrID && *numberEnd == '\0') {
 		BDiskDevice device;
 		if (roster.GetDeviceWithID(id, &device) == B_OK && device.IsFile()) {
 			status_t error = roster.UnregisterFileDevice(id);
@@ -901,13 +1030,14 @@ MainWindow::SaveDiskImage(void* data)
 	const char* sourcepath;
 	const char* targetpath;
 	const char* targetfolder;
-	int32 partitionID;
+	// partition_id is dev_t; SaveDiskImage posts/receives Int64.
+	int64 partitionID;
 	BMessenger messenger;
 
 	msg->FindString("source", &sourcepath);
 	msg->FindString("target", &targetpath);
 	msg->FindString("targetfolder", &targetfolder);
-	msg->FindInt32("partitionID", &partitionID);
+	msg->FindInt64("partitionID", &partitionID);
 	msg->FindMessenger("messenger", &messenger);
 
 	BFile source(sourcepath, B_READ_ONLY);
@@ -928,7 +1058,7 @@ MainWindow::SaveDiskImage(void* data)
 	BDirectory* targetdir = new BDirectory(targetfolder);
 	node_ref node;
 	targetdir->GetNodeRef(&node);
-	BVolume volume(node.device);
+	BVolume volume(node.device());
 
 	if (volume.InitCheck()) {
 		FileErrorAlert(B_TRANSLATE("Cannot init target volume."), NULL,
@@ -1020,7 +1150,7 @@ MainWindow::_WriteDiskImage(BMessenger messenger, BFile source, BFile target,
 
 	source.GetSize(&sourcesize);
 
-	char maximumBuffer[16], currentBuffer[16];
+	char maximumBuffer[1024], currentBuffer[1024];
 	BString statusprogress;
 
 	BNotification progress(B_PROGRESS_NOTIFICATION);
@@ -1038,8 +1168,8 @@ MainWindow::_WriteDiskImage(BMessenger messenger, BFile source, BFile target,
 			targetbytes += bytes;
 
 			statusprogress.SetToFormat("%s: %s / %s", targetpath,
-				string_for_size(targetbytes, currentBuffer, 16),
-				string_for_size(sourcesize, maximumBuffer, 16));
+				string_for_size(targetbytes, currentBuffer, sizeof(currentBuffer)),
+				string_for_size(sourcesize, maximumBuffer, sizeof(maximumBuffer)));
 
 			progress.SetContent(statusprogress);
 			progress.SetProgress((float)targetbytes / sourcesize);
@@ -1060,9 +1190,19 @@ MainWindow::_WriteDiskImage(BMessenger messenger, BFile source, BFile target,
 
 
 void
+MainWindow::MenusBeginning()
+{
+	PartitionListRow* selected
+		= dynamic_cast<PartitionListRow*>(fListView->CurrentSelection());
+	_SetToDiskAndPartition(fCurrentDisk != NULL ? fCurrentDisk->ID() : -1,
+		fCurrentPartitionID, selected != NULL ? selected->ParentID() : -1);
+}
+
+
+void
 MainWindow::_ScanDrives()
 {
-	fSpaceIDMap.Clear();
+	// Do not clear SpaceIDMap: ids must stay stable across rescans.
 	int32 diskCount = 0;
 	ListPopulatorVisitor driveVisitor(fListView, diskCount, fSpaceIDMap);
 	fDiskDeviceRoster.VisitEachPartition(&driveVisitor);
@@ -1072,6 +1212,8 @@ MainWindow::_ScanDrives()
 	PartitionListRow* previousSelection
 		= fListView->FindRow(fCurrentPartitionID);
 	if (previousSelection) {
+		if (fCurrentDisk != NULL)
+			fCurrentDisk->Update();
 		fListView->SetFocusRow(previousSelection, true);
 		_UpdateMenus(fCurrentDisk, fCurrentPartitionID,
 			previousSelection->ParentID());
@@ -1115,6 +1257,13 @@ MainWindow::_AdaptToSelectedPartition()
 		}
 	}
 
+	if (getenv("VOS_DEBUG_MENUS") != NULL) {
+		fprintf(stderr, "[DriveSetup select] row=%p disk=%" B_PRIdDEV
+			" partition=%" B_PRIdDEV " parent=%" B_PRIdDEV
+			" (fCurrentPartitionID was %" B_PRIdDEV ")\n",
+			_selectedRow, diskID, partitionID, parentID, fCurrentPartitionID);
+	}
+
 	_SetToDiskAndPartition(diskID, partitionID, parentID);
 }
 
@@ -1139,6 +1288,8 @@ MainWindow::_SetToDiskAndPartition(partition_id disk, partition_id partition,
 			} else
 				fCurrentDisk = newDisk;
 		}
+	} else {
+		fCurrentDisk->Update();
 	}
 
 	fCurrentPartitionID = partition;
@@ -1193,7 +1344,7 @@ MainWindow::_UpdateMenus(BDiskDevice* disk,
 
 		// Create menu and items
 		BPartition* parentPartition = NULL;
-		if (selectedPartition <= -2) {
+		if ((int64)selectedPartition <= -2) {
 			// a partitionable space item is selected
 			parentPartition = disk->FindDescendant(parentID);
 		}
@@ -1207,6 +1358,7 @@ MainWindow::_UpdateMenus(BDiskDevice* disk,
 		fFormatMenu->SetEnabled(prepared);
 		fDeleteMenuItem->SetEnabled(prepared);
 		fChangeMenuItem->SetEnabled(prepared);
+		fFlagsMenuItem->SetEnabled(prepared);
 
 		fFormatContextMenuItem->SetEnabled(prepared);
 		fDeleteContextMenuItem->SetEnabled(prepared);
@@ -1221,10 +1373,14 @@ MainWindow::_UpdateMenus(BDiskDevice* disk,
 				continue;
 
 			BMessage* message = new BMessage(MSG_INITIALIZE);
-			message->AddInt32("parent id", parentID);
+			message->AddInt64("parent id", (int64)parentID);
 			message->AddString("disk system", diskSystem.PrettyName());
 
 			BString label = diskSystem.PrettyName();
+			bool recommended = !diskSystem.IsFileSystem()
+				&& label == "GUID Partition Table";
+			if (recommended)
+				label << B_TRANSLATE(" (recommended)");
 			label << B_UTF8_ELLIPSIS;
 			BMenuItem* item = new BMenuItem(label.String(), message);
 
@@ -1235,14 +1391,17 @@ MainWindow::_UpdateMenus(BDiskDevice* disk,
 			if (disk->ID() == selectedPartition
 				&& !diskSystem.IsFileSystem()) {
 				// Disk is selected, and DiskSystem is a partition map
-				fDiskInitMenu->AddItem(item);
+				if (recommended)
+					fDiskInitMenu->AddItem(item, 0);
+				else
+					fDiskInitMenu->AddItem(item);
 			} else if (diskSystem.IsFileSystem()) {
 				// Otherwise a filesystem
 				fFormatMenu->AddItem(item);
 
 				// Context menu
 				BMessage* message = new BMessage(MSG_INITIALIZE);
-				message->AddInt32("parent id", parentID);
+				message->AddInt64("parent id", (int64)parentID);
 				message->AddString("disk system", diskSystem.PrettyName());
 				BMenuItem* popUpItem = new BMenuItem(label.String(), message);
 				popUpItem->SetEnabled(partition != NULL
@@ -1267,15 +1426,66 @@ MainWindow::_UpdateMenus(BDiskDevice* disk,
 				&& fDiskInitMenu->CountItems() > 0);
 
 			fChangeMenuItem->SetEnabled(writable && canChangeParameters);
-			fChangeContextMenuItem->SetEnabled(writable && canChangeParameters);
+			fChangeContextMenuItem->SetEnabled(writable
+				&& canChangeParameters);
+			fFlagsMenuItem->SetEnabled(writable
+				&& partition->Parent() != NULL);
+
+			// ContentType() is set for bare maps too; require a filesystem.
+			BDiskSystem contentDiskSystem;
+			bool hasContent = partition->ContentType() != NULL
+				&& partition->GetDiskSystem(&contentDiskSystem) == B_OK
+				&& contentDiskSystem.IsFileSystem();
+			bool contentOpsPossible = notMountedAndWritable && hasContent;
+
+			bool canCheck = false;
+			bool canRenameLabel = false;
+			bool canResizeMove = false;
+			if (contentOpsPossible) {
+				PartitionCapabilities caps;
+				if (PartitionCapabilities::Get(partition->ContentType(), caps)
+						== B_OK) {
+					canCheck = caps.check == "external"
+						|| caps.check == "internal";
+					canRenameLabel = caps.writeLabel == "external"
+						|| caps.writeLabel == "internal";
+					canResizeMove = caps.grow != "none"
+						|| caps.shrink != "none" || caps.move != "none";
+				}
+			}
+			fCheckMenuItem->SetEnabled(canCheck);
+			// both defragment tools walk a mounted filesystem
+			fDefragMenuItem->SetEnabled(hasContent && writable
+				&& partition->IsMounted() && partition->CanDefragment());
+			fEraseMenuItem->SetEnabled(contentOpsPossible);
+			fWipeMenuItem->SetEnabled(notMountedAndWritable
+				&& !partition->IsDevice());
+			fResizeMenuItem->SetEnabled(canResizeMove);
+			fRenameMenuItem->SetEnabled(canRenameLabel);
+
+			BPartition* parentPartition = partition->Parent();
+			bool isGptTable = parentPartition != NULL
+				&& BString(parentPartition->ContentType()) == "gpt";
+			if (isGptTable) {
+				if (fPartitionMenu->IndexOf(fRenameGptMenuItem) < 0) {
+					fPartitionMenu->AddItem(fRenameGptMenuItem,
+						fPartitionMenu->IndexOf(fRenameMenuItem) + 1);
+				}
+				fRenameGptMenuItem->SetEnabled(writable
+					&& !partition->IsDevice());
+			} else if (fPartitionMenu->IndexOf(fRenameGptMenuItem) >= 0) {
+				fPartitionMenu->RemoveItem(fRenameGptMenuItem);
+			}
 
 			fDeleteMenuItem->SetEnabled(notMountedAndWritable
 				&& !partition->IsDevice());
 			fDeleteContextMenuItem->SetEnabled(notMountedAndWritable
 				&& !partition->IsDevice());
 
-			fMountMenuItem->SetEnabled(!partition->IsMounted());
-			fMountContextMenuItem->SetEnabled(!partition->IsMounted());
+			bool mountable = !partition->IsMounted()
+				&& partition->ContentType() != NULL;
+			fMountMenuItem->SetEnabled(mountable);
+			fMountContextMenuItem->SetEnabled(mountable);
 
 			fFormatContextMenuItem->SetEnabled(notMountedAndWritable
 				&& fFormatContextMenuItem->CountItems() > 0);
@@ -1296,6 +1506,15 @@ MainWindow::_UpdateMenus(BDiskDevice* disk,
 		} else {
 			fDeleteMenuItem->SetEnabled(false);
 			fChangeMenuItem->SetEnabled(false);
+			fResizeMenuItem->SetEnabled(false);
+			fFlagsMenuItem->SetEnabled(false);
+			fCheckMenuItem->SetEnabled(false);
+			fDefragMenuItem->SetEnabled(false);
+			fEraseMenuItem->SetEnabled(false);
+			fWipeMenuItem->SetEnabled(false);
+			fRenameMenuItem->SetEnabled(false);
+			if (fPartitionMenu->IndexOf(fRenameGptMenuItem) >= 0)
+				fPartitionMenu->RemoveItem(fRenameGptMenuItem);
 			fMountMenuItem->SetEnabled(false);
 			fFormatMenu->SetEnabled(false);
 			fDiskInitMenu->SetEnabled(false);
@@ -1306,6 +1525,49 @@ MainWindow::_UpdateMenus(BDiskDevice* disk,
 			fFormatContextMenuItem->SetEnabled(false);
 		}
 
+		if (getenv("VOS_DEBUG_MENUS") != NULL) {
+			BPartition* p = disk->FindDescendant(selectedPartition);
+			fprintf(stderr, "[DriveSetup menus] selected=%" B_PRIdDEV
+				" parent=%" B_PRIdDEV " found=%s prepared=%s\n",
+				selectedPartition, parentID, p ? "yes" : "NO", 
+				prepared ? "yes" : "no");
+			if (p != NULL) {
+				BDiskSystem ds;
+				bool gotDS = p->GetDiskSystem(&ds) == B_OK;
+				fprintf(stderr, "[DriveSetup menus]   contentType=%s "
+					"diskSystem=%s isFS=%s isDevice=%s mounted=%s "
+					"readOnly=%s hasMedia=%s\n",
+					p->ContentType() ? p->ContentType() : "(null)",
+					gotDS ? ds.Name() : "(lookup FAILED)",
+					gotDS && ds.IsFileSystem() ? "yes" : "no",
+					p->IsDevice() ? "yes" : "no",
+					p->IsMounted() ? "yes" : "no",
+					p->IsReadOnly() ? "yes" : "no",
+					p->Device()->HasMedia() ? "yes" : "no");
+			} else {
+				BPartition* pp = (int64)parentID >= 0
+					? disk->FindDescendant(parentID) : NULL;
+				fprintf(stderr, "[DriveSetup menus]   (space row) parent=%s "
+					"parentIsContainer=%s\n",
+					pp ? "found" : "NOT FOUND",
+					pp && pp->ContainsPartitioningSystem() ? "yes" : "no");
+			}
+			fprintf(stderr, "[DriveSetup menus]   enabled: create=%d "
+				"format=%d delete=%d change=%d mount=%d unmount=%d "
+				"erase=%d wipe=%d check=%d defrag=%d rename=%d "
+				"resize=%d\n",
+				fCreateContextMenuItem->IsEnabled(),
+				fFormatContextMenuItem->IsEnabled(),
+				fDeleteContextMenuItem->IsEnabled(),
+				fChangeContextMenuItem->IsEnabled(),
+				fMountContextMenuItem->IsEnabled(),
+				fUnmountContextMenuItem->IsEnabled(),
+				fEraseMenuItem->IsEnabled(), fWipeMenuItem->IsEnabled(),
+				fCheckMenuItem->IsEnabled(),
+				fDefragMenuItem->IsEnabled(),
+				fRenameMenuItem->IsEnabled(), fResizeMenuItem->IsEnabled());
+		}
+
 		if (prepared)
 			disk->CancelModifications();
 
@@ -1314,9 +1576,18 @@ MainWindow::_UpdateMenus(BDiskDevice* disk,
 
 		fMountAllMenuItem->SetEnabled(true);
 	}
-	if (selectedPartition < 0) {
+	if ((int64)selectedPartition < 0) {
 		fDeleteMenuItem->SetEnabled(false);
 		fChangeMenuItem->SetEnabled(false);
+		fResizeMenuItem->SetEnabled(false);
+		fFlagsMenuItem->SetEnabled(false);
+		fCheckMenuItem->SetEnabled(false);
+		fDefragMenuItem->SetEnabled(false);
+		fEraseMenuItem->SetEnabled(false);
+		fWipeMenuItem->SetEnabled(false);
+		fRenameMenuItem->SetEnabled(false);
+		if (fPartitionMenu->IndexOf(fRenameGptMenuItem) >= 0)
+			fPartitionMenu->RemoveItem(fRenameGptMenuItem);
 		fMountMenuItem->SetEnabled(false);
 
 		fDeleteContextMenuItem->SetEnabled(false);
@@ -1328,28 +1599,33 @@ MainWindow::_UpdateMenus(BDiskDevice* disk,
 
 void
 MainWindow::_DisplayPartitionError(BString _message,
-	const BPartition* partition, status_t error) const
+	const BPartition* partition, status_t error, const BMessage* result) const
 {
-	char message[1024];
+	BString message;
 
 	if (partition && _message.FindFirst("%s") >= 0) {
 		BString name;
 		name << "\"" << partition->ContentName() << "\"";
-		snprintf(message, sizeof(message), _message.String(), name.String());
+		message.SetToFormat(_message.String(), name.String());
 	} else {
 		_message.ReplaceAll("%s", "");
-		strlcpy(message, _message.String(), sizeof(message));
+		message = _message;
 	}
 
-	if (error < B_OK) {
-		BString helper = message;
+	BString detail;
+	if (result != NULL)
+		result->FindString("detail", &detail);
+
+	if (!detail.IsEmpty()) {
+		message << "\n\n" << detail;
+	} else if (error < B_OK) {
 		const char* errorString
 			= B_TRANSLATE_COMMENT("Error:", "in any error alert");
-		snprintf(message, sizeof(message), "%s\n\n%s %s", helper.String(),
-			errorString, strerror(error));
+		message << "\n\n" << errorString << " " << strerror(error);
 	}
 
-	BAlert* alert = new BAlert("error", message, B_TRANSLATE("OK"), NULL, NULL,
+	BAlert* alert = new BAlert("error", message.String(),
+		B_TRANSLATE("OK"), NULL, NULL,
 		B_WIDTH_FROM_WIDEST, error < B_OK ? B_STOP_ALERT : B_INFO_ALERT);
 	alert->SetFlags(alert->Flags() | B_CLOSE_ON_ESCAPE);
 	alert->Go(NULL);
@@ -1362,39 +1638,7 @@ MainWindow::_DisplayPartitionError(BString _message,
 void
 MainWindow::_Mount(BDiskDevice* disk, partition_id selectedPartition)
 {
-	if (!disk || selectedPartition < 0) {
-		_DisplayPartitionError(B_TRANSLATE("You need to select a partition "
-			"entry from the list."));
-		return;
-	}
-
-	BPartition* partition = disk->FindDescendant(selectedPartition);
-	if (!partition) {
-		_DisplayPartitionError(B_TRANSLATE("Unable to find the selected "
-			"partition by ID."));
-		return;
-	}
-
-	if (!partition->IsMounted()) {
-		status_t status = partition->Mount();
-		if (status != B_OK) {
-			_DisplayPartitionError(B_TRANSLATE("Could not mount partition %s."),
-				partition, status);
-		} else {
-			// successful mount, adapt to the changes
-			_ScanDrives();
-		}
-	} else {
-		_DisplayPartitionError(
-			B_TRANSLATE("The partition %s is already mounted."), partition);
-	}
-}
-
-
-void
-MainWindow::_Unmount(BDiskDevice* disk, partition_id selectedPartition)
-{
-	if (!disk || selectedPartition < 0) {
+	if (!disk || (int64)selectedPartition < 0) {
 		_DisplayPartitionError(B_TRANSLATE("You need to select a partition "
 			"entry from the list."));
 		return;
@@ -1408,51 +1652,123 @@ MainWindow::_Unmount(BDiskDevice* disk, partition_id selectedPartition)
 	}
 
 	if (partition->IsMounted()) {
-		BPath path;
-		partition->GetMountPoint(&path);
-		status_t status = partition->Unmount();
-		if (status != B_OK) {
-			BString message = B_TRANSLATE("Could not unmount partition");
-			message << " \"" << partition->ContentName() << "\":\n\t"
-				<< strerror(status) << "\n\n"
-				<< B_TRANSLATE("Should unmounting be forced?\n\n"
-				"Note: If an application is currently writing to the volume, "
-				"unmounting it now might result in loss of data.\n");
+		_DisplayPartitionError(
+			B_TRANSLATE("The partition %s is already mounted."), partition);
+		return;
+	}
 
-			BAlert* alert = new BAlert(B_TRANSLATE("Force unmount"), message,
-				B_TRANSLATE("Cancel"), B_TRANSLATE("Force unmount"), NULL,
-				B_WIDTH_AS_USUAL, B_WARNING_ALERT);
-			alert->SetShortcut(0, B_ESCAPE);
+	// Unprivileged app: mount(2) needs CAP_SYS_ADMIN, so ask mount_server.
+	BMessage message(kMountVolume);
+	message.AddInt64("id", partition->ID());
+	BMessenger(kMountServerSignature).SendMessage(&message);
+}
 
-			if (alert->Go() == 1)
-				status = partition->Unmount(B_FORCE_UNMOUNT);
-			else
-				return;
-		}
 
-		if (status != B_OK) {
-			_DisplayPartitionError(
-				B_TRANSLATE("Could not unmount partition %s."),
-				partition, status);
-		} else {
-			if (dev_for_path(path.Path()) == dev_for_path("/"))
-				rmdir(path.Path());
-			// successful unmount, adapt to the changes
-			_ScanDrives();
-		}
-	} else {
+void
+MainWindow::_Unmount(BDiskDevice* disk, partition_id selectedPartition)
+{
+	if (!disk || (int64)selectedPartition < 0) {
+		_DisplayPartitionError(B_TRANSLATE("You need to select a partition "
+			"entry from the list."));
+		return;
+	}
+
+	BPartition* partition = disk->FindDescendant(selectedPartition);
+	if (!partition) {
+		_DisplayPartitionError(B_TRANSLATE("Unable to find the selected "
+			"partition by ID."));
+		return;
+	}
+
+	if (!partition->IsMounted()) {
 		_DisplayPartitionError(
 			B_TRANSLATE("The partition %s is already unmounted."),
 			partition);
+		return;
 	}
+
+	// mount_server unmounts; a busy volume comes back here to ask the user.
+	BMessage message(kUnmountVolume);
+	message.AddInt64("id", partition->ID());
+	BMessage reply;
+	status_t status = BMessenger(kMountServerSignature).SendMessage(&message,
+		&reply);
+	if (status != B_OK) {
+		_DisplayPartitionError(B_TRANSLATE("The mount server did not "
+			"answer."), partition, status);
+		return;
+	}
+
+	int32 error = B_OK;
+	reply.FindInt32("error", &error);
+	if (error == B_OK)
+		return;
+
+	const char* name = reply.FindString("name");
+	if (name == NULL)
+		name = B_TRANSLATE("volume");
+
+	if (error != B_BUSY) {
+		BString text;
+		text.SetToFormat(B_TRANSLATE("Could not unmount \"%s\": %s"),
+			name, strerror(error));
+		_DisplayPartitionError(text, partition, error);
+		return;
+	}
+
+	BString text;
+	text.SetToFormat(B_TRANSLATE("\"%s\" is busy."), name);
+	text << "\n\n";
+	text << B_TRANSLATE("Processes holding it:") << "\n";
+	const char* process;
+	int32 index = 0;
+	while (reply.FindString("busyProcesses", index, &process) == B_OK) {
+		text << "  " << process << "\n";
+		index++;
+	}
+	text << "\n";
+	text << B_TRANSLATE("Force unmount anyway? Open files on the volume "
+		"may lose data.");
+
+	BAlert* alert = new BAlert("", text.String(),
+		B_TRANSLATE("Force unmount"), B_TRANSLATE("Cancel"), NULL,
+		B_WIDTH_AS_USUAL, B_WARNING_ALERT);
+	alert->SetFlags(alert->Flags() | B_CLOSE_ON_ESCAPE);
+	if (alert->Go() != 0)
+		return;
+
+	BMessage forceMessage(kUnmountVolume);
+	forceMessage.AddInt64("id", partition->ID());
+	forceMessage.AddBool("force", true);
+	BMessage forceReply;
+	status = BMessenger(kMountServerSignature).SendMessage(&forceMessage,
+		&forceReply);
+	if (status != B_OK) {
+		_DisplayPartitionError(B_TRANSLATE("The mount server did not "
+			"answer."), partition, status);
+		return;
+	}
+
+	int32 forceError = B_OK;
+	forceReply.FindInt32("error", &forceError);
+	if (forceError == B_OK)
+		return;
+
+	const char* forceName = forceReply.FindString("name");
+	if (forceName == NULL)
+		forceName = name;
+	BString forceText;
+	forceText.SetToFormat(B_TRANSLATE("Could not unmount \"%s\": %s"),
+		forceName, strerror(forceError));
+	_DisplayPartitionError(forceText, partition, forceError);
 }
 
 
 void
 MainWindow::_MountAll()
 {
-	MountAllVisitor visitor;
-	fDiskDeviceRoster.VisitEachPartition(&visitor);
+	BMessage message(kMountAllNow);
+	BMessenger(kMountServerSignature).SendMessage(&message);
 }
 
 
@@ -1463,7 +1779,7 @@ void
 MainWindow::_Initialize(BDiskDevice* disk, partition_id selectedPartition,
 	const BString& diskSystemName)
 {
-	if (!disk || selectedPartition < 0) {
+	if (!disk || (int64)selectedPartition < 0) {
 		_DisplayPartitionError(B_TRANSLATE("You need to select a partition "
 			"entry from the list."));
 		return;
@@ -1632,7 +1948,11 @@ MainWindow::_Initialize(BDiskDevice* disk, partition_id selectedPartition,
 		return;
 
 	// commit
-	status = modificationPreparer.CommitModifications();
+	BMessage result;
+	status = modificationPreparer.CommitModifications(&result);
+
+	ProgressWindow* progress = new ProgressWindow(this, result);
+	progress->Go();
 
 	// The partition pointer is toast now! Use the partition ID to
 	// retrieve it again.
@@ -1649,10 +1969,10 @@ MainWindow::_Initialize(BDiskDevice* disk, partition_id selectedPartition,
 	} else {
 		if (diskSystem.IsFileSystem()) {
 			_DisplayPartitionError(B_TRANSLATE("Failed to format the "
-				"partition %s!\n"), partition, status);
+				"partition %s!\n"), partition, status, &result);
 		} else {
 			_DisplayPartitionError(B_TRANSLATE("Failed to initialize the "
-				"disk %s!\n"), partition, status);
+				"disk %s!\n"), partition, status, &result);
 		}
 	}
 
@@ -1663,7 +1983,7 @@ MainWindow::_Initialize(BDiskDevice* disk, partition_id selectedPartition,
 void
 MainWindow::_Create(BDiskDevice* disk, partition_id selectedPartition)
 {
-	if (!disk || selectedPartition > -2) {
+	if (!disk || (int64)selectedPartition > -2) {
 		_DisplayPartitionError(B_TRANSLATE("The currently selected partition "
 			"is not empty."));
 		return;
@@ -1765,11 +2085,16 @@ MainWindow::_Create(BDiskDevice* disk, partition_id selectedPartition)
 	}
 
 	// commit
-	status = modificationPreparer.CommitModifications();
+	BMessage result;
+	status = modificationPreparer.CommitModifications(&result);
+
+	ProgressWindow* progress = new ProgressWindow(this, result);
+	progress->Go();
 
 	if (status != B_OK) {
 		_DisplayPartitionError(B_TRANSLATE("Failed to create the "
-			"partition. No changes have been written to disk."), NULL, status);
+			"partition. No changes have been written to disk."), NULL,
+			status, &result);
 		return;
 	}
 
@@ -1785,7 +2110,7 @@ MainWindow::_Create(BDiskDevice* disk, partition_id selectedPartition)
 void
 MainWindow::_Delete(BDiskDevice* disk, partition_id selectedPartition)
 {
-	if (!disk || selectedPartition < 0) {
+	if (!disk || (int64)selectedPartition < 0) {
 		_DisplayPartitionError(B_TRANSLATE("You need to select a partition "
 			"entry from the list."));
 		return;
@@ -1843,11 +2168,15 @@ MainWindow::_Delete(BDiskDevice* disk, partition_id selectedPartition)
 		return;
 	}
 
-	status = modificationPreparer.CommitModifications();
+	BMessage result;
+	status = modificationPreparer.CommitModifications(&result);
+
+	ProgressWindow* progress = new ProgressWindow(this, result);
+	progress->Go();
 
 	if (status != B_OK) {
 		_DisplayPartitionError(B_TRANSLATE("Failed to delete the partition. "
-			"No changes have been written to disk."), NULL, status);
+			"No changes have been written to disk."), NULL, status, &result);
 		return;
 	}
 
@@ -1859,7 +2188,7 @@ MainWindow::_Delete(BDiskDevice* disk, partition_id selectedPartition)
 void
 MainWindow::_ChangeParameters(BDiskDevice* disk, partition_id selectedPartition)
 {
-	if (disk == NULL || selectedPartition < 0) {
+	if (disk == NULL || (int64)selectedPartition < 0) {
 		_DisplayPartitionError(B_TRANSLATE("You need to select a partition "
 			"entry from the list."));
 		return;
@@ -1887,8 +2216,8 @@ MainWindow::_ChangeParameters(BDiskDevice* disk, partition_id selectedPartition)
 
 	ChangeParametersPanel* panel = new ChangeParametersPanel(this, partition);
 
-	BString name, type, parameters;
-	status = panel->Go(name, type, parameters);
+	BString name, type, parameters, contentParameters;
+	status = panel->Go(name, type, parameters, contentParameters);
 	if (status != B_OK) {
 		if (status != B_CANCELED) {
 			_DisplayPartitionError(B_TRANSLATE("The panel experienced a "
@@ -1919,12 +2248,24 @@ MainWindow::_ChangeParameters(BDiskDevice* disk, partition_id selectedPartition)
 	if (choice == 1)
 		return;
 
+	// an untouched field must not turn into a plan op
+	BString currentParameters(
+		partition->Parameters() != NULL ? partition->Parameters() : "");
+	BString currentContentParameters(partition->ContentParameters() != NULL
+		? partition->ContentParameters() : "");
+
 	if (partition->CanSetType())
 		status = partition->SetType(type.String());
 	if (status == B_OK && partition->CanSetName())
 		status = partition->SetName(name.String());
-	if (status == B_OK && partition->CanEditParameters())
+	if (status == B_OK && partition->CanEditParameters()
+		&& parameters != currentParameters) {
 		status = partition->SetParameters(parameters.String());
+	}
+	if (status == B_OK && partition->CanEditContentParameters()
+		&& contentParameters != currentContentParameters) {
+		status = partition->SetContentParameters(contentParameters.String());
+	}
 
 	if (status != B_OK) {
 		_DisplayPartitionError(
@@ -1933,17 +2274,683 @@ MainWindow::_ChangeParameters(BDiskDevice* disk, partition_id selectedPartition)
 		return;
 	}
 
-	status = modificationPreparer.CommitModifications();
+	BMessage result;
+	status = modificationPreparer.CommitModifications(&result);
+
+	ProgressWindow* progress = new ProgressWindow(this, result);
+	progress->Go();
 
 	if (status != B_OK) {
 		_DisplayPartitionError(B_TRANSLATE("Failed to change the parameters "
 			"of the partition. No changes have been written to disk."), NULL,
-			status);
+			status, &result);
 		return;
 	}
 
 	_ScanDrives();
 	fDiskView->ForceUpdate();
+}
+
+
+void
+MainWindow::_SetFlags(BDiskDevice* disk, partition_id selectedPartition)
+{
+	if (disk == NULL || (int64)selectedPartition < 0) {
+		_DisplayPartitionError(B_TRANSLATE("You need to select a partition "
+			"entry from the list."));
+		return;
+	}
+
+	if (disk->IsReadOnly()) {
+		_DisplayPartitionError(B_TRANSLATE("The selected disk is read-only."));
+		return;
+	}
+
+	BPartition* partition = disk->FindDescendant(selectedPartition);
+	if (partition == NULL) {
+		_DisplayPartitionError(B_TRANSLATE("Unable to find the selected "
+			"partition by ID."));
+		return;
+	}
+
+	BPartition* parent = partition->Parent();
+	if (parent == NULL) {
+		_DisplayPartitionError(B_TRANSLATE("The selected partition has no "
+			"partitioning system to set flags on."));
+		return;
+	}
+
+	FlagsPanel* panel = new FlagsPanel(this, partition);
+
+	BMessage flags;
+	status_t status = panel->Go(flags);
+	if (status != B_OK) {
+		if (status != B_CANCELED) {
+			_DisplayPartitionError(B_TRANSLATE("The panel experienced a "
+				"problem!"), NULL, status);
+		}
+		return;
+	}
+
+	PartitionReference* parentRef = new PartitionReference(parent->ID());
+	PartitionReference* childRef = new PartitionReference(partition->ID());
+
+	SetFlagsJob* job = new SetFlagsJob(parentRef, childRef);
+	job->Init(flags);
+
+	parentRef->ReleaseReference();
+	childRef->ReleaseReference();
+
+	BMessage result;
+	DiskDeviceJobQueue jobQueue;
+	jobQueue.AddJob(job);
+	status = jobQueue.ExecuteViaHelper(disk, &result);
+
+	ProgressWindow* progress = new ProgressWindow(this, result);
+	progress->Go();
+
+	if (status != B_OK) {
+		_DisplayPartitionError(B_TRANSLATE("Could not set the flags of the "
+			"selected partition."), NULL, status, &result);
+		return;
+	}
+
+	_ScanDrives();
+}
+
+
+void
+MainWindow::_ResizeMove(BDiskDevice* disk, partition_id selectedPartition)
+{
+	if (disk == NULL || (int64)selectedPartition < 0) {
+		_DisplayPartitionError(B_TRANSLATE("You need to select a partition "
+			"entry from the list."));
+		return;
+	}
+
+	if (disk->IsReadOnly()) {
+		_DisplayPartitionError(B_TRANSLATE("The selected disk is read-only."));
+		return;
+	}
+
+	BPartition* partition = disk->FindDescendant(selectedPartition);
+	if (partition == NULL) {
+		_DisplayPartitionError(B_TRANSLATE("Unable to find the selected "
+			"partition by ID."));
+		return;
+	}
+
+	BPartition* parent = partition->Parent();
+	if (parent == NULL) {
+		_DisplayPartitionError(B_TRANSLATE("The selected partition has no "
+			"partitioning system to resize or move within."));
+		return;
+	}
+
+	bool mounted = partition->IsMounted();
+
+	const char* filesystem = partition->ContentType();
+	PartitionCapabilities caps;
+	if (filesystem == NULL
+		|| PartitionCapabilities::Get(filesystem, caps) != B_OK) {
+		_DisplayPartitionError(B_TRANSLATE("Could not determine what this "
+			"partition's filesystem supports."));
+		return;
+	}
+
+	bool canResize = caps.grow != "none" || caps.shrink != "none";
+	bool canMoveType = caps.move != "none" && !mounted;
+	if (!canResize && !canMoveType) {
+		_DisplayPartitionError(B_TRANSLATE("This filesystem does not "
+			"support resizing or moving."));
+		return;
+	}
+
+	BPath path;
+	if (partition->GetPath(&path) != B_OK) {
+		_DisplayPartitionError(B_TRANSLATE("Could not determine the "
+			"partition's device path."));
+		return;
+	}
+
+	off_t currentSizeMiB = partition->Size() / (1024 * 1024);
+	off_t minSizeMiB = currentSizeMiB;
+	off_t maxSizeMiB = currentSizeMiB;
+	off_t usedMiB = -1;
+	if (canResize) {
+		status_t status = PartitionCapabilities::GetSizeLimits(path.Path(),
+			filesystem, minSizeMiB, maxSizeMiB, &usedMiB);
+		if (status != B_OK) {
+			_DisplayPartitionError(B_TRANSLATE("Could not determine this "
+				"partition's size limits; resizing is unavailable for now "
+				"(move may still be)."), NULL, status);
+			canResize = false;
+			minSizeMiB = maxSizeMiB = currentSizeMiB;
+			usedMiB = -1;
+		}
+	}
+
+	BString note;
+	if (canResize && mounted) {
+		BString fs(filesystem);
+		if (fs == "xfs") {
+			note = B_TRANSLATE("XFS cannot be shrunk");
+			minSizeMiB = currentSizeMiB;
+		} else if (fs != "btrfs") {
+			note = B_TRANSLATE("Shrinking requires unmounting");
+			minSizeMiB = currentSizeMiB;
+		}
+		if (minSizeMiB >= maxSizeMiB) {
+			canResize = false;
+			maxSizeMiB = currentSizeMiB;
+		}
+	}
+
+	off_t currentStartMiB = partition->Offset() / (1024 * 1024);
+	off_t minStartMiB = currentStartMiB;
+	off_t maxStartMiB = currentStartMiB;
+	bool canMove = false;
+	if (canMoveType) {
+		ModificationPreparer modificationPreparer(disk);
+		if (modificationPreparer.ModificationStatus() == B_OK) {
+			BPartitioningInfo info;
+			if (parent->GetPartitioningInfo(&info) == B_OK) {
+				off_t partOffset = partition->Offset();
+				off_t partSize = partition->Size();
+				off_t beforeGap = 0;
+				off_t afterGap = 0;
+				off_t spaceOffset, spaceSize;
+				for (int32 i = 0; info.GetPartitionableSpaceAt(i,
+						&spaceOffset, &spaceSize) == B_OK; i++) {
+					if (spaceOffset + spaceSize == partOffset)
+						beforeGap = spaceSize;
+					if (spaceOffset == partOffset + partSize)
+						afterGap = spaceSize;
+				}
+				if (beforeGap > 0 || afterGap > 0) {
+					minStartMiB = (partOffset - beforeGap) / (1024 * 1024);
+					maxStartMiB = (partOffset + afterGap) / (1024 * 1024);
+					canMove = true;
+				}
+			}
+		}
+	}
+
+	if (!canResize && !canMove) {
+		_DisplayPartitionError(B_TRANSLATE("There is no free space next to "
+			"this partition to grow or move into, and its filesystem "
+			"cannot be shrunk."));
+		return;
+	}
+
+	ResizeMoveWindow* panel = new ResizeMoveWindow(this,
+		B_TRANSLATE("Resize/move partition"), currentSizeMiB, minSizeMiB,
+		maxSizeMiB, canResize, currentStartMiB, minStartMiB, maxStartMiB,
+		canMove, usedMiB, note.String());
+
+	off_t newSizeMiB = currentSizeMiB;
+	off_t newStartMiB = currentStartMiB;
+	status_t status = panel->Go(newSizeMiB, newStartMiB);
+	if (status != B_OK) {
+		if (status != B_CANCELED) {
+			_DisplayPartitionError(B_TRANSLATE("The panel experienced a "
+				"problem!"), NULL, status);
+		}
+		return;
+	}
+
+	bool sizeChanged = canResize && newSizeMiB != currentSizeMiB;
+	bool startChanged = canMove && newStartMiB != currentStartMiB;
+	if (!sizeChanged && !startChanged) {
+		return;
+	}
+
+	PartitionReference* parentRef = new PartitionReference(parent->ID());
+	PartitionReference* childRef = new PartitionReference(partition->ID());
+
+	DiskDeviceJobQueue jobQueue;
+
+	// Move must run before resize: refs resolve against the live devnode.
+	if (startChanged) {
+		MoveJob* moveJob = new MoveJob(parentRef, childRef);
+		moveJob->Init(newStartMiB * 1024 * 1024, NULL, 0);
+		jobQueue.AddJob(moveJob);
+	}
+	if (sizeChanged) {
+		off_t newSizeBytes = newSizeMiB * 1024 * 1024;
+		ResizeJob* resizeJob = new ResizeJob(parentRef, childRef,
+			newSizeBytes, newSizeBytes);
+		jobQueue.AddJob(resizeJob);
+	}
+
+	parentRef->ReleaseReference();
+	childRef->ReleaseReference();
+
+	BMessage result;
+	status = jobQueue.ExecuteViaHelper(disk, &result);
+
+	ProgressWindow* progress = new ProgressWindow(this, result);
+	progress->Go();
+
+	if (status != B_OK) {
+		_DisplayPartitionError(B_TRANSLATE("Could not resize or move the "
+			"selected partition."), NULL, status, &result);
+		return;
+	}
+
+	// Move journals are cleared on success; if one is left, show it.
+	PostMessage(MSG_MOVE_RECOVERY);
+	_ScanDrives();
+}
+
+
+void
+MainWindow::_CheckFilesystem(BDiskDevice* disk, partition_id selectedPartition)
+{
+	if (disk == NULL || (int64)selectedPartition < 0) {
+		_DisplayPartitionError(B_TRANSLATE("You need to select a partition "
+			"entry from the list."));
+		return;
+	}
+
+	BPartition* partition = disk->FindDescendant(selectedPartition);
+	if (partition == NULL) {
+		_DisplayPartitionError(B_TRANSLATE("Unable to find the selected "
+			"partition by ID."));
+		return;
+	}
+
+	PartitionReference* partitionRef
+		= new PartitionReference(partition->ID());
+
+	RepairJob* job = new RepairJob(partitionRef, true);
+
+	partitionRef->ReleaseReference();
+
+	BMessage result;
+	DiskDeviceJobQueue jobQueue;
+	jobQueue.AddJob(job);
+	status_t status = jobQueue.ExecuteViaHelper(disk, &result);
+
+	ProgressWindow* progress = new ProgressWindow(this, result);
+	progress->Go();
+
+	if (status != B_OK) {
+		_DisplayPartitionError(B_TRANSLATE("Checking the selected "
+			"partition's filesystem failed, or found problems."), NULL,
+			status, &result);
+	}
+}
+
+
+void
+MainWindow::_Defragment(BDiskDevice* disk, partition_id selectedPartition)
+{
+	if (disk == NULL || (int64)selectedPartition < 0) {
+		_DisplayPartitionError(B_TRANSLATE("You need to select a partition "
+			"entry from the list."));
+		return;
+	}
+
+	BPartition* partition = disk->FindDescendant(selectedPartition);
+	if (partition == NULL) {
+		_DisplayPartitionError(B_TRANSLATE("Unable to find the selected "
+			"partition by ID."));
+		return;
+	}
+
+	PartitionReference* partitionRef
+		= new PartitionReference(partition->ID());
+
+	DefragmentJob* job = new DefragmentJob(partitionRef);
+
+	// without a filesystem the job maps to B_NOT_SUPPORTED, never a plan
+	BDiskSystem contentDiskSystem;
+	if (partition->GetDiskSystem(&contentDiskSystem) == B_OK
+		&& contentDiskSystem.IsFileSystem()) {
+		job->SetFileSystem(contentDiskSystem.Name());
+	}
+
+	partitionRef->ReleaseReference();
+
+	BMessage result;
+	DiskDeviceJobQueue jobQueue;
+	jobQueue.AddJob(job);
+	status_t status = jobQueue.ExecuteViaHelper(disk, &result);
+
+	ProgressWindow* progress = new ProgressWindow(this, result);
+	progress->Go();
+
+	if (status != B_OK) {
+		_DisplayPartitionError(B_TRANSLATE("Defragmenting the selected "
+			"partition failed."), NULL, status, &result);
+	}
+}
+
+
+void
+MainWindow::_Erase(BDiskDevice* disk, partition_id selectedPartition)
+{
+	if (disk == NULL || (int64)selectedPartition < 0) {
+		_DisplayPartitionError(B_TRANSLATE("You need to select a partition "
+			"entry from the list."));
+		return;
+	}
+
+	if (disk->IsReadOnly()) {
+		_DisplayPartitionError(B_TRANSLATE("The selected disk is read-only."));
+		return;
+	}
+
+	BPartition* partition = disk->FindDescendant(selectedPartition);
+	if (partition == NULL) {
+		_DisplayPartitionError(B_TRANSLATE("Unable to find the selected "
+			"partition by ID."));
+		return;
+	}
+
+	BPartition* parent = partition->Parent();
+
+	BAlert* alert = new BAlert("final notice", B_TRANSLATE("Are you sure you "
+		"want to erase the filesystem on the selected partition?\n\n"
+		"All data on the partition will be irretrievably lost if you "
+		"do so! The partition itself is not removed."),
+		B_TRANSLATE("Erase filesystem"), B_TRANSLATE("Cancel"), NULL,
+		B_WIDTH_FROM_WIDEST, B_WARNING_ALERT);
+	alert->SetShortcut(1, B_ESCAPE);
+	if (alert->Go() == 1)
+		return;
+
+	PartitionReference* parentRef = parent != NULL
+		? new PartitionReference(parent->ID()) : NULL;
+	PartitionReference* childRef = new PartitionReference(partition->ID());
+
+	UninitializeJob* job = new UninitializeJob(childRef, parentRef);
+
+	if (parentRef != NULL)
+		parentRef->ReleaseReference();
+	childRef->ReleaseReference();
+
+	BMessage result;
+	DiskDeviceJobQueue jobQueue;
+	jobQueue.AddJob(job);
+	status_t status = jobQueue.ExecuteViaHelper(disk, &result);
+
+	ProgressWindow* progress = new ProgressWindow(this, result);
+	progress->Go();
+
+	if (status != B_OK) {
+		_DisplayPartitionError(B_TRANSLATE("Could not erase the filesystem "
+			"on the selected partition."), NULL, status, &result);
+		return;
+	}
+
+	_ScanDrives();
+}
+
+
+void
+MainWindow::_Wipe(BDiskDevice* disk, partition_id selectedPartition)
+{
+	if (disk == NULL || (int64)selectedPartition < 0) {
+		_DisplayPartitionError(B_TRANSLATE("You need to select a partition "
+			"entry from the list."));
+		return;
+	}
+
+	if (disk->IsReadOnly()) {
+		_DisplayPartitionError(B_TRANSLATE("The selected disk is read-only."));
+		return;
+	}
+
+	BPartition* partition = disk->FindDescendant(selectedPartition);
+	if (partition == NULL) {
+		_DisplayPartitionError(B_TRANSLATE("Unable to find the selected "
+			"partition by ID."));
+		return;
+	}
+
+	if (partition->IsDevice()) {
+		_DisplayPartitionError(B_TRANSLATE("Wipe targets a single "
+			"partition, not the whole disk."));
+		return;
+	}
+
+	if (partition->IsMounted()) {
+		_DisplayPartitionError(B_TRANSLATE("The selected partition is "
+			"mounted. Unmount it first."));
+		return;
+	}
+
+	BAlert* alert = new BAlert("final notice", B_TRANSLATE("Are you sure you "
+		"want to wipe the selected partition?\n\n"
+		"All data on the partition will be irretrievably lost if you "
+		"do so! The partition table entry is kept."),
+		B_TRANSLATE("Quick wipe"), B_TRANSLATE("Full wipe"),
+		B_TRANSLATE("Cancel"),
+		B_WIDTH_FROM_WIDEST, B_WARNING_ALERT);
+	alert->SetShortcut(2, B_ESCAPE);
+	int32 choice = alert->Go();
+	if (choice == 2)
+		return;
+	bool full = (choice == 1);
+
+	PartitionReference* partitionRef
+		= new PartitionReference(partition->ID());
+
+	WipeJob* job = new WipeJob(partitionRef, full);
+
+	partitionRef->ReleaseReference();
+
+	BMessage result;
+	DiskDeviceJobQueue jobQueue;
+	jobQueue.AddJob(job);
+	status_t status = jobQueue.ExecuteViaHelper(disk, &result);
+
+	ProgressWindow* progress = new ProgressWindow(this, result);
+	progress->Go();
+
+	if (status != B_OK) {
+		_DisplayPartitionError(B_TRANSLATE("Could not wipe the selected "
+			"partition."), NULL, status, &result);
+		return;
+	}
+
+	_ScanDrives();
+}
+
+
+void
+MainWindow::_Rename(BDiskDevice* disk, partition_id selectedPartition)
+{
+	if (disk == NULL || (int64)selectedPartition < 0) {
+		_DisplayPartitionError(B_TRANSLATE("You need to select a partition "
+			"entry from the list."));
+		return;
+	}
+
+	if (disk->IsReadOnly()) {
+		_DisplayPartitionError(B_TRANSLATE("The selected disk is read-only."));
+		return;
+	}
+
+	BPartition* partition = disk->FindDescendant(selectedPartition);
+	if (partition == NULL) {
+		_DisplayPartitionError(B_TRANSLATE("Unable to find the selected "
+			"partition by ID."));
+		return;
+	}
+
+	RenamePanel* panel = new RenamePanel(this,
+		B_TRANSLATE("Rename filesystem"), B_TRANSLATE("New label:"),
+		partition->ContentName().String());
+
+	BString newLabel;
+	status_t status = panel->Go(newLabel);
+	if (status != B_OK) {
+		if (status != B_CANCELED) {
+			_DisplayPartitionError(B_TRANSLATE("The panel experienced a "
+				"problem!"), NULL, status);
+		}
+		return;
+	}
+
+	PartitionReference* partitionRef
+		= new PartitionReference(partition->ID());
+
+	SetStringJob* job = new SetStringJob(partitionRef);
+	job->Init(newLabel.String(), B_DISK_DEVICE_JOB_SET_CONTENT_NAME);
+
+	partitionRef->ReleaseReference();
+
+	BMessage result;
+	DiskDeviceJobQueue jobQueue;
+	jobQueue.AddJob(job);
+	status = jobQueue.ExecuteViaHelper(disk, &result);
+
+	ProgressWindow* progress = new ProgressWindow(this, result);
+	progress->Go();
+
+	if (status != B_OK) {
+		_DisplayPartitionError(B_TRANSLATE("Could not rename the selected "
+			"partition's filesystem."), NULL, status, &result);
+		return;
+	}
+
+	_ScanDrives();
+}
+
+
+void
+MainWindow::_RenameGpt(BDiskDevice* disk, partition_id selectedPartition)
+{
+	if (disk == NULL || (int64)selectedPartition < 0) {
+		_DisplayPartitionError(B_TRANSLATE("You need to select a partition "
+			"entry from the list."));
+		return;
+	}
+
+	if (disk->IsReadOnly()) {
+		_DisplayPartitionError(B_TRANSLATE("The selected disk is read-only."));
+		return;
+	}
+
+	BPartition* partition = disk->FindDescendant(selectedPartition);
+	if (partition == NULL) {
+		_DisplayPartitionError(B_TRANSLATE("Unable to find the selected "
+			"partition by ID."));
+		return;
+	}
+
+	RenamePanel* panel = new RenamePanel(this,
+		B_TRANSLATE("Rename partition"), B_TRANSLATE("New name:"),
+		partition->Name());
+
+	BString newName;
+	status_t status = panel->Go(newName);
+	if (status != B_OK) {
+		if (status != B_CANCELED) {
+			_DisplayPartitionError(B_TRANSLATE("The panel experienced a "
+				"problem!"), NULL, status);
+		}
+		return;
+	}
+
+	PartitionReference* partitionRef
+		= new PartitionReference(partition->ID());
+
+	SetStringJob* job = new SetStringJob(partitionRef);
+	job->Init(newName.String(), B_DISK_DEVICE_JOB_SET_NAME);
+
+	partitionRef->ReleaseReference();
+
+	BMessage result;
+	DiskDeviceJobQueue jobQueue;
+	jobQueue.AddJob(job);
+	status = jobQueue.ExecuteViaHelper(disk, &result);
+
+	ProgressWindow* progress = new ProgressWindow(this, result);
+	progress->Go();
+
+	if (status != B_OK) {
+		_DisplayPartitionError(B_TRANSLATE("Could not rename the selected "
+			"partition."), NULL, status, &result);
+		return;
+	}
+
+	_ScanDrives();
+}
+
+
+void
+MainWindow::_ShowFeatures()
+{
+	FeaturesWindow* window = new FeaturesWindow(this);
+	window->Show();
+}
+
+
+void
+MainWindow::_CheckMoveRecovery()
+{
+	BMessage result;
+	if (PartitionPlanBuilder::QueryMoveRecovery(result) != B_OK)
+		return;
+
+	BString status;
+	result.FindString("move_recovery", &status);
+	if (status != "pending")
+		return;
+
+	BString detail;
+	result.FindString("move_recovery_detail", &detail);
+
+	BString message = B_TRANSLATE("A partition move did not finish. "
+		"V\\OS left a move journal; the copy must be resumed or rolled "
+		"back before further changes on that disk.");
+	if (!detail.IsEmpty())
+		message << "\n\n" << detail;
+
+	BAlert* alert = new BAlert("move-recovery", message.String(),
+		B_TRANSLATE("Resume"), B_TRANSLATE("Roll back"),
+		B_TRANSLATE("Later"), B_WIDTH_FROM_WIDEST, B_WARNING_ALERT);
+	alert->SetFlags(alert->Flags() | B_CLOSE_ON_ESCAPE);
+	int32 choice = alert->Go();
+	if (choice == 0)
+		_MoveRecoveryAction("resume");
+	else if (choice == 1)
+		_MoveRecoveryAction("rollback");
+}
+
+
+void
+MainWindow::_MoveRecoveryAction(const char* action)
+{
+	BMessage result;
+	status_t status = PartitionPlanBuilder::RunMoveRecovery(action, result);
+	if (status != B_OK) {
+		_DisplayPartitionError(B_TRANSLATE("Partition move recovery "
+			"failed."), NULL, status, &result);
+		return;
+	}
+
+	BString recovered;
+	result.FindString("move_recovery", &recovered);
+	BString detail;
+	result.FindString("move_recovery_detail", &detail);
+
+	BString message;
+	message.SetToFormat(B_TRANSLATE("Partition move recovery: %s"),
+		recovered.String());
+	if (!detail.IsEmpty())
+		message << "\n\n" << detail;
+
+	BAlert* alert = new BAlert("move-recovery-done", message.String(),
+		B_TRANSLATE("OK"), NULL, NULL, B_WIDTH_FROM_WIDEST,
+		recovered == "failed" ? B_STOP_ALERT : B_INFO_ALERT);
+	alert->SetFlags(alert->Flags() | B_CLOSE_ON_ESCAPE);
+	alert->Go(NULL);
+	_ScanDrives();
 }
 
 

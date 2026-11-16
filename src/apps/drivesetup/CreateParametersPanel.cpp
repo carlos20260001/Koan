@@ -1,4 +1,5 @@
 /*
+ * Copyright 2026, Dario Casalinuovo. All rights reserved.
  * Copyright 2008-2013 Haiku, Inc. All rights reserved.
  * Distributed under the terms of the MIT license.
  *
@@ -20,7 +21,9 @@
 #include <MenuItem.h>
 #include <MessageFilter.h>
 #include <PopUpMenu.h>
+#include <RadioButton.h>
 #include <String.h>
+#include <StringView.h>
 #include <TextControl.h>
 #include <Variant.h>
 
@@ -38,6 +41,9 @@ enum {
 };
 
 static const uint32 kMegaByte = 0x100000;
+
+// Standard CHS compatibility geometry; same default as fdisk/GParted.
+static const off_t kCylinderSize = 255LL * 63 * 512;
 
 
 CreateParametersPanel::CreateParametersPanel(BWindow* window,
@@ -64,8 +70,9 @@ CreateParametersPanel::Go(off_t& offset, off_t& size, BString& name,
 	// a BMessage
 
 	BMessage storage;
+	BString contentParameters;
 	status_t status = ChangeParametersPanel::Go(name, type, parameters,
-		storage);
+		contentParameters, storage);
 	if (status != B_OK)
 		return status;
 
@@ -83,15 +90,17 @@ CreateParametersPanel::MessageReceived(BMessage* message)
 	switch (message->what) {
 		case MSG_SIZE_SLIDER:
 			_UpdateSizeTextControl();
+			fOkButton->SetEnabled(true);
 			break;
 
 		case MSG_SIZE_TEXTCONTROL:
 		{
 			off_t size = strtoll(fSizeTextControl->Text(), NULL, 10) * kMegaByte;
-			if (size >= 0 && size <= fSizeSlider->MaxPartitionSize())
+			if (size > 0 && size <= fSizeSlider->MaxPartitionSize()) {
 				fSizeSlider->SetSize(size);
-			else
-				_UpdateSizeTextControl();
+				fOkButton->SetEnabled(true);
+			} else
+				fOkButton->SetEnabled(false);
 			break;
 		}
 
@@ -109,13 +118,32 @@ CreateParametersPanel::NeedsEditor() const
 
 
 status_t
-CreateParametersPanel::ParametersReceived(const BString& parameters,
+CreateParametersPanel::ParametersReceived(BString& parameters,
 	BMessage& storage)
 {
+	off_t offset = fSizeSlider->Offset();
+	off_t size = fSizeSlider->Size();
+
+	// Clicking Create leaves the box focused, so a typed size is unapplied.
+	off_t typed = strtoll(fSizeTextControl->Text(), NULL, 10) * kMegaByte;
+	if (typed > 0 && typed <= fSizeSlider->MaxPartitionSize())
+		size = typed;
+
+	off_t alignedOffset = _AlignOffset(offset);
+	if (alignedOffset > offset)
+		offset = alignedOffset;
+
+	// keep the requested size; only clamp to the end of the free range
+	off_t end = fSizeSlider->Offset() + fSizeSlider->MaxPartitionSize();
+	if (offset + size > end)
+		size = end - offset;
+	if (size < 0)
+		size = 0;
+
 	// Return the value back as bytes.
-	status_t status = storage.SetInt64("size", fSizeSlider->Size());
+	status_t status = storage.SetInt64("size", size);
 	if (status == B_OK)
-		status = storage.SetInt64("offset", fSizeSlider->Offset());
+		status = storage.SetInt64("offset", offset);
 
 	if (status != B_OK)
 		return status;
@@ -130,7 +158,15 @@ CreateParametersPanel::AddControls(BLayoutBuilder::Group<>& builder,
 {
 	builder
 		.Add(fSizeSlider)
-		.Add(fSizeTextControl);
+		.Add(fSizeTextControl)
+		.AddGroup(B_VERTICAL, B_USE_SMALL_SPACING)
+			.Add(new BStringView("alignment label",
+				B_TRANSLATE("Start alignment:")))
+			.Add(fAlign1MiBRadio)
+			.Add(fAlign4MiBRadio)
+			.Add(fAlignCylinderRadio)
+			.Add(fAlignNoneRadio)
+		.End();
 
 	ChangeParametersPanel::AddControls(builder, editorView);
 }
@@ -148,14 +184,24 @@ CreateParametersPanel::_CreateCreateControls(BPartition* parent, off_t offset,
 	fSizeSlider->SetPosition(1.0);
 	fSizeSlider->SetModificationMessage(new BMessage(MSG_SIZE_SLIDER));
 
-	fSizeTextControl = new BTextControl("Size Control", "", "", NULL);
+	fSizeTextControl = new BTextControl("Size Control",
+		B_TRANSLATE("Size (MiB):"), "", new BMessage(MSG_SIZE_TEXTCONTROL));
+	fSizeTextControl->SetTarget(this);
 	for(int32 i = 0; i < 256; i++)
 		fSizeTextControl->TextView()->DisallowChar(i);
 	for(int32 i = '0'; i <= '9'; i++)
 		fSizeTextControl->TextView()->AllowChar(i);
 	_UpdateSizeTextControl();
-	fSizeTextControl->SetModificationMessage(
-		new BMessage(MSG_SIZE_TEXTCONTROL));
+
+	fAlign1MiBRadio = new BRadioButton("align1MiB",
+		B_TRANSLATE("1 MiB boundary"), NULL);
+	fAlign1MiBRadio->SetValue(B_CONTROL_ON);
+	fAlign4MiBRadio = new BRadioButton("align4MiB",
+		B_TRANSLATE("4 MiB boundary"), NULL);
+	fAlignCylinderRadio = new BRadioButton("alignCylinder",
+		B_TRANSLATE("Cylinder boundary (legacy)"), NULL);
+	fAlignNoneRadio = new BRadioButton("alignNone",
+		B_TRANSLATE("None"), NULL);
 
 	CreateChangeControls(NULL, parent);
 
@@ -169,4 +215,32 @@ CreateParametersPanel::_UpdateSizeTextControl()
 	BString sizeString;
 	sizeString << fSizeSlider->Size() / kMegaByte;
 	fSizeTextControl->SetText(sizeString.String());
+}
+
+
+off_t
+CreateParametersPanel::_AlignmentGranularity() const
+{
+	if (fAlign4MiBRadio->Value() == B_CONTROL_ON)
+		return 4 * off_t(kMegaByte);
+	if (fAlignCylinderRadio->Value() == B_CONTROL_ON)
+		return kCylinderSize;
+	if (fAlignNoneRadio->Value() == B_CONTROL_ON)
+		return 0;
+	return off_t(kMegaByte);
+}
+
+
+off_t
+CreateParametersPanel::_AlignOffset(off_t offset) const
+{
+	off_t granularity = _AlignmentGranularity();
+	if (granularity <= 0)
+		return offset;
+
+	off_t remainder = offset % granularity;
+	if (remainder == 0)
+		return offset;
+
+	return offset + (granularity - remainder);
 }

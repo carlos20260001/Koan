@@ -28,6 +28,7 @@
 #include "icons.h"
 #include "EncryptionUtils.h"
 #include "MainWindow.h"
+#include "Support.h"
 
 
 #undef B_TRANSLATION_CONTEXT
@@ -116,7 +117,7 @@ public:
 	virtual void MouseDown(BPoint where)
 	{
 		BMessage message(MSG_SELECTED_PARTITION_ID);
-		message.AddInt32("partition_id", fID);
+		message.AddInt64("partition_id", fID);
 		Window()->PostMessage(&message);
 	}
 
@@ -357,8 +358,18 @@ public:
 		if (name.Length() == 0) {
 			if (partition->CountChildren() > 0)
 				name << partition->Type();
-			else
-				name.SetToFormat(B_TRANSLATE("Partition %ld"), (long int)partition->ID());
+			else {
+				BPath path;
+				if (partition->GetPath(&path) == B_OK)
+					name = path.Leaf();
+				else {
+					name.SetToFormat(B_TRANSLATE("Partition %" B_PRIdDEV),
+						partition->ID());
+				}
+				char sizeString[64];
+				name << " (" << string_for_size(partition->Size(), sizeString,
+					sizeof(sizeString)) << ")";
+			}
 		}
 		partition_id id = partition->ID();
 		PartitionView* view = new PartitionView(name.String(), scale, offset,
@@ -563,7 +574,7 @@ DiskView::SetDiskCount(int32 count)
 	fDiskCount = count;
 	if (count == 1) {
 		BMessage message(MSG_SELECTED_PARTITION_ID);
-		message.AddInt32("partition_id", 0);
+		message.AddInt64("partition_id", 0);
 		Window()->PostMessage(&message);
 	}
 }

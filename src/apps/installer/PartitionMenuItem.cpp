@@ -14,10 +14,10 @@ PartitionMenuItem::PartitionMenuItem(const char* name, const char* label,
 	:
 	BMenuItem(label, message),
 	fID(id),
-	fMenuLabel(strdup(menuLabel)),
-	fName(strdup(name)),
-	fIsValidTarget(true),
-	fIsWholeDisk(false)
+	// strdup(NULL) faults; callers pass NULL when the short name is unused.
+	fMenuLabel(menuLabel != NULL ? strdup(menuLabel) : NULL),
+	fName(name != NULL ? strdup(name) : NULL),
+	fIsValidTarget(true)
 {
 }
 
@@ -63,16 +63,3 @@ PartitionMenuItem::IsValidTarget() const
 	return fIsValidTarget;
 }
 
-
-void
-PartitionMenuItem::SetIsWholeDisk(bool isWholeDisk)
-{
-	fIsWholeDisk = isWholeDisk;
-}
-
-
-bool
-PartitionMenuItem::IsWholeDisk() const
-{
-	return fIsWholeDisk;
-}

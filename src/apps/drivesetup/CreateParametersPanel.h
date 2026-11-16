@@ -15,6 +15,16 @@
 
 
 class SizeSlider;
+class BRadioButton;
+
+
+// Start alignment options; 1 MiB default, others for GParted parity.
+enum alignment_mode {
+	ALIGN_1_MIB = 0,
+	ALIGN_4_MIB,
+	ALIGN_CYLINDER,
+	ALIGN_NONE
+};
 
 
 class CreateParametersPanel : public ChangeParametersPanel {
@@ -31,7 +41,7 @@ public:
 
 protected:
 	virtual bool				NeedsEditor() const;
-	virtual status_t			ParametersReceived(const BString& parameters,
+	virtual status_t			ParametersReceived(BString& parameters,
 									BMessage& storage);
 	virtual	void				AddControls(BLayoutBuilder::Group<>& builder,
 									BView* editorView);
@@ -42,9 +52,17 @@ private:
 
 			void				_UpdateSizeTextControl();
 
+			off_t				_AlignmentGranularity() const;
+			off_t				_AlignOffset(off_t offset) const;
+
 private:
 			SizeSlider*			fSizeSlider;
 			BTextControl*		fSizeTextControl;
+
+			BRadioButton*		fAlign1MiBRadio;
+			BRadioButton*		fAlign4MiBRadio;
+			BRadioButton*		fAlignCylinderRadio;
+			BRadioButton*		fAlignNoneRadio;
 };
 
 
