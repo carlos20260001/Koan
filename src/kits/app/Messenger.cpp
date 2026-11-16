@@ -325,7 +325,6 @@ BMessenger::_InitData(const char* signature, team_id team, status_t* _result)
 	if (team < 0) {
 		// no team ID given
 		if (signature != NULL) {
-			// Try existing launch communication data first
 			BMessage data;
 			if (BLaunchRoster().GetData(signature, data) == B_OK) {
 				info.port = data.GetInt32("port", -1);
@@ -334,8 +333,6 @@ BMessenger::_InitData(const char* signature, team_id team, status_t* _result)
 			if (info.port < 0) {
 				result = be_roster->GetAppInfo(signature, &info);
 				team = info.team;
-				// B_ERROR means that no application with the given signature
-				// is running. But we are supposed to return B_BAD_VALUE.
 				if (result == B_ERROR)
 					result = B_BAD_VALUE;
 			} else

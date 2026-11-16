@@ -1,4 +1,5 @@
 /*
+ * Copyright 2026, Dario Casalinuovo. All rights reserved.
  * Copyright 2001-2011, Haiku.
  * Distributed under the terms of the MIT License.
  *
@@ -58,7 +59,9 @@ LinkReceiver::LinkReceiver(port_id port)
 	:
 	fReceivePort(port), fRecvBuffer(NULL), fRecvPosition(0), fRecvStart(0),
 	fRecvBufferSize(0), fDataSize(0),
-	fReplySize(0), fReadError(B_OK)
+	fReplySize(0), fReadError(B_OK),
+	fCapAware(true), fReceivedCaps(NULL), fReceivedCapCount(0),
+	fReceivedCapCapacity(0)
 {
 }
 
@@ -66,6 +69,19 @@ LinkReceiver::LinkReceiver(port_id port)
 LinkReceiver::~LinkReceiver()
 {
 	free(fRecvBuffer);
+	free(fReceivedCaps);
+}
+
+
+status_t
+LinkReceiver::TakeVRefCaps(port_cap_out** outCaps, size_t* outCount)
+{
+	*outCaps = fReceivedCaps;
+	*outCount = fReceivedCapCount;
+	fReceivedCaps = NULL;
+	fReceivedCapCount = 0;
+	fReceivedCapCapacity = 0;
+	return B_OK;
 }
 
 
@@ -233,7 +249,38 @@ LinkReceiver::ReadFromPort(bigtime_t timeout)
 
 	STRACE(("info: LinkReceiver reading port %ld.\n", fReceivePort));
 	while (true) {
-		if (timeout != B_INFINITE_TIMEOUT) {
+		if (fCapAware) {
+			// Best-effort cap pickup; overflow degrades to no-caps.
+			size_t bufSz = fRecvBufferSize;
+			port_cap_out localCaps[16];
+			size_t capCount = 16;
+			uint32 flags = (timeout != B_INFINITE_TIMEOUT)
+				? B_TIMEOUT : 0;
+			bigtime_t to = (timeout != B_INFINITE_TIMEOUT)
+				? timeout : B_INFINITE_TIMEOUT;
+			do {
+				bufSz = fRecvBufferSize;
+				capCount = 16;
+				bytesRead = read_port_with_caps(fReceivePort, &code,
+					fRecvBuffer, &bufSz, localCaps, &capCount,
+					flags, to);
+			} while (bytesRead == B_INTERRUPTED);
+			if (bytesRead >= 0) {
+				bytesRead = (ssize_t)bufSz;
+				if (capCount > 0) {
+					port_cap_out* grown = (port_cap_out*)malloc(
+						capCount * sizeof(port_cap_out));
+					if (grown != NULL) {
+						memcpy(grown, localCaps,
+							capCount * sizeof(port_cap_out));
+						free(fReceivedCaps);
+						fReceivedCaps = grown;
+						fReceivedCapCount = capCount;
+						fReceivedCapCapacity = capCount;
+					}
+				}
+			}
+		} else if (timeout != B_INFINITE_TIMEOUT) {
 			do {
 				bytesRead = read_port_etc(fReceivePort, &code, fRecvBuffer,
 					fRecvBufferSize, B_TIMEOUT, timeout);
@@ -298,17 +345,26 @@ LinkReceiver::Read(void *data, ssize_t passedSize)
 		area_id sourceArea;
 		memcpy((void*)&sourceArea, fRecvBuffer + fRecvPosition, size);
 
+		void* areaAddress = NULL;
+		area_id clonedArea = B_ERROR;
+
 		area_info areaInfo;
-		if (get_area_info(sourceArea, &areaInfo) < B_OK)
-			fReadError = B_BAD_VALUE;
+		if (get_area_info(sourceArea, &areaInfo) == B_OK)
+			areaAddress = areaInfo.address;
 
-		if (fReadError >= B_OK) {
-			void* areaAddress = areaInfo.address;
+		if (areaAddress == NULL) {
+			// Area was transferred to us; clone it into our address space.
+			clonedArea = clone_area("recv_area", &areaAddress,
+				B_ANY_ADDRESS, B_READ_AREA | B_WRITE_AREA, sourceArea);
+			if (clonedArea < B_OK)
+				fReadError = B_BAD_VALUE;
+		}
 
-			if (areaAddress && sourceArea >= B_OK) {
-				memcpy(data, areaAddress, passedSize);
-				delete_area(sourceArea);
-			}
+		if (fReadError >= B_OK && areaAddress != NULL) {
+			memcpy(data, areaAddress, passedSize);
+			delete_area(sourceArea);
+			if (clonedArea >= B_OK)
+				delete_area(clonedArea);
 		}
 	} else {
 		memcpy(data, fRecvBuffer + fRecvPosition, size);
