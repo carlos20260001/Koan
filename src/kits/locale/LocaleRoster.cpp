@@ -1,10 +1,12 @@
 /*
  * Copyright 2003-2012, Haiku. All rights reserved.
+ * Copyright 2026, Dario Casalinuovo <b.vitruvio@gmail.com>.
  * Distributed under the terms of the MIT License.
  *
  * Authors:
  *		Axel Dörfler, axeld@pinc-software.de
  *		Oliver Tappe, zooey@hirschkaefer.de
+ *		Dario Casalinuovo
  */
 
 
@@ -39,6 +41,7 @@
 #include <unicode/locdspnm.h>
 #include <unicode/locid.h>
 #include <unicode/timezone.h>
+#include <unicode/uloc.h>
 
 
 using BPrivate::CatalogAddOnInfo;
@@ -71,8 +74,7 @@ country_code_for_language(const BLanguage& language)
 	if (language.IsCountrySpecific())
 		return language.CountryCode();
 
-	// TODO: implement for real! For now, we just map some well known
-	// languages to countries to make FirstBootPrompt happy.
+	// This switch encodes deliberate choices (ICU fallback handles the rest)
 	switch ((tolower(language.Code()[0]) << 8) | tolower(language.Code()[1])) {
 		case 'be':	// Belarus
 			return "BY";
@@ -119,7 +121,36 @@ country_code_for_language(const BLanguage& language)
 			return language.Code();
 	}
 
-	return NULL;
+	// Fall back to ICU's likely-subtags data for every language the switch
+	// above does not special-case (e.g. "id" -> ID, "tr" -> TR, "ga" -> IE).
+	UErrorCode status = U_ZERO_ERROR;
+	char maximized[ULOC_FULLNAME_CAPACITY];
+	uloc_addLikelySubtags(language.Code(), maximized, sizeof(maximized),
+		&status);
+	if (U_FAILURE(status))
+		return NULL;
+
+	status = U_ZERO_ERROR;
+	char country[ULOC_COUNTRY_CAPACITY];
+	int32_t countryLength = uloc_getCountry(maximized, country,
+		sizeof(country), &status);
+	if (U_FAILURE(status))
+		return NULL;
+
+	// A country code must be exactly two ASCII letters. ICU falls back to a
+	// UN M.49 region number (e.g. "001" for Esperanto) when a language has
+	// no country at all; reject that instead of passing it on.
+	if (countryLength != 2 || !isalpha((unsigned char)country[0])
+		|| !isalpha((unsigned char)country[1])) {
+		return NULL;
+	}
+
+	static thread_local char sCountryCode[3];
+	sCountryCode[0] = toupper((unsigned char)country[0]);
+	sCountryCode[1] = toupper((unsigned char)country[1]);
+	sCountryCode[2] = '\0';
+
+	return sCountryCode;
 }
 
 
