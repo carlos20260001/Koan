@@ -1,0 +1,12 @@
+# Lights boot splash stage %i (see src/system/boot_splash/splash_stages.h).
+# The ordering of each stage is in vos-splash-stage@N.service.d/. Without a
+# splash daemon this does nothing.
+[Unit]
+Description=air/OS boot splash stage %i
+DefaultDependencies=no
+ConditionKernelCommandLine=splash
+ConditionKernelCommandLine=!nosplash
+
+[Service]
+Type=oneshot
+ExecStart=/usr/libexec/vos-splash --stage %i

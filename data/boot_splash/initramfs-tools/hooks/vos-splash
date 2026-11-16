@@ -1,0 +1,16 @@
+#!/bin/sh
+# Copies the air/OS boot splash (vos-splash, static) into the initramfs.
+# It draws on the firmware frame buffer (efifb/simpledrm) the kernel brings
+# up before any GPU driver, and moves to the real DRM driver when udev loads
+# it on the real root.
+PREREQ=""
+prereqs() { echo "$PREREQ"; }
+case "$1" in
+	prereqs) prereqs; exit 0 ;;
+esac
+
+. /usr/share/initramfs-tools/hook-functions
+
+[ -x /usr/libexec/vos-splash ] || exit 0
+copy_exec /usr/libexec/vos-splash /bin/vos-splash
+exit 0

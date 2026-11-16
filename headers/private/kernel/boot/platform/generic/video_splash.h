@@ -9,7 +9,9 @@
 #include <SupportDefs.h>
 
 
-void
+// Linux port: static inline, since vos-splash links the boot loader and
+// kernel halves into one program and both include this header.
+static inline void
 compute_splash_logo_placement(uint32 screenWidth, uint32 screenHeight,
 	int& width, int& height, int& x, int& y)
 {
@@ -28,7 +30,7 @@ compute_splash_logo_placement(uint32 screenWidth, uint32 screenHeight,
 }
 
 
-void
+static inline void
 compute_splash_icons_placement(uint32 screenWidth, uint32 screenHeight,
 	int& width, int& height, int& x, int& y)
 {
