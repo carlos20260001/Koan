@@ -17,10 +17,16 @@ pipeline inside Koan's Podman container.
   Haiku file already exists (keyboard/mouse add-ons, three `libroot/posix`
   files, shared headers) the VitruvianOS change is applied as a three-way
   merge onto the air/OS version.
-- **CMake beside Jam.** Every directory that is ported gets a
-  `CMakeLists.txt` (VitruvianOS's where it has one, written new otherwise).
-  Jamfiles are left in place so the Jam build of air/OS keeps working; they
-  are retired only once the CMake build covers the same targets.
+- **CMake replaces Jam, directory by directory.** Every directory that is
+  ported gets a `CMakeLists.txt` (VitruvianOS's where it has one, written new
+  otherwise). Decision of 2026-11-16: the target is Linux + Nexus only, so a
+  directory's Jamfile is deleted as soon as CMake builds its replacement, and
+  the parent Jamfile stops including it. Directories whose CMake side does
+  not build yet keep their Jamfile until it does.
+- **No Haiku kernel.** `src/system/kernel` holds only Nexus and its
+  `CMakeLists.txt` (2026-11-16). Jam targets that compiled kernel sources
+  (boot loader, runtime loader, kernel add-ons/drivers, some tests) no longer
+  build; what to do with them is decision D1 below.
 - **Authorship.** A port is a commit whose git Author is the VitruvianOS
   author. Single commits: `git cherry-pick -x`. Snapshots (first landing of a
   component): Author = the dominant upstream author, message says
@@ -175,6 +181,23 @@ scroll phases), so this is a three-way merge, not a copy.
       `x-vnd.Haiku-KeyboardInputServerDevice` (`25ceefa95a`'s tree-wide signature
       rename is a separate decision; the VOS path launches `x-vnd.vos-Terminal`)
 
+### M6 - Retire Haiku-only code (decision 2026-11-16)
+- [x] Haiku kernel sources deleted (612 files), `src/system/kernel` keeps
+      `CMakeLists.txt` + `nexus` — `564cc23cd0`
+- [x] Jamfiles retired where CMake builds the replacement: all 78 under
+      `src/system/libroot`, `devices/keyboard`, `devices/mouse`; parents updated — `c96ff2222f`
+- [x] After both: `vos-configure` "Configured correctly!", `ninja root` →
+      `libroot.so`, `ninja nexus` → `nexus-dkms_*.deb` (container)
+- Kept for now (CMake side not building yet): `src/bin/rc`, `src/build/*`,
+  `src/tools/locale`, `src/kits/support` Jamfiles
+- [ ] D1: delete the other Haiku-kernel-only trees — `src/system/boot`,
+      `src/system/runtime_loader`, `src/system/glue`, `src/system/ldscripts`,
+      `src/add-ons/kernel` (drivers), Haiku libroot sources under
+      `src/system/libroot/{os,posix/*}` not used by CMake; 66 Jamfiles/jam rules
+      still reference `src system kernel`
+- [ ] D2: drop the dead `#else // !__VOS__` Haiku branches in the keyboard and
+      mouse add-ons, and `movement_maker.*`, now that nothing builds them
+
 ### Not started (later milestones)
 - Kits (`libbe`) and `input_server` on CMake, needed before M5 can link
 - app_server on DRM, registrar, the rest of the VitruvianOS userland
@@ -190,3 +213,4 @@ scroll phases), so this is a three-way merge, not a copy.
 | 2026-11-15 | `ce44a5947b` | M2: Podman build container merged (`port/docker-builder`); pipeline reaches configure with prebuilt buildtools |
 | 2026-11-15 | `3a28f25a0b` | M4: libroot2 merged (`port/libroot2`); `libroot.so` links in the container |
 | 2026-11-15 | | Integrated check on the merged tree (`vitruvian_build` container, Koan buildtools mounted): `vos-configure` "Configured correctly!", `ninja root` → `libroot.so` (620680 bytes), `ninja nexus` → `nexus-dkms_0.3.0+git0.unknown_all.deb` |
+| 2026-11-16 | `c96ff2222f` | M6: Haiku kernel and the replaced Jamfiles deleted; root + nexus still build |
