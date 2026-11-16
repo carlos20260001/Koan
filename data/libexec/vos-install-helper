@@ -1,0 +1,2761 @@
+#!/bin/sh
+
+set -eu
+
+PATH="/usr/sbin:/sbin:/usr/bin:/bin:$PATH"
+export PATH
+
+log() { printf '[vos-install-helper] %s\n' "$*" >&2; }
+
+# Read-only, root-free; runs before the lib is sourced, so self-contained.
+_do_partition_capabilities() {
+    _requested="${1:-}"
+
+    _cap_one() {
+        _fs="$1"
+        case "$_fs" in
+            intel)   _tools="sfdisk";    _create_tool="sfdisk" ;;
+            gpt)     _tools="sfdisk";    _create_tool="sfdisk" ;;
+            ext4)    _tools="mkfs.ext4 dumpe2fs e2fsck resize2fs tune2fs e4defrag"
+                     _create_tool="mkfs.ext4" ;;
+            fat)     _tools="mkfs.fat fsck.fat fatlabel"
+                     _create_tool="mkfs.fat" ;;
+            xfs)     _tools="mkfs.xfs xfs_admin xfs_db xfs_growfs xfs_repair"
+                     _create_tool="mkfs.xfs" ;;
+            btrfs)   _tools="mkfs.btrfs btrfs btrfstune"
+                     _create_tool="mkfs.btrfs" ;;
+            linux-swap) _tools="mkswap swaplabel"; _create_tool="mkswap" ;;
+            luks)    _tools="cryptsetup"; _create_tool="" ;;
+                     # luks_create not wired in apply yet; create stays "none".
+            *)       return 1 ;;
+        esac
+
+        _present=""
+        _missing=""
+        for _t in $_tools; do
+            if command -v "$_t" >/dev/null 2>&1; then
+                _present="$_present${_present:+ }$_t"
+            else
+                _missing="$_missing${_missing:+ }$_t"
+            fi
+        done
+
+        _create="none"
+        _read_uuid="none"
+        _read_label="none"
+        if [ -n "$_create_tool" ] && command -v "$_create_tool" >/dev/null 2>&1
+        then
+            _create="external"
+            case "$_fs" in
+                intel|gpt) ;;
+                *) _read_uuid="external"; _read_label="external" ;;
+            esac
+        fi
+
+        _grow="none"; _shrink="none"; _check="none"; _write_label="none"
+        _move="none"
+        _online_grow="0"; _online_shrink="0"
+        _have() { command -v "$1" >/dev/null 2>&1; }
+        case "$_fs" in
+            ext4)
+                _have resize2fs && _grow="external" && _shrink="external"
+                _have e2fsck && _check="external"
+                _have e2label && _write_label="external"
+                _have resize2fs && _online_grow="1"
+                ;;
+            xfs)
+                # No shrink tool exists for xfs (P3-2/P3-3).
+                _have xfs_growfs && _grow="external" && _online_grow="1"
+                _have xfs_repair && _check="external"
+                _have xfs_admin && _write_label="external"
+                ;;
+            fat)
+                # FAT resize: permanent; no libparted, fatresize unsafe.
+                _have fsck.fat && _check="external"
+                _have fatlabel && _write_label="external"
+                ;;
+            btrfs)
+                _have btrfs && _check="external" && _write_label="external"
+                _have btrfs && _grow="external" && _shrink="external"
+                _have btrfs && _online_grow="1" && _online_shrink="1"
+                ;;
+            linux-swap)
+                # mkswap recreates, not resizes; no grow or shrink capability.
+                _have swaplabel && _write_label="external"
+                ;;
+        esac
+        case "$_fs" in
+            ext4|fat|xfs|btrfs|linux-swap)
+                _have sfdisk && _move="external"
+                ;;
+        esac
+
+        printf 'filesystem=%s\n' "$_fs"
+        printf 'create=%s\n' "$_create"
+        printf 'grow=%s\n' "$_grow"
+        printf 'shrink=%s\n' "$_shrink"
+        printf 'move=%s\n' "$_move"
+        printf 'check=%s\n' "$_check"
+        printf 'read_label=%s\n' "$_read_label"
+        printf 'write_label=%s\n' "$_write_label"
+        printf 'read_uuid=%s\n' "$_read_uuid"
+        printf 'write_uuid=none\n'
+        printf 'online_grow=%s\n' "$_online_grow"
+        printf 'online_shrink=%s\n' "$_online_shrink"
+        for _t in $_present; do printf 'tools_present=%s\n' "$_t"; done
+        for _t in $_missing; do printf 'tools_missing=%s\n' "$_t"; done
+        printf 'minSizeMiB=\n'
+        printf 'maxSizeMiB=\n'
+    }
+
+    _kMustTier="intel gpt ext4 fat xfs btrfs linux-swap luks"
+
+    if [ -n "$_requested" ]; then
+        case " $_kMustTier " in
+            *" $_requested "*) ;;
+            *) log "capabilities: unknown filesystem: $_requested"; return 1 ;;
+        esac
+        _cap_one "$_requested"
+        return 0
+    fi
+
+    for _fs in $_kMustTier; do
+        printf '[filesystem]\n'
+        _cap_one "$_fs"
+    done
+    return 0
+}
+
+if [ "${1:-}" = "partition" ] && [ "${2:-}" = "capabilities" ]; then
+    shift 2
+    _do_partition_capabilities "${1:-}"
+    exit $?
+fi
+
+# Per-instance, not per-filesystem like capabilities; reads raw device
+# metadata, so it is privileged (dispatched after the root check).
+_do_partition_size_limits() {
+    _sl_target="${1:-}"
+    _sl_fs="${2:-}"
+
+    if [ -z "$_sl_target" ] || [ ! -b "$_sl_target" ]; then
+        log "size-limits: not a block device: $_sl_target"
+        return 2
+    fi
+
+    if [ -z "$_sl_fs" ]; then
+        _sl_t="$(blkid -p -s TYPE -o value "$_sl_target" 2>/dev/null)"
+        case "$_sl_t" in
+            ext2|ext3|ext4) _sl_fs="ext4" ;;
+            vfat)           _sl_fs="fat32" ;;
+            *)              _sl_fs="$_sl_t" ;;
+        esac
+    fi
+    if [ -z "$_sl_fs" ]; then
+        log "size-limits: could not detect filesystem on $_sl_target"
+        return 1
+    fi
+
+    # Permanent: no libparted by design; fatresize unsafe. See P3-2c.
+    case "$_sl_fs" in
+        fat32|fat|vfat)
+            log "size-limits: fat32 is not resizable (permanent decision, see P3-2c)"
+            return 1
+            ;;
+    esac
+
+    _sl_disk="$(lsblk -no PKNAME "$_sl_target" 2>/dev/null | head -n1)"
+    [ -n "$_sl_disk" ] && _sl_disk="/dev/$_sl_disk"
+    if [ -z "$_sl_disk" ] || [ ! -b "$_sl_disk" ]; then
+        log "size-limits: cannot resolve parent disk of $_sl_target"
+        return 2
+    fi
+
+    _sl_disk_bytes="$(blockdev --getsize64 "$_sl_disk" 2>/dev/null || echo 0)"
+
+    _sl_max_mib="$(sfdisk --dump "$_sl_disk" 2>/dev/null | awk -v want="$_sl_target" -v diskbytes="$_sl_disk_bytes" '
+        /^sector-size:/ { ss = $2 }
+        /^\// {
+            # sfdisk right-aligns; start=/size= may be one field or two.
+            node = $1; st = ""; sz = ""
+            for (i = 2; i <= NF; i++) {
+                if ($i == "start=") { st = $(i + 1); gsub(",", "", st) }
+                else if ($i ~ /^start=[0-9]/) { st = $i; gsub("start=|,", "", st) }
+                if ($i == "size=") { sz = $(i + 1); gsub(",", "", sz) }
+                else if ($i ~ /^size=[0-9]/) { sz = $i; gsub("size=|,", "", sz) }
+            }
+            n++; NODE[n] = node; STARTB[n] = st * ss; SIZEB[n] = sz * ss
+        }
+        END {
+            idx = ""
+            for (i = 1; i <= n; i++) if (NODE[i] == want) idx = i
+            if (idx == "") exit 1
+            myendb = STARTB[idx] + SIZEB[idx]
+            nextb = diskbytes
+            for (i = 1; i <= n; i++) {
+                if (STARTB[i] >= myendb && STARTB[i] < nextb) nextb = STARTB[i]
+            }
+            gap = nextb - myendb
+            if (gap < 0) gap = 0
+            printf "%d\n", (SIZEB[idx] + gap) / 1048576
+        }
+    ')"
+    if [ -z "$_sl_max_mib" ]; then
+        log "size-limits: could not locate $_sl_target on $_sl_disk"
+        return 1
+    fi
+
+    _sl_cur_mib="$(_partlib_part_size_mib "$_sl_disk" "$_sl_target")"
+
+    # usedMiB is best-effort: filled only where the data is already at hand;
+    # empty means "disable the usage bar", not an oversight.
+    _sl_used_mib=""
+    case "$_sl_fs" in
+        ext4)
+            _sl_blocks="$(resize2fs -P "$_sl_target" 2>/dev/null | sed -n 's/^.*: *//p' | tail -n1)"
+            _sl_dumpe2fs="$(dumpe2fs -h "$_sl_target" 2>/dev/null)"
+            _sl_bs="$(printf '%s\n' "$_sl_dumpe2fs" | awk -F': *' '/^Block size:/ { print $2 }')"
+            if [ -z "$_sl_blocks" ] || [ -z "$_sl_bs" ]; then
+                log "size-limits: could not read ext4 minimum size for $_sl_target"
+                return 1
+            fi
+            _sl_min_mib=$(( (_sl_blocks * _sl_bs + 1048575) / 1048576 ))
+
+            _sl_block_count="$(printf '%s\n' "$_sl_dumpe2fs" | awk -F': *' '/^Block count:/ { print $2 }')"
+            _sl_free_blocks="$(printf '%s\n' "$_sl_dumpe2fs" | awk -F': *' '/^Free blocks:/ { print $2 }')"
+            if [ -n "$_sl_block_count" ] && [ -n "$_sl_free_blocks" ]; then
+                _sl_used_mib=$(( ((_sl_block_count - _sl_free_blocks) * _sl_bs) / 1048576 ))
+            fi
+            ;;
+        xfs)
+            [ -n "$_sl_cur_mib" ] || { log "size-limits: could not read current size of $_sl_target"; return 1; }
+            _sl_min_mib="$_sl_cur_mib"
+            ;;
+        btrfs)
+            # btrfs min-dev-size needs a mounted path, not the raw device.
+            mkdir -p /run/vos-partition-helper 2>/dev/null || true
+            _sl_mnt="$(mktemp -d /run/vos-partition-helper/mnt-XXXXXX 2>/dev/null)"
+            if [ -z "$_sl_mnt" ]; then
+                log "size-limits: could not create a temporary mountpoint for btrfs min-dev-size"
+                return 1
+            fi
+            if ! mount "$_sl_target" "$_sl_mnt" 2>/dev/null; then
+                log "size-limits: could not mount $_sl_target for btrfs min-dev-size"
+                rmdir "$_sl_mnt" 2>/dev/null || true
+                return 1
+            fi
+            _partlib_mount_track "$_sl_mnt"
+            _sl_min_bytes="$(btrfs inspect-internal min-dev-size "$_sl_mnt" 2>/dev/null | awk '{ print $1 }')"
+            # df's used figure; btrfs raw accounting double-counts metadata.
+            _sl_used_bytes="$(df -B1 --output=used "$_sl_mnt" 2>/dev/null | tail -n1 | tr -d ' ')"
+            _partlib_safe_umount "$_sl_mnt"
+            _partlib_mount_untrack "$_sl_mnt"
+            rmdir "$_sl_mnt" 2>/dev/null || true
+            if [ -z "$_sl_min_bytes" ]; then
+                log "size-limits: could not read btrfs minimum size for $_sl_target"
+                return 1
+            fi
+            _sl_min_mib=$(( (_sl_min_bytes + 1048575) / 1048576 ))
+            case "$_sl_used_bytes" in
+                ''|*[!0-9]*) ;;
+                *) _sl_used_mib=$(( _sl_used_bytes / 1048576 )) ;;
+            esac
+            ;;
+        swap)
+            log "size-limits: swap has no shrink floor; it is recreated, not resized (see _partlib_resize's swap:* arm)"
+            return 1
+            ;;
+        *)
+            log "size-limits: unsupported filesystem for size-limits: $_sl_fs"
+            return 1
+            ;;
+    esac
+
+    printf 'target=%s\n' "$_sl_target"
+    printf 'filesystem=%s\n' "$_sl_fs"
+    printf 'minSizeMiB=%s\n' "$_sl_min_mib"
+    printf 'maxSizeMiB=%s\n' "$_sl_max_mib"
+    printf 'usedMiB=%s\n' "$_sl_used_mib"
+    _do_partition_move_recovery_report "$_sl_disk" status
+    printf 'move_recovery=%s\n' "$_move_recovery"
+    printf 'move_recovery_detail=%s\n' "$_move_recovery_detail"
+    return 0
+}
+
+if [ "$(id -u)" -ne 0 ]; then
+    echo "vos-install-helper must run as root (invoke via pkexec)" >&2
+    exit 1
+fi
+
+_HELPER_DIR="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
+if [ -f "$_HELPER_DIR/vos-partition-lib.sh" ]; then
+    . "$_HELPER_DIR/vos-partition-lib.sh"
+else
+    . /usr/libexec/vos-partition-lib.sh
+fi
+
+EXCLUDES=/usr/share/vos/installer/excludes.list
+FULL_INSTALL_MOUNT=/run/vos/target
+
+_do_commit_setup() {
+    TARGET="$1"
+
+    _language=""
+    _keymap=""
+    _keymap_variant=""
+    _keymap_options=""
+    _username=""
+    _full_name=""
+    _hostname=""
+    _sudo_enabled=1
+    _autologin=0
+    _password=""
+    _root_password=""
+    while IFS= read -r _line || [ -n "$_line" ]; do
+        case "$_line" in ''|\#*) continue ;; esac
+        _k=${_line%%=*}
+        _v=${_line#*=}
+        case "$_k" in
+            language)      _language=$_v ;;
+            keymap)        _keymap=$_v ;;
+            keymap_variant) _keymap_variant=$_v ;;
+            keymap_options) _keymap_options=$_v ;;
+            username)      _username=$_v ;;
+            full_name)     _full_name=$_v ;;
+            hostname)      _hostname=$_v ;;
+            sudo_enabled)  _sudo_enabled=$_v ;;
+            autologin)     _autologin=$_v ;;
+            password)      _password=$_v ;;
+            root_password) _root_password=$_v ;;
+            *) log "ignoring unknown key: $_k" ;;
+        esac
+    done
+
+    if [ -z "$_username" ] || [ -z "$_password" ]; then
+        log "commit-setup: missing username or password"
+        return 2
+    fi
+
+    _validate_input() {
+        # username: [a-z_][a-z0-9_-]{0,31}, not reserved, <=32.
+        case "$_username" in
+            [!a-z_]*) log "invalid username (must start [a-z_]): $_username"; return 2 ;;
+        esac
+        case "$_username" in
+            *[!a-z0-9_-]*) log "invalid username (bad char): $_username"; return 2 ;;
+        esac
+        if [ "${#_username}" -gt 32 ]; then
+            log "username too long (>32): $_username"; return 2
+        fi
+        for _r in root daemon sys bin vos_login vos-live \
+                  _vitruvian-login nobody; do
+            if [ "$_username" = "$_r" ]; then
+                log "reserved username: $_username"; return 2
+            fi
+        done
+
+        # full_name: no ':' (passwd delimiter) or newline, <=80 (GECOS).
+        case "$_full_name" in
+            *:*) log "invalid full_name (contains ':')"; return 2 ;;
+        esac
+        case "$_full_name" in
+            *'
+'*) log "invalid full_name (contains newline)"; return 2 ;;
+        esac
+        if [ -n "$_full_name" ] && [ "${#_full_name}" -gt 80 ]; then
+            log "full_name too long (>80)"; return 2
+        fi
+
+        # hostname: RFC 1123 [a-z0-9-]{1,63}, no leading/trailing '-'.
+        if [ -n "$_hostname" ]; then
+            case "$_hostname" in
+                -*|*-) log "invalid hostname (leading/trailing '-')"; return 2 ;;
+                *[!a-z0-9-]*) log "invalid hostname (bad char): $_hostname"; return 2 ;;
+            esac
+            if [ "${#_hostname}" -gt 63 ]; then
+                log "hostname too long (>63): $_hostname"; return 2
+            fi
+        fi
+
+        # keymap / language: lowercase-alpha whitelist.
+        case "$_keymap" in
+            ''|[a-z]*) ;;
+            *) log "invalid keymap: $_keymap"; return 2 ;;
+        esac
+        case "$_keymap_variant" in
+            '') ;;
+            *[!a-z0-9_-]*)
+                log "invalid keymap variant: $_keymap_variant"; return 2 ;;
+        esac
+        case "$_keymap_options" in
+            '') ;;
+            *[!a-z0-9_:,-]*)
+                log "invalid keymap options: $_keymap_options"; return 2 ;;
+        esac
+        case "$_language" in
+            ''|[a-z]*) ;;
+            *) log "invalid language: $_language"; return 2 ;;
+        esac
+
+        # boolean fields: exactly 0 or 1.
+        case "$_sudo_enabled" in 0|1) ;; *) log "invalid sudo_enabled: $_sudo_enabled"; return 2 ;; esac
+        case "$_autologin" in 0|1) ;; *) log "invalid autologin: $_autologin"; return 2 ;; esac
+
+        return 0
+    }
+    _validate_input || return 2
+
+    _hash_password() {
+        if command -v mkpasswd >/dev/null 2>&1; then
+            printf '%s' "$1" | mkpasswd -m sha-512 -s
+        elif command -v openssl >/dev/null 2>&1; then
+            printf '%s' "$1" | openssl passwd -6 -stdin
+        else
+            log "no password hasher available (need mkpasswd or openssl)"
+            return 1
+        fi
+    }
+
+    _pw_hash=$(_hash_password "$_password")
+    _password=""
+    _root_hash=""
+    _VOS_ROOT_SET=0
+    if [ -n "$_root_password" ]; then
+        _VOS_ROOT_SET=1
+        _root_hash=$(_hash_password "$_root_password")
+        _root_password=""
+    fi
+
+    mkdir -p /run/vos
+    CONF=/run/vos/setup.conf
+    umask 077
+    : > "$CONF"
+    {
+        [ -n "$_language" ]  && printf 'language=%s\n'      "$_language"
+        [ -n "$_keymap" ]    && printf 'keymap=%s\n'        "$_keymap"
+        [ -n "$_keymap_variant" ] && \
+            printf 'keymap_variant=%s\n' "$_keymap_variant"
+        [ -n "$_keymap_options" ] && \
+            printf 'keymap_options=%s\n' "$_keymap_options"
+        [ -n "$_hostname" ]  && printf 'hostname=%s\n'      "$_hostname"
+        [ -n "$_full_name" ] && printf 'full_name=%s\n'     "$_full_name"
+        printf 'username=%s\n'       "$_username"
+        printf 'password_hash=%s\n'  "$_pw_hash"
+        [ -n "$_root_hash" ] && printf 'root_hash=%s\n'     "$_root_hash"
+        printf 'sudo_enabled=%s\n'   "$_sudo_enabled"
+        printf 'autologin=%s\n'      "$_autologin"
+    } > "$CONF"
+    chown root:root "$CONF"
+    chmod 0600 "$CONF"
+
+    /usr/libexec/vos-firstboot-commit --root="$TARGET" "$CONF"
+    _rc=$?
+    rm -f "$CONF"
+    if [ $_rc -ne 0 ]; then
+        log "vos-firstboot-commit failed (rc=$_rc)"
+        return $_rc
+    fi
+
+    if [ "$TARGET" = "/" ]; then
+        _in=""
+    else
+        _in="chroot $TARGET"
+    fi
+
+    if $_in getent group nexus >/dev/null 2>&1; then
+        $_in usermod -aG nexus "$_username" \
+            || log "warn: could not add $_username to nexus group"
+    fi
+
+    _pre_settings=/system/login/config/settings
+    _tgt_home=$($_in getent passwd "$_username" | cut -d: -f6)
+    if [ -n "$_tgt_home" ]; then
+        _tgt_settings="$TARGET$_tgt_home/config/settings"
+        mkdir -p "$_tgt_settings"
+        for _f in "Locale settings" Key_map; do
+            [ -f "$_pre_settings/$_f" ] || continue
+            cp -p "$_pre_settings/$_f" "$_tgt_settings/$_f" \
+                || log "warn: could not copy $_f to $_tgt_settings"
+        done
+        $_in chown -R "$_username:$_username" "$_tgt_home/config" \
+            || log "warn: could not chown $_tgt_home/config"
+    fi
+
+    $_in userdel -f -r vos-live 2>/dev/null || true
+    if $_in getent passwd vos-live >/dev/null 2>&1; then
+        log "userdel vos-live failed on target"; return 3
+    fi
+    $_in systemctl disable userbootscript@vos-live.service 2>/dev/null || true
+    rm -f "$TARGET/etc/vos/live" || {
+        log "cannot remove /etc/vos/live"; return 3; }
+    rm -f "$TARGET/etc/sudoers.d/vos-live" || {
+        log "cannot remove sudoers.d/vos-live"; return 3; }
+    rm -f "$TARGET/usr/share/polkit-1/rules.d/49-vitruvian-installer.rules" || {
+        log "cannot remove installer polkit rule"; return 3; }
+    if [ "${_VOS_KEEP_SSH:-0}" -ne 1 ]; then
+        $_in systemctl disable ssh.service 2>/dev/null || true
+        $_in systemctl disable sshd.service 2>/dev/null || true
+        $_in systemctl disable ssh.socket 2>/dev/null || true
+    fi
+
+    # janus's VOS_DEFAULT_USER must name the account this install created;
+    # the unit ships vos-live for the live ISO.
+    mkdir -p "$TARGET/etc/systemd/system/janus.service.d"
+    cat > "$TARGET/etc/systemd/system/janus.service.d/50-install-user.conf" <<EOF
+[Service]
+Environment=VOS_DEFAULT_USER=$_username
+EOF
+    $_in systemctl daemon-reload 2>/dev/null || true
+
+    log "commit-setup complete for user $_username"
+    return 0
+}
+
+_unmount_binds() {
+    for _fs in run sys proc dev/pts dev; do
+        umount -R "$1/$_fs" 2>/dev/null || true
+    done
+}
+
+# Hibernate needs a resume device with a known offset. Sized by $3 (MiB), else to RAM (capped at 32GiB);
+# skipped on an unsupported fs or tight headroom. Sets _SWAP_CREATED and _SWAP_RESUME_OFFSET (4096-unit blocks on ext4).
+_setup_swapfile() {
+    _sw_target="$1"; _sw_fstype="$2"; _sw_req_mib="${3:-}"
+
+    # Image builds and the host harness configure a tree that is not the
+    # running system; a RAM-sized swapfile does not belong there.
+    if [ "${VOS_INSTALL_NO_SWAPFILE:-0}" = "1" ]; then
+        log "hibernate: VOS_INSTALL_NO_SWAPFILE set; skipping swapfile"
+        return 0
+    fi
+
+    case "$_sw_fstype" in
+        ext4) : ;;
+        *)
+            log "hibernate: $_sw_fstype target, swapfile support not wired up for it; skipping"
+            return 0
+            ;;
+    esac
+
+    case "$_sw_req_mib" in
+        '')
+            _mem_kb="$(awk '/^MemTotal:/ {print $2; exit}' /proc/meminfo 2>/dev/null)"
+            case "$_mem_kb" in
+                ''|*[!0-9]*)
+                    log "hibernate: cannot read MemTotal; skipping swapfile"
+                    return 0
+                    ;;
+            esac
+            _swap_mib=$((_mem_kb / 1024))
+            _cap_mib=$((32 * 1024))
+            [ "$_swap_mib" -gt "$_cap_mib" ] && _swap_mib=$_cap_mib
+            ;;
+        *[!0-9]*)
+            log "swap: bad --swap-size '$_sw_req_mib'; skipping swapfile"
+            return 0
+            ;;
+        *) _swap_mib="$_sw_req_mib" ;;
+    esac
+    [ "$_swap_mib" -lt 1 ] && _swap_mib=1
+
+    _avail_kb="$(df -Pk "$_sw_target" 2>/dev/null | awk 'NR==2 {print $4}')"
+    case "$_avail_kb" in
+        ''|*[!0-9]*)
+            log "hibernate: cannot read free space on $_sw_target; skipping swapfile"
+            return 0
+            ;;
+    esac
+    _avail_mib=$((_avail_kb / 1024))
+    _need_mib=$((_swap_mib + 2048))
+    if [ "$_avail_mib" -lt "$_need_mib" ]; then
+        log "hibernate: only ${_avail_mib}MiB free on target (need ${_need_mib}MiB for a ${_swap_mib}MiB swapfile plus headroom); skipping swapfile"
+        return 0
+    fi
+
+    _swapfile="$_sw_target/swapfile"
+    rm -f "$_swapfile"
+    if ! fallocate -l "${_swap_mib}M" "$_swapfile" 2>/dev/null; then
+        log "hibernate: fallocate failed, falling back to dd (slow)"
+        if ! dd if=/dev/zero of="$_swapfile" bs=1M count="$_swap_mib" status=none 2>/dev/null; then
+            log "hibernate: could not create swapfile; skipping"
+            rm -f "$_swapfile"
+            return 0
+        fi
+    fi
+    if ! chmod 600 "$_swapfile"; then
+        log "hibernate: chmod 600 on swapfile failed; skipping"
+        rm -f "$_swapfile"
+        return 0
+    fi
+    if ! mkswap "$_swapfile" >/dev/null 2>&1; then
+        log "hibernate: mkswap failed; skipping swapfile"
+        rm -f "$_swapfile"
+        return 0
+    fi
+
+    _SWAP_CREATED=1
+    log "hibernate: swapfile created ($_swapfile, ${_swap_mib}MiB)"
+
+    if ! command -v filefrag >/dev/null 2>&1; then
+        log "hibernate: filefrag not available; swap is usable but resume_offset cannot be computed"
+        return 0
+    fi
+    _frag="$(filefrag -v "$_swapfile" 2>/dev/null)"
+    _extents="$(printf '%s\n' "$_frag" | grep -c '^ *[0-9][0-9]*: ')"
+    if [ "$_extents" -gt 1 ]; then
+        log "hibernate: swapfile has $_extents extents (fragmented); resume still works, the fs driver bmaps the rest"
+    fi
+    _offset="$(printf '%s\n' "$_frag" | awk '$1=="0:" {x=$4; sub(/\.\.$/, "", x); print x; exit}')"
+    case "$_offset" in
+        ''|*[!0-9]*)
+            log "hibernate: could not parse filefrag output; resume_offset unavailable"
+            return 0
+            ;;
+    esac
+    _SWAP_RESUME_OFFSET="$_offset"
+    return 0
+}
+
+# Swap partition: reused as is when it already holds a swap signature, mkswap'd only when blank.
+# Sets _SWAP_CREATED and _SWAP_PART_UUID; never touches the live system's swap.
+_setup_swap_partition() {
+    _sp_dev="$1"
+    if [ -z "$_sp_dev" ] || [ ! -b "$_sp_dev" ]; then
+        log "swap: not a block device: '$_sp_dev'; skipping swap"
+        return 0
+    fi
+    _sp_type="$(blkid -p -s TYPE -o value "$_sp_dev" 2>/dev/null || true)"
+    case "$_sp_type" in
+        swap) ;;
+        '')
+            if ! mkswap "$_sp_dev" >/dev/null 2>&1; then
+                log "swap: mkswap failed on $_sp_dev; skipping swap"
+                return 0
+            fi
+            ;;
+        *)
+            log "swap: $_sp_dev holds a $_sp_type filesystem, not swap; skipping swap"
+            return 0
+            ;;
+    esac
+    _sp_uuid="$(blkid -p -s UUID -o value "$_sp_dev" 2>/dev/null || true)"
+    if [ -z "$_sp_uuid" ]; then
+        log "swap: cannot read UUID of $_sp_dev; skipping swap"
+        return 0
+    fi
+    _SWAP_CREATED=1
+    _SWAP_PART_UUID="$_sp_uuid"
+    log "swap: using partition $_sp_dev (UUID=$_sp_uuid)"
+    return 0
+}
+
+# btrfs targets: fstab and the GRUB cmdline must name the @ subvolume,
+# or boot mounts the empty top level.
+_btrfs_subvols_active() {
+    [ -f "$1/etc/vos/btrfs-subvols" ]
+}
+
+# Creates the @/@home layout while the fresh target btrfs is mounted, the
+# only moment subvolumes can be created. Failure keeps the flat layout.
+_btrfs_setup_subvols() {
+    _bs_root="$1"
+    command -v btrfs >/dev/null 2>&1 || {
+        log "btrfs: btrfs-progs missing; keeping flat layout"; return 1; }
+    if ! btrfs subvolume show "$_bs_root/@" >/dev/null 2>&1; then
+        btrfs subvolume create "$_bs_root/@" || {
+            log "btrfs: could not create @ subvolume"; return 1; }
+    fi
+    if ! btrfs subvolume show "$_bs_root/@home" >/dev/null 2>&1; then
+        btrfs subvolume create "$_bs_root/@home" || {
+            log "btrfs: could not create @home subvolume"; return 1; }
+    fi
+    _bs_id="$(btrfs subvolume list -p "$_bs_root" 2>/dev/null \
+        | awk '$NF == "@" {print $2; exit}')"
+    case "$_bs_id" in
+        ''|*[!0-9]*)
+            log "btrfs: cannot resolve @ subvolume id; keeping flat layout"
+            return 1 ;;
+    esac
+    btrfs subvolume set-default "$_bs_id" "$_bs_root" || {
+        log "btrfs: could not set @ as default subvolume"; return 1; }
+    log "btrfs: @ and @home subvolumes created (@ is default)"
+    return 0
+}
+
+# TARGET, plus SOURCE/FSTYPE for an unmounted target. _VOS_CFG_ESP
+# overrides the ESP auto-scan.
+_do_config() {
+    TARGET="$1"
+
+    _live_source="$(findmnt -no SOURCE / || true)"
+    if [ -n "${2:-}" ]; then
+        _target_source="$2"
+        _target_fstype="${3:-$(blkid -p -s TYPE -o value "$2" 2>/dev/null)}"
+    else
+        _target_source="$(findmnt -no SOURCE "$TARGET" || true)"
+        _target_fstype="$(findmnt -no FSTYPE "$TARGET" || true)"
+    fi
+
+    if [ -z "$_target_source" ] || [ -z "$_target_fstype" ]; then
+        log "cannot resolve target block device / fstype"
+        return 2
+    fi
+    if [ -n "$_live_source" ] && [ "$_target_source" = "$_live_source" ]; then
+        log "target device matches live root ($_target_source); refusing"
+        return 2
+    fi
+
+    log "config: target=$TARGET (source=$_target_source fstype=$_target_fstype)"
+
+    : > "$TARGET/etc/machine-id"
+    rm -f "$TARGET/var/lib/dbus/machine-id"
+    systemd-machine-id-setup --root="$TARGET" \
+        || log "warn: systemd-machine-id-setup failed"
+
+    # Create host keys
+    mkdir -p "$TARGET/etc/ssh"
+    ssh-keygen -A -f "$TARGET" || log "warn: ssh-keygen -A returned an error"
+    # ssh-keygen -A exits 0 even when every key write failed, so verify
+    if [ ! -f "$TARGET/etc/ssh/ssh_host_ed25519_key" ]; then
+        log "warn: no sshd host keys in $TARGET/etc/sshd sshd will not start"
+    fi
+
+    _target_uuid="$(blkid -s UUID -o value "$_target_source" || true)"
+    if [ -z "$_target_uuid" ]; then
+        log "cannot resolve target UUID"
+        return 2
+    fi
+
+    # passno 0: no boot check (btrfs scrub is separate; fsck.xfs is a no-op).
+    # passno 1: e2fsck preen in the initramfs via initramfs-tools checkfs.
+    _fsck_pass=1
+    _home_line=""
+    case "$_target_fstype" in
+        btrfs)
+            _root_opts="defaults"; _fsck_pass=0
+            if _btrfs_subvols_active "$TARGET"; then
+                _root_opts="defaults,subvol=@"
+                _home_line="UUID=$_target_uuid  /home  btrfs  defaults,subvol=@home  0  0"
+            fi ;;
+        xfs)   _root_opts="defaults" ; _fsck_pass=0 ;;
+        *)     _root_opts="errors=remount-ro" ;;
+    esac
+
+    _SWAP_CREATED=0
+    _SWAP_RESUME_OFFSET=""
+    _SWAP_PART_UUID=""
+    # _VOS_CFG_SWAP (partition|file|none) comes from --full-install; unset sizes the swapfile to RAM.
+    case "${_VOS_CFG_SWAP:-}" in
+        none) log "swap: none requested" ;;
+        partition) _setup_swap_partition "${_VOS_CFG_SWAP_DEV:-}" ;;
+        file) _setup_swapfile "$TARGET" "$_target_fstype" "${_VOS_CFG_SWAP_SIZE:-}" ;;
+        *) _setup_swapfile "$TARGET" "$_target_fstype" ;;
+    esac
+
+    mkdir -p "$TARGET/etc/vos"
+    printf '%s\n' "$_target_fstype" > "$TARGET/etc/vos/root-fstype"
+    cat > "$TARGET/etc/fstab" <<EOF
+# /etc/fstab - written by vos-install-helper
+UUID=$_target_uuid  /  $_target_fstype  $_root_opts  0  $_fsck_pass
+tmpfs               /tmp  tmpfs  defaults,nosuid,nodev  0  0
+EOF
+    [ -n "$_home_line" ] && printf '%s\n' "$_home_line" >> "$TARGET/etc/fstab"
+    if [ "$_SWAP_CREATED" -eq 1 ]; then
+        if [ -n "$_SWAP_PART_UUID" ]; then
+            printf 'UUID=%s  none  swap  sw  0  0\n' "$_SWAP_PART_UUID" >> "$TARGET/etc/fstab"
+        else
+            printf '/swapfile  none  swap  sw  0  0\n' >> "$TARGET/etc/fstab"
+        fi
+    fi
+
+    # update-grub on the target must yield rw root, but the live rootfs often has no
+    # /etc/default/grub, so copy the packaged one from /usr/share/vos/grub/.
+    mkdir -p "$TARGET/etc/default"
+    if [ ! -f "$TARGET/usr/share/vos/grub/grub" ]; then
+        log "missing packaged /usr/share/vos/grub/grub on target; cannot write /etc/default/grub"
+        return 1
+    fi
+    cp "$TARGET/usr/share/vos/grub/grub" "$TARGET/etc/default/grub"
+
+    # The installer passes the ESP the user chose; fall back to scanning
+    # the target's own disk for one.
+    _esp_part="${_VOS_CFG_ESP:-}"
+    if [ -z "$_esp_part" ]; then
+        _target_disk="$(lsblk -no PKNAME "$_target_source" | head -n1)"
+        if [ -n "$_target_disk" ]; then
+            for _cand in $(lsblk -lnpo NAME "/dev/$_target_disk" 2>/dev/null | tail -n +2); do
+                case "$(lsblk -no PARTTYPE "$_cand" 2>/dev/null | head -n1)" in
+                    c12a7328-f81f-11d2-ba4b-00a0c93ec93b|0xef) ;;
+                    *) continue ;;
+                esac
+                _esp_part="$_cand"; break
+            done
+        fi
+    fi
+    [ "$_esp_part" = "none" ] && _esp_part=""
+    if [ -n "$_esp_part" ]; then
+        _esp_uuid="$(blkid -s UUID -o value "$_esp_part" || true)"
+        [ -n "$_esp_uuid" ] && printf 'UUID=%s  /boot/efi  vfat  umask=0077,shortname=mixed,nofail  0  2\n' \
+            "$_esp_uuid" >> "$TARGET/etc/fstab"
+    fi
+
+    for _fs in dev proc sys; do
+        mkdir -p "$TARGET/$_fs"
+        mount --rbind "/$_fs" "$TARGET/$_fs" \
+            || log "warn: cannot bind $_fs into target (chroot steps may fail)"
+    done
+    mkdir -p "$TARGET/run"
+    mount -t tmpfs tmpfs "$TARGET/run" \
+        || log "warn: cannot mount tmpfs on target /run"
+
+    rm -f "$TARGET"/usr/share/initramfs-tools/hooks/live* \
+          "$TARGET"/usr/share/initramfs-tools/scripts/live* \
+          "$TARGET"/etc/initramfs-tools/conf.d/live* 2>/dev/null || true
+    chroot "$TARGET" dpkg --purge --force-all \
+        live-boot live-boot-initramfs-tools live-config live-config-systemd \
+        live-tools 2>/dev/null || log "warn: live-boot purge incomplete"
+    # Installed targets boot with rw from GRUB; remount-fs must stay enabled
+    # (the live ISO image build masks it). See #271.
+    chroot "$TARGET" systemctl unmask systemd-remount-fs.service 2>/dev/null \
+        || log "warn: could not unmask systemd-remount-fs on target"
+    mkdir -p "$TARGET/etc/initramfs-tools/conf.d"
+    if [ "$_SWAP_CREATED" -eq 1 ] && [ -n "$_SWAP_PART_UUID" ]; then
+        # Swap partition: resume straight from its UUID, no offset.
+        printf 'RESUME=UUID=%s\n' "$_SWAP_PART_UUID" > "$TARGET/etc/initramfs-tools/conf.d/resume"
+        mkdir -p "$TARGET/etc/vos"
+        printf 'resume=UUID=%s\n' "$_SWAP_PART_UUID" > "$TARGET/etc/vos/resume-cmdline"
+        log "hibernate: resume configured (swap UUID=$_SWAP_PART_UUID)"
+    elif [ "$_SWAP_CREATED" -eq 1 ] && [ -n "$_SWAP_RESUME_OFFSET" ]; then
+        # Hibernate: the resume device is the root fs UUID and the offset is the swapfile's first block.
+        # initramfs-tools needs this before update-initramfs; _write_shim_grubcfg adds the kernel cmdline.
+        cat > "$TARGET/etc/initramfs-tools/conf.d/resume" <<EOF
+RESUME=UUID=$_target_uuid
+RESUME_OFFSET=$_SWAP_RESUME_OFFSET
+EOF
+        mkdir -p "$TARGET/etc/vos"
+        printf 'resume=UUID=%s resume_offset=%s\n' \
+            "$_target_uuid" "$_SWAP_RESUME_OFFSET" > "$TARGET/etc/vos/resume-cmdline"
+        log "hibernate: resume configured (UUID=$_target_uuid offset=$_SWAP_RESUME_OFFSET)"
+    else
+        # No swap in fstab; never record the live system's.
+        # Dropped afterwards so the target's own regenerations find its swap.
+        echo RESUME=none > "$TARGET/etc/initramfs-tools/conf.d/resume"
+        rm -f "$TARGET/etc/vos/resume-cmdline"
+    fi
+    _stage 88 initramfs
+    _ui_rc=0
+    chroot "$TARGET" update-initramfs -u -k all || _ui_rc=$?
+    [ "$_ui_rc" -eq 0 ] || log "warn: update-initramfs failed (status $_ui_rc)"
+    _tidy_initrds "$TARGET"
+    if [ "$_SWAP_CREATED" -ne 1 ]; then
+        rm -f "$TARGET/etc/initramfs-tools/conf.d/resume"
+    fi
+
+    _kver="$(ls -1 "$TARGET"/boot/vmlinuz-* 2>/dev/null | sort -V | tail -n1 | sed 's|.*/vmlinuz-||')"
+    if [ -n "$_kver" ]; then
+        ln -sfn "boot/vmlinuz-$_kver"    "$TARGET/vmlinuz"
+        ln -sfn "boot/initrd.img-$_kver" "$TARGET/initrd.img"
+    else
+        log "warn: no /boot/vmlinuz-* on target; /vmlinuz symlink not created"
+    fi
+
+    _unmount_binds "$TARGET"
+
+    rm -f "$TARGET/var/lib/vos/first-boot-done"
+
+    log "config complete (bootloader is a separate step)"
+    return 0
+}
+
+# Stray .new/.dpkg-bak mean an interrupted or failed run; drop them only
+# when the main initrd is a valid archive, otherwise keep them as evidence.
+_tidy_initrds() {
+    for _ti in "$1"/boot/initrd.img-*; do
+        case "$_ti" in *.new|*.dpkg-bak) continue ;; esac
+        [ -e "$_ti" ] || continue
+        _ti_v="${_ti##*/initrd.img-}"
+        if [ -s "$_ti" ] && chroot "$1" lsinitramfs "/boot/initrd.img-$_ti_v" >/dev/null 2>&1; then
+            rm -f "$_ti.new" "$_ti.dpkg-bak"
+        else
+            log "warn: initrd for $_ti_v missing or invalid"
+        fi
+    done
+}
+
+_BOOTROOT=/run/vos/bootroot
+
+_write_shim_grubcfg() {
+    _su="$1"; _sc="$2"; _kv="$3"; _troot="$4"
+
+    # Hibernate: _do_config leaves the resume= kernel params here when it provisioned a swapfile.
+    # Read fresh each call, since bootloader runs separately. Safe Mode never resumes, as it is the way out of a bad image.
+    _resume_cmdline=""
+    if [ -f "$_troot/etc/vos/resume-cmdline" ]; then
+        _resume_cmdline="$(cat "$_troot/etc/vos/resume-cmdline")"
+    fi
+
+    # The root fs driver must be embedded or GRUB cannot read its own
+    # kernel; btrfs boots land in the @ subvolume via rootflags.
+    _rootfstype="ext4"
+    [ -f "$_troot/etc/vos/root-fstype" ] \
+        && _rootfstype="$(cat "$_troot/etc/vos/root-fstype")"
+    _fs_insmod="insmod ext2"
+    _rootflags=""
+    # GRUB reads btrfs from the top level, ignoring the default subvolume.
+    _bootpfx=""
+    case "$_rootfstype" in
+        xfs)   _fs_insmod="insmod xfs" ;;
+        btrfs) _fs_insmod="insmod btrfs"
+               _btrfs_subvols_active "$_troot" \
+                   && _rootflags="rootflags=subvol=@" && _bootpfx="/@" ;;
+        fat)   _fs_insmod="insmod fat" ;;
+    esac
+
+    # Read by _write_efi_stub.
+    _SHIM_BOOTPFX="$_bootpfx"; _SHIM_FSINSMOD="$_fs_insmod"
+
+    # Debug builds ship vos-sshdebug.service; only then offer the Debug entry.
+    _debug_menuentry=""
+    if [ -f "$_troot/etc/systemd/system/vos-sshdebug.service" ]; then
+        _debug_menuentry="menuentry \"Vitruvian (SSH Debug)\" {
+    linux (\$root)$_bootpfx/boot/vmlinuz-$_kv root=UUID=$_su rw $_rootflags console=tty0 console=ttyS0,115200 earlyprintk=ttyS0,115200 ignore_loglevel vitruvian.sshdebug $_resume_cmdline
+    initrd (\$root)$_bootpfx/boot/initrd.img-$_kv
+}"
+    fi
+
+    cat > "$_sc" <<EOF
+insmod part_gpt
+insmod part_msdos
+insmod fat
+$_fs_insmod
+insmod search
+insmod search_fs_uuid
+insmod linux
+insmod normal
+insmod all_video
+insmod gfxterm
+search --no-floppy --fs-uuid --set=root $_su
+set timeout=3
+menuentry "Vitruvian" {
+    linux (\$root)$_bootpfx/boot/vmlinuz-$_kv root=UUID=$_su rw $_rootflags quiet splash fsck.mode=auto fsck.repair=preen $_resume_cmdline
+    initrd (\$root)$_bootpfx/boot/initrd.img-$_kv
+}
+menuentry "Vitruvian (Safe Mode)" {
+    insmod all_video
+    set gfxpayload=1024x768x32,1024x768,800x600,auto
+    linux (\$root)$_bootpfx/boot/vmlinuz-$_kv root=UUID=$_su rw $_rootflags nomodeset acpi=off noapic nosmp console=tty0 console=ttyS0,115200 earlyprintk=ttyS0,115200 ignore_loglevel systemd.show_status=true vitruvian.safemode vitruvian.disable_user_addons noresume
+    initrd (\$root)$_bootpfx/boot/initrd.img-$_kv
+}
+menuentry "Vitruvian (Recovery)" {
+    linux (\$root)$_bootpfx/boot/vmlinuz-$_kv root=UUID=$_su rw $_rootflags console=tty0 console=ttyS0,115200 earlyprintk=ttyS0,115200 ignore_loglevel vitruvian.recovery systemd.unit=rescue.target noresume
+    initrd (\$root)$_bootpfx/boot/initrd.img-$_kv
+}
+$_debug_menuentry
+if [ "\$grub_platform" = "efi" ]; then
+    menuentry "UEFI Firmware Settings" {
+        fwsetup
+    }
+fi
+EOF
+}
+
+# Stub for the standalone image: defers to the target's own grub.cfg so
+# kernel upgrades (update-grub) never leave a stale version embedded;
+# the full menu after it is the fallback if configfile fails.
+_write_efi_stub() {
+    _es_uuid="$1"; _es_full="$2"; _es_out="$3"
+    {
+        cat <<EOF
+insmod part_gpt
+insmod part_msdos
+insmod fat
+$_SHIM_FSINSMOD
+insmod search
+insmod search_fs_uuid
+insmod configfile
+search --no-floppy --fs-uuid --set=root $_es_uuid
+configfile (\$root)$_SHIM_BOOTPFX/boot/grub/grub.cfg
+EOF
+        cat "$_es_full"
+    } > "$_es_out"
+}
+
+# vitruvian writes \EFI\Vitruvian\ only; removable writes \EFI\BOOT\ and
+# never replaces another OS's loader unless allow-clobber is set.
+_install_grub_efi() {
+    _esp="$1"; _ruuid="$2"; _rmount="$3"
+    _efi_mode="${4:-vitruvian}"; _allow_clobber="${5:-0}"
+    command -v grub-mkstandalone >/dev/null 2>&1 || {
+        log "grub-mkstandalone not found (grub-common missing)"; return 1; }
+    _kver="$(ls -1 "$_rmount"/boot/vmlinuz-* 2>/dev/null | sort -V | tail -n1 | sed 's|.*/vmlinuz-||')"
+    if [ -z "$_kver" ]; then
+        log "no /boot/vmlinuz-* in target root; cannot build boot entry"; return 1
+    fi
+    case "$(uname -m)" in
+        x86_64)          _efi_fmt="x86_64-efi";  _boot_efi="BOOTX64.EFI"; _vendor_efi="grubx64.efi" ;;
+        aarch64|arm64)   _efi_fmt="arm64-efi";   _boot_efi="BOOTAA64.EFI"; _vendor_efi="grubaa64.efi" ;;
+        riscv64)         _efi_fmt="riscv64-efi"; _boot_efi="BOOTRISCV64.EFI"; _vendor_efi="grubriscv64.efi" ;;
+        i386|i486|i586|i686) _efi_fmt="i386-efi"; _boot_efi="BOOTIA32.EFI"; _vendor_efi="grubia32.efi" ;;
+        *) log "unsupported arch for EFI GRUB: $(uname -m)"; return 1 ;;
+    esac
+
+    if [ "$_efi_mode" = "removable" ]; then
+        _efi_out="$_esp/EFI/BOOT/$_boot_efi"
+        # The fallback path is shared: refuse to replace whatever is
+        # already there unless the user said so explicitly.
+        # Ours if a previous install left its marker; replacing it is safe.
+        if [ -f "$_efi_out" ] && [ "$_allow_clobber" -ne 1 ] \
+                && [ ! -f "$_esp/EFI/Vitruvian/installed-by-vos" ]; then
+            log "refusing to replace existing $_efi_out (possibly another OS's fallback loader); pass --allow-clobber-efi to overwrite"
+            return 1
+        fi
+    else
+        _efi_mode="vitruvian"
+        _efi_out="$_esp/EFI/Vitruvian/$_vendor_efi"
+    fi
+
+    _tmpcfg="$(mktemp)" || return 1
+    _fullcfg="$(mktemp)" || { rm -f "$_tmpcfg"; return 1; }
+    _write_shim_grubcfg "$_ruuid" "$_fullcfg" "$_kver" "$_rmount"
+    _write_efi_stub "$_ruuid" "$_fullcfg" "$_tmpcfg"
+    rm -f "$_fullcfg"
+    mkdir -p "$(dirname "$_efi_out")"
+    if ! grub-mkstandalone --format="$_efi_fmt" \
+            --output="$_efi_out" --locales="" --fonts="" \
+            "boot/grub/grub.cfg=$_tmpcfg"; then
+        rm -f "$_tmpcfg"; log "grub-mkstandalone ($_efi_fmt) failed"; return 1
+    fi
+    rm -f "$_tmpcfg"
+    _efi_was_ours=0
+    [ -f "$_esp/EFI/Vitruvian/installed-by-vos" ] && _efi_was_ours=1
+    mkdir -p "$_esp/EFI/Vitruvian"
+    : > "$_esp/EFI/Vitruvian/installed-by-vos"
+    if [ "$_efi_mode" = "vitruvian" ]; then
+        # Without an NVRAM entry firmware only looks at the fallback path;
+        # take it when free or ours, never over another OS's loader.
+        if [ ! -f "$_esp/EFI/BOOT/$_boot_efi" ] || [ "$_efi_was_ours" -eq 1 ]; then
+            mkdir -p "$_esp/EFI/BOOT"
+            cp "$_efi_out" "$_esp/EFI/BOOT/$_boot_efi" \
+                && log "EFI fallback loader installed: $_esp/EFI/BOOT/$_boot_efi" \
+                || log "warn: could not install the EFI fallback loader"
+        fi
+    fi
+    log "EFI bootloader installed ($_efi_mode): $_efi_out"
+    return 0
+}
+
+# target: "disk" writes the MBR / BIOS boot area of the whole disk; a
+# partition devnode writes that partition's boot sector instead.
+_install_grub_bios() {
+    _disk="$1"; _root="$2"; _bios_target="${3:-disk}"
+    [ -d /usr/lib/grub/i386-pc ] || {
+        log "no i386-pc GRUB modules; skipping BIOS bootloader"; return 1; }
+    command -v grub-install >/dev/null 2>&1 || {
+        log "grub-install not found; skipping BIOS bootloader"; return 1; }
+
+    if [ "$_bios_target" = "disk" ] || [ -z "$_bios_target" ]; then
+        _bios_dev="$_disk"; _bios_target="disk"
+        # GRUB's BIOS core needs a bios_boot gap on GPT; without one the
+        # install silently cannot boot, so refuse with the reason.
+        if sfdisk -d "$_disk" 2>/dev/null | grep -q '^label: gpt'; then
+            if ! sfdisk -d "$_disk" 2>/dev/null \
+                    | grep -qi '21686148-6449-6e6f-744e-656564454649'; then
+                log "GPT disk $_disk has no bios_grub partition; BIOS boot needs one (create it in the plan, or choose the ESP/none instead)"
+                return 1
+            fi
+        fi
+    else
+        _bios_dev="$_bios_target"
+    fi
+
+    mkdir -p "$_root/boot/grub"
+    if ! grub-install --target=i386-pc --boot-directory="$_root/boot" \
+            --modules="part_gpt part_msdos" "$_bios_dev" >/dev/null 2>&1; then
+        log "grub-install i386-pc failed for $_bios_dev"
+        return 1
+    fi
+    log "BIOS bootloader (i386-pc) installed to $_bios_target ($_bios_dev)"
+    return 0
+}
+
+_bootloader_cleanup() {
+    _unmount_binds "$_BOOTROOT"
+    umount "$_BOOTROOT/boot/efi" 2>/dev/null || true
+    umount -R "$_BOOTROOT" 2>/dev/null || true
+    rmdir "$_BOOTROOT" 2>/dev/null || true
+}
+
+# Installs the bootloader onto an already-mounted target root.
+#   $1 root mount   $2 root devnode (for BIOS disk target)   $3 root UUID
+#   $4 ESP devnode or empty (empty: no EFI install)
+#   $5 efi mode: vitruvian|removable|none
+#   $6 bios mode: disk|<devnode>|none
+#   $7 allow-clobber-efi   $8 nvram (1: also register a firmware entry)
+_bootloader_core() {
+    _bl_root="$1"; _bl_rootdev="$2"; _bl_ruuid="$3"
+    _bl_esp="$4"; _bl_efi="$5"; _bl_bios="$6"
+    _bl_clobber="${7:-0}"; _bl_nvram="${8:-0}"
+
+    # Firmware variables are unreachable off a non-UEFI boot: use the fallback path, no NVRAM.
+    if [ "$_bl_efi" != "none" ] && [ ! -d /sys/firmware/efi ]; then
+        log "running system is not UEFI; EFI loader goes to the fallback path, no NVRAM entry"
+        _bl_efi="removable"; _bl_nvram=0
+    fi
+
+    _bl_esp_owns=""
+    if [ -n "$_bl_esp" ] && [ "$_bl_efi" != "none" ]; then
+        mkdir -p "$_bl_root/boot/efi"
+        if ! mountpoint -q "$_bl_root/boot/efi"; then
+            if ! mount "$_bl_esp" "$_bl_root/boot/efi" \
+                    || ! mountpoint -q "$_bl_root/boot/efi"; then
+                log "warn: could not mount ESP $_bl_esp; EFI bootloader skipped"
+                _bl_esp=""
+            else
+                _bl_esp_owns=1
+            fi
+        fi
+    fi
+
+    _bl_rc=0
+    if [ "$_bl_efi" != "none" ]; then
+        if [ -z "$_bl_esp" ]; then
+            log "EFI bootloader requested but no ESP available"; _bl_rc=1
+        elif ! _install_grub_efi "$_bl_root/boot/efi" "$_bl_ruuid" \
+                "$_bl_root" "$_bl_efi" "$_bl_clobber"; then
+            _bl_rc=1
+        elif [ "$_bl_nvram" -eq 1 ]; then
+            case "$(uname -m)" in
+                x86_64) _bl_efi_fmt="x86_64-efi" ;;
+                aarch64|arm64) _bl_efi_fmt="arm64-efi" ;;
+                *) _bl_efi_fmt="" ;;
+            esac
+            if [ -n "$_bl_efi_fmt" ] && command -v grub-install >/dev/null 2>&1; then
+                grub-install --target="$_bl_efi_fmt" \
+                    --efi-directory="$_bl_root/boot/efi" \
+                    --bootloader-id=Vitruvian --recheck >/dev/null 2>&1 \
+                    || log "warn: NVRAM boot entry registration failed (file install is still in place)"
+            fi
+        fi
+    fi
+
+    if [ "$_bl_bios" != "none" ] && [ -n "$_bl_bios" ]; then
+        _bl_disk="$_bl_rootdev"
+        if [ "$_bl_bios" = "disk" ]; then
+            _bl_disk="$(lsblk -no PKNAME "$_bl_rootdev" 2>/dev/null | head -n1)"
+            [ -n "$_bl_disk" ] && _bl_disk="/dev/$_bl_disk"
+            [ -b "$_bl_disk" ] || {
+                log "cannot resolve target disk from $_bl_rootdev"; _bl_rc=1; _bl_disk="" ; }
+        fi
+        if [ -n "$_bl_disk" ]; then
+            _install_grub_bios "$_bl_disk" "$_bl_root" "$_bl_bios" \
+                || _bl_rc=1
+        fi
+    fi
+
+    [ -n "$_bl_esp_owns" ] && umount "$_bl_root/boot/efi" 2>/dev/null
+    return $_bl_rc
+}
+
+# usage: vos-install-helper bootloader <device-on-target-disk>
+#        [--esp <devnode>|none] [--bios disk|<devnode>|none]
+#        [--removable] [--nvram] [--allow-clobber-efi]
+# Without flags the historical auto mode runs: every ESP and the disk MBR.
+_do_bootloader() {
+    _arg="${1:-}"
+    if [ -z "$_arg" ]; then
+        echo "usage: vos-install-helper bootloader <device-on-target-disk>" >&2
+        echo "       [--esp <devnode>|none] [--bios disk|<devnode>|none]" >&2
+        echo "       [--removable] [--nvram] [--allow-clobber-efi]" >&2
+        return 1
+    fi
+    if [ ! -b "$_arg" ]; then
+        log "not a block device: $_arg"; return 2
+    fi
+    shift
+
+    _esp_choice=""; _bios_choice=""; _efi_mode="vitruvian"
+    _allow_clobber=0; _nvram=0; _explicit=0
+    while [ $# -gt 0 ]; do
+        case "$1" in
+            --esp)
+                [ $# -ge 2 ] || { log "--esp needs a value"; return 2; }
+                _esp_choice="$2"; _explicit=1; shift 2 ;;
+            --bios)
+                [ $# -ge 2 ] || { log "--bios needs a value"; return 2; }
+                _bios_choice="$2"; _explicit=1; shift 2 ;;
+            --removable) _efi_mode="removable"; shift ;;
+            --nvram) _nvram=1; shift ;;
+            --allow-clobber-efi) _allow_clobber=1; shift ;;
+            *) log "unknown bootloader option: $1"; return 2 ;;
+        esac
+    done
+
+    # Resolve the whole disk ($_arg may be a partition or the disk itself).
+    _disk="$(lsblk -no PKNAME "$_arg" 2>/dev/null | head -n1)"
+    [ -n "$_disk" ] && _disk="/dev/$_disk" || _disk="$_arg"
+    [ -b "$_disk" ] || { log "cannot resolve target disk from $_arg"; return 2; }
+
+    _esp_part=""; _root_part=""
+    for _p in $(lsblk -lnpo NAME "$_disk" 2>/dev/null | tail -n +2); do
+        case "$(lsblk -no PARTTYPE "$_p" 2>/dev/null | head -n1)" in
+            c12a7328-f81f-11d2-ba4b-00a0c93ec93b|0xef) [ -z "$_esp_part" ] && _esp_part="$_p" ;;
+        esac
+        case "$(blkid -s LABEL -o value "$_p" 2>/dev/null || true)" in
+            vitruvian-data|vitruvian-root) _root_part="$_p" ;;
+        esac
+    done
+    # A partition passed by the caller is the root, whatever it is labelled.
+    if [ "$_arg" != "$_disk" ]; then
+        case "$(blkid -s TYPE -o value "$_arg" 2>/dev/null || true)" in
+            ext4|ext3|ext2|xfs|btrfs) _root_part="$_arg" ;;
+        esac
+    fi
+    if [ -z "$_root_part" ]; then
+        _rc=0
+        for _p in $(lsblk -lnpo NAME "$_disk" 2>/dev/null | tail -n +2); do
+            case "$(blkid -s TYPE -o value "$_p" 2>/dev/null || true)" in
+                ext4|ext3|ext2|xfs|btrfs) _rc=$((_rc + 1)); _root_part="$_p" ;;
+            esac
+        done
+        if [ "$_rc" -gt 1 ]; then
+            log "multiple candidate root partitions on $_disk and none labelled vitruvian-*; refusing to guess"
+            return 2
+        fi
+    fi
+    [ -n "$_root_part" ] || { log "no Vitruvian root filesystem found on $_disk"; return 2; }
+    _ruuid="$(blkid -s UUID -o value "$_root_part" || true)"
+    [ -n "$_ruuid" ] || { log "cannot read root UUID of $_root_part"; return 2; }
+
+    if [ "$_explicit" -eq 0 ]; then
+        _esp_choice="$_esp_part"; [ -z "$_esp_choice" ] && _esp_choice="none"
+        _bios_choice="disk"
+    fi
+    case "$_esp_choice" in
+        none) _esp_part="" ;;
+        '')   _esp_part="" ;;
+        *)    _esp_part="$_esp_choice" ;;
+    esac
+
+    mkdir -p "$_BOOTROOT"
+    if mountpoint -q "$_BOOTROOT"; then
+        log "bootroot scratch mount already in use: $_BOOTROOT"; return 2
+    fi
+    mount "$_root_part" "$_BOOTROOT" || { log "cannot mount root $_root_part"; return 2; }
+    trap '_bootloader_cleanup' EXIT INT TERM
+
+    for _fs in dev proc sys run; do
+        mkdir -p "$_BOOTROOT/$_fs"
+        mount --rbind "/$_fs" "$_BOOTROOT/$_fs" \
+            || log "warn: cannot bind $_fs into bootroot"
+    done
+
+    _kver="$(ls -1 "$_BOOTROOT"/boot/vmlinuz-* 2>/dev/null | sort -V | tail -n1 | sed 's|.*/vmlinuz-||')"
+    if [ -n "$_kver" ]; then
+        mkdir -p "$_BOOTROOT/boot/grub"
+        _write_shim_grubcfg "$_ruuid" "$_BOOTROOT/boot/grub/grub.cfg" "$_kver" "$_BOOTROOT" \
+            || log "warn: could not write /boot/grub/grub.cfg (BIOS menu may be minimal)"
+    else
+        log "warn: no /boot/vmlinuz-* under target; skipping BIOS grub.cfg"
+    fi
+
+    if _bootloader_core "$_BOOTROOT" "$_root_part" "$_ruuid" "$_esp_part" \
+            "$_efi_mode" "$_bios_choice" "$_allow_clobber" "$_nvram"; then
+        log "bootloader install complete on $_disk (efi=$_efi_mode bios=${_bios_choice:-none})"
+        return 0
+    fi
+    log "bootloader install failed on $_disk"
+    return 3
+}
+
+_do_bootloader_setup() {
+    _new_default="${1:-}"
+    _new_timeout="${2:-}"
+
+    _cfg=/boot/grub/grub.cfg
+    if [ -f "$_cfg" ]; then
+        log "current GRUB menu entries:"
+        grep -n '^menuentry ' "$_cfg" | sed "s/^/  /" >&2
+    else
+        log "warn: $_cfg not found; nothing to list"
+    fi
+
+    [ -n "$_new_default" ] || [ -n "$_new_timeout" ] || return 0
+
+    if [ ! -f "$_cfg" ]; then
+        log "cannot set default/timeout: $_cfg not found"
+        return 2
+    fi
+
+    if [ -n "$_new_default" ]; then
+        case "$_new_default" in
+            *[!0-9]*) log "invalid default (must be a numeric menu index): $_new_default"; return 2 ;;
+        esac
+        if grep -q '^set default=' "$_cfg"; then
+            sed -i "s/^set default=.*/set default=$_new_default/" "$_cfg"
+        else
+            sed -i "/^search .*--set=root/a set default=$_new_default" "$_cfg"
+        fi
+    fi
+    if [ -n "$_new_timeout" ]; then
+        case "$_new_timeout" in
+            *[!0-9]*) log "invalid timeout (must be numeric seconds): $_new_timeout"; return 2 ;;
+        esac
+        if grep -q '^set timeout=' "$_cfg"; then
+            sed -i "s/^set timeout=.*/set timeout=$_new_timeout/" "$_cfg"
+        else
+            sed -i "/^search .*--set=root/a set timeout=$_new_timeout" "$_cfg"
+        fi
+    fi
+
+    log "bootloader setup complete (default=${_new_default:-unchanged} timeout=${_new_timeout:-unchanged})"
+    return 0
+}
+
+# =========================== partition plan ================================
+
+_PLAN_MAX_BYTES=65536
+
+_partition_front_door() {
+    _plan="${1:-}"
+    if [ -z "$_plan" ]; then
+        echo "usage: vos-install-helper partition {validate|apply} <plan>" >&2
+        return 1
+    fi
+    if [ ! -f "$_plan" ]; then
+        log "plan file does not exist: $_plan"
+        return 2
+    fi
+    _plan_size="$(wc -c < "$_plan" 2>/dev/null || echo 0)"
+    if [ "$_plan_size" -gt "$_PLAN_MAX_BYTES" ]; then
+        log "plan file too large (>${_PLAN_MAX_BYTES} bytes): $_plan"
+        return 2
+    fi
+
+    _plan_version=""
+    _plan_disk=""
+    _plan_table_type=""
+    while IFS= read -r _pfd_line || [ -n "$_pfd_line" ]; do
+        case "$_pfd_line" in
+            ''|'#'*) continue ;;
+            \[*) break ;;
+        esac
+        _partlib_kv_split "$_pfd_line" || {
+            log "plan: malformed header line: $_pfd_line"; return 2; }
+        case "$_KV_KEY" in
+            plan_version) _plan_version="$_KV_VAL" ;;
+            disk)         _plan_disk="$_KV_VAL" ;;
+            table_type)   _plan_table_type="$_KV_VAL" ;;
+            *) log "plan: unknown header key: $_KV_KEY"; return 2 ;;
+        esac
+    done < "$_plan"
+
+    if [ "$_plan_version" != "1" ]; then
+        log "unsupported plan_version: ${_plan_version:-<missing>}"
+        return 2
+    fi
+
+    case "$_plan_disk" in
+        /dev/[A-Za-z0-9_/-]*) ;;
+        *) log "invalid or missing disk path: $_plan_disk"; return 2 ;;
+    esac
+    [ -b "$_plan_disk" ] || { log "not a block device: $_plan_disk"; return 2; }
+
+    case "$_plan_table_type" in
+        gpt|mbr|'') ;;
+        *) log "invalid table_type: $_plan_table_type"; return 2 ;;
+    esac
+
+    return 0
+}
+
+_partition_check_int() {
+    case "$1" in
+        -1) return 0 ;;
+        *[!0-9]*) return 1 ;;
+        '') return 1 ;;
+    esac
+    return 0
+}
+
+_partition_check_devnode() {
+    case "$1" in
+        /dev/[A-Za-z0-9_/-]*) return 0 ;;
+        *) return 1 ;;
+    esac
+}
+
+# Prints the first mountpoint among a node and its partitions, if any.
+_partition_first_mount() {
+    for _pm_node in "$1" $(lsblk -lnpo NAME "$1" 2>/dev/null | tail -n +2); do
+        _pm_mnt="$(findmnt -n -o TARGET --source "$_pm_node" 2>/dev/null | head -n1)"
+        if [ -n "$_pm_mnt" ]; then
+            printf '%s at %s\n' "$_pm_node" "$_pm_mnt"
+            return 0
+        fi
+    done
+    return 1
+}
+
+# gpt|mbr from the plan header, else the table already on the disk.
+# Empty when neither says; the apply side re-checks that pairing anyway.
+_partition_effective_table() {
+    case "$_plan_table_type" in
+        gpt|mbr) printf '%s\n' "$_plan_table_type"; return 0 ;;
+    esac
+    case "$(_partlib_table_type "$_plan_disk" 2>/dev/null)" in
+        gpt) printf 'gpt\n' ;;
+        dos) printf 'mbr\n' ;;
+    esac
+    return 0
+}
+
+# Target checks shared by the modification ops: the ref must name a
+# partition of this plan's disk, never the whole disk itself. In-plan ids
+# have no devnode yet and are accepted as-is.
+_partition_check_child() {
+    _pcc_id="$1"
+    _pcc_ref="$2"
+
+    if [ -z "$_pcc_ref" ]; then
+        log "[$_pcc_id]: missing target_ref"
+        return 1
+    fi
+    case " $_validate_seen_ids " in
+        *" $_pcc_ref "*) ;;
+        *) _partition_check_devnode "$_pcc_ref" || {
+               log "[$_pcc_id]: target_ref resolves to neither a plan id nor a devnode: $_pcc_ref"
+               return 1
+           } ;;
+    esac
+    if _partition_check_devnode "$_pcc_ref"; then
+        if [ ! -b "$_pcc_ref" ]; then
+            log "[$_pcc_id]: not a block device: $_pcc_ref"
+            return 1
+        fi
+        if [ "$_pcc_ref" = "$_plan_disk" ] \
+                || [ "$(lsblk -dno TYPE "$_pcc_ref" 2>/dev/null)" = "disk" ]; then
+            log "[$_pcc_id]: refuses whole-disk target: $_pcc_ref"
+            return 1
+        fi
+    fi
+    return 0
+}
+
+_validate_rc=0
+_validate_seen_ids=""
+_validate_esp_warned=0
+_validate_op_count=0
+
+_validate_one_op() {
+    case "$_RECORD_KIND" in
+        op) ;;
+        *) log "plan: unknown section [$_RECORD_KIND]"
+           _validate_rc=2; _PARTLIB_ABORT=1; return ;;
+    esac
+
+    _op="$(_partlib_rec_get kind)"
+    _id="$(_partlib_rec_get id)"
+    _validate_op_count=$((_validate_op_count + 1))
+
+    if [ -z "$_op" ] || [ -z "$_id" ]; then
+        log "[op] #$_validate_op_count: missing kind or id"
+        _validate_rc=2; _PARTLIB_ABORT=1; return
+    fi
+    case "$_id" in
+        *[!A-Za-z0-9_-]*)
+            log "[op] #$_validate_op_count: invalid id (must be [A-Za-z0-9_-]+): $_id"
+            _validate_rc=2; _PARTLIB_ABORT=1; return ;;
+    esac
+    case " $_validate_seen_ids " in
+        *" $_id "*)
+            log "[op] #$_validate_op_count: duplicate id '$_id'"
+            _validate_rc=2; _PARTLIB_ABORT=1; return ;;
+    esac
+    _validate_seen_ids="$_validate_seen_ids $_id"
+
+    case "$_op" in
+        create_table)
+            _t="$(_partlib_rec_get type)"
+            case "$_t" in
+                gpt|mbr) ;;
+                *) log "[$_id]: invalid create_table type: $_t"
+                   _validate_rc=2; _PARTLIB_ABORT=1; return ;;
+            esac
+            if _pm_hit="$(_partition_first_mount "$_plan_disk")"; then
+                log "[$_id]: $_pm_hit; unmount it first"
+                _validate_rc=2; _PARTLIB_ABORT=1; return
+            fi
+            log "  [$_id] create_table type=$_t"
+            ;;
+        create)
+            _start="$(_partlib_rec_get start_mib)"
+            _size="$(_partlib_rec_get size_mib)"
+            _partition_check_int "$_start" || {
+                log "[$_id]: invalid start_mib: $_start"
+                _validate_rc=2; _PARTLIB_ABORT=1; return; }
+            _partition_check_int "$_size" || {
+                log "[$_id]: invalid size_mib: $_size"
+                _validate_rc=2; _PARTLIB_ABORT=1; return; }
+            if [ "$_start" -lt 0 ] || [ "$_start" -ge "$_disk_size_mib" ]; then
+                log "[$_id]: start_mib out of range: $_start"
+                _validate_rc=2; _PARTLIB_ABORT=1; return
+            fi
+            if [ "$_size" -ne -1 ] && [ "$_size" -le 0 ]; then
+                log "[$_id]: size_mib must be positive or -1: $_size"
+                _validate_rc=2; _PARTLIB_ABORT=1; return
+            fi
+            if [ "$_size" -ne -1 ] && [ $(( _start + _size )) -gt "$_disk_size_mib" ]; then
+                log "[$_id]: create extends past end of disk"
+                _validate_rc=2; _PARTLIB_ABORT=1; return
+            fi
+            if [ -z "$(_partlib_rec_get gpt_type)" ]; then
+                log "[$_id]: missing gpt_type (partition type not set)"
+                _validate_rc=2; _PARTLIB_ABORT=1; return
+            fi
+            log "  [$_id] create start=${_start}MiB size=${_size}MiB"
+            ;;
+        delete)
+            _tref="$(_partlib_rec_get target_ref)"
+            if [ -z "$_tref" ]; then
+                log "[$_id]: missing target_ref"
+                _validate_rc=2; _PARTLIB_ABORT=1; return
+            fi
+            case " $_validate_seen_ids " in
+                *" $_tref "*) ;;
+                *) _partition_check_devnode "$_tref" || {
+                       log "[$_id]: target_ref resolves to neither a plan id nor a devnode: $_tref"
+                       _validate_rc=2; _PARTLIB_ABORT=1; return ;} ;;
+            esac
+            # In-plan ids have no devnode yet; -b is checked only for devnodes.
+            if _partition_check_devnode "$_tref" && [ ! -b "$_tref" ]; then
+                log "[$_id]: not a block device: $_tref"
+                _validate_rc=2; _PARTLIB_ABORT=1; return
+            fi
+            if _partition_check_devnode "$_tref" \
+                    && _pm_hit="$(_partition_first_mount "$_tref")"; then
+                log "[$_id]: $_pm_hit; unmount it first"
+                _validate_rc=2; _PARTLIB_ABORT=1; return
+            fi
+            log "  [$_id] delete target_ref=$_tref"
+            ;;
+        format)
+            _tref="$(_partlib_rec_get target_ref)"
+            _fs="$(_partlib_rec_get filesystem)"
+            _role="$(_partlib_rec_get role)"
+            [ -n "$_role" ] || _role="none"
+            case "$_fs" in
+                ext4|fat32|btrfs|xfs|swap) ;;
+                *) log "[$_id]: unsupported filesystem: $_fs"
+                   _validate_rc=2; _PARTLIB_ABORT=1; return ;;
+            esac
+            case "$_role" in
+                esp|boot|root|home|swap|none) ;;
+                *) log "[$_id]: invalid role: $_role"
+                   _validate_rc=2; _PARTLIB_ABORT=1; return ;;
+            esac
+            if [ -z "$_tref" ]; then
+                log "[$_id]: missing target_ref"
+                _validate_rc=2; _PARTLIB_ABORT=1; return
+            fi
+            case " $_validate_seen_ids " in
+                *" $_tref "*) ;;
+                *) _partition_check_devnode "$_tref" || {
+                       log "[$_id]: target_ref resolves to neither a plan id nor a devnode: $_tref"
+                       _validate_rc=2; _PARTLIB_ABORT=1; return ;} ;;
+            esac
+            if [ "$_role" = "esp" ] && _partition_check_devnode "$_tref" \
+                    && [ "$_validate_esp_warned" -eq 0 ]; then
+                log "  WARNING [$_id]: format targets an existing device with role=esp;"
+                log "    apply refuses this without --allow-reformat-esp (never clobber a shared ESP)"
+                _validate_esp_warned=1
+            fi
+            if _partition_check_devnode "$_tref" \
+                    && _pm_hit="$(_partition_first_mount "$_tref")"; then
+                log "[$_id]: $_pm_hit; unmount it first"
+                _validate_rc=2; _PARTLIB_ABORT=1; return
+            fi
+            log "  [$_id] format target_ref=$_tref filesystem=$_fs role=$_role"
+            ;;
+        resize)
+            _tref="$(_partlib_rec_get target_ref)"
+            _newsize="$(_partlib_rec_get new_size_mib)"
+            if [ -z "$_tref" ]; then
+                log "[$_id]: missing target_ref"
+                _validate_rc=2; _PARTLIB_ABORT=1; return
+            fi
+            case " $_validate_seen_ids " in
+                *" $_tref "*) ;;
+                *) _partition_check_devnode "$_tref" || {
+                       log "[$_id]: target_ref resolves to neither a plan id nor a devnode: $_tref"
+                       _validate_rc=2; _PARTLIB_ABORT=1; return ;} ;;
+            esac
+            _partition_check_int "$_newsize" || {
+                log "[$_id]: invalid new_size_mib: $_newsize"
+                _validate_rc=2; _PARTLIB_ABORT=1; return; }
+            if [ "$_newsize" -le 0 ]; then
+                log "[$_id]: new_size_mib must be positive: $_newsize"
+                _validate_rc=2; _PARTLIB_ABORT=1; return
+            fi
+            log "  [$_id] resize target_ref=$_tref new_size_mib=$_newsize"
+            ;;
+        move)
+            _tref="$(_partlib_rec_get target_ref)"
+            _newstart="$(_partlib_rec_get new_start_mib)"
+            if [ -z "$_tref" ]; then
+                log "[$_id]: missing target_ref"
+                _validate_rc=2; _PARTLIB_ABORT=1; return
+            fi
+            case " $_validate_seen_ids " in
+                *" $_tref "*) ;;
+                *) _partition_check_devnode "$_tref" || {
+                       log "[$_id]: target_ref resolves to neither a plan id nor a devnode: $_tref"
+                       _validate_rc=2; _PARTLIB_ABORT=1; return ;} ;;
+            esac
+            _partition_check_int "$_newstart" || {
+                log "[$_id]: invalid new_start_mib: $_newstart"
+                _validate_rc=2; _PARTLIB_ABORT=1; return; }
+            if [ "$_newstart" -lt 0 ]; then
+                log "[$_id]: new_start_mib must not be negative: $_newstart"
+                _validate_rc=2; _PARTLIB_ABORT=1; return
+            fi
+            log "  [$_id] move target_ref=$_tref new_start_mib=$_newstart"
+            ;;
+        erase)
+            _tref="$(_partlib_rec_get target_ref)"
+            if [ -z "$_tref" ]; then
+                log "[$_id]: missing target_ref"
+                _validate_rc=2; _PARTLIB_ABORT=1; return
+            fi
+            case " $_validate_seen_ids " in
+                *" $_tref "*) ;;
+                *) _partition_check_devnode "$_tref" || {
+                       log "[$_id]: target_ref resolves to neither a plan id nor a devnode: $_tref"
+                       _validate_rc=2; _PARTLIB_ABORT=1; return ;} ;;
+            esac
+            log "  [$_id] erase target_ref=$_tref"
+            ;;
+        wipe)
+            _tref="$(_partlib_rec_get target_ref)"
+            _mode="$(_partlib_rec_get mode)"
+            if [ -z "$_tref" ]; then
+                log "[$_id]: missing target_ref"
+                _validate_rc=2; _PARTLIB_ABORT=1; return
+            fi
+            case "$_mode" in
+                quick|full) ;;
+                *) log "[$_id]: wipe mode must be quick or full: $_mode"
+                   _validate_rc=2; _PARTLIB_ABORT=1; return ;;
+            esac
+            case " $_validate_seen_ids " in
+                *" $_tref "*) ;;
+                *) _partition_check_devnode "$_tref" || {
+                       log "[$_id]: target_ref resolves to neither a plan id nor a devnode: $_tref"
+                       _validate_rc=2; _PARTLIB_ABORT=1; return ;} ;;
+            esac
+            if _partition_check_devnode "$_tref" && [ ! -b "$_tref" ]; then
+                log "[$_id]: not a block device: $_tref"
+                _validate_rc=2; _PARTLIB_ABORT=1; return
+            fi
+            if _partition_check_devnode "$_tref" && [ "$_tref" = "$_plan_disk" ]; then
+                log "[$_id]: wipe refuses whole-disk target: $_tref"
+                _validate_rc=2; _PARTLIB_ABORT=1; return
+            fi
+            if _partition_check_devnode "$_tref"; then
+                _wt="$(lsblk -dno TYPE "$_tref" 2>/dev/null)"
+                if [ "$_wt" = "disk" ]; then
+                    log "[$_id]: wipe refuses whole-disk target: $_tref"
+                    _validate_rc=2; _PARTLIB_ABORT=1; return
+                fi
+                if _mnt="$(findmnt -n -o TARGET --source "$_tref" 2>/dev/null)" \
+                        && [ -n "$_mnt" ]; then
+                    log "[$_id]: $_tref is mounted at $_mnt; unmount it first"
+                    _validate_rc=2; _PARTLIB_ABORT=1; return
+                fi
+            fi
+            log "  [$_id] wipe target_ref=$_tref mode=$_mode"
+            ;;
+        repair)
+            _tref="$(_partlib_rec_get target_ref)"
+            _fs="$(_partlib_rec_get filesystem)"
+            _check_only="$(_partlib_rec_get check_only)"
+            if [ -z "$_tref" ]; then
+                log "[$_id]: missing target_ref"
+                _validate_rc=2; _PARTLIB_ABORT=1; return
+            fi
+            case "$_fs" in
+                ext4|fat32|btrfs|xfs|'') ;;
+                    # Empty allowed: apply probes the fs via blkid when omitted.
+                *) log "[$_id]: unsupported filesystem for repair: $_fs"
+                   _validate_rc=2; _PARTLIB_ABORT=1; return ;;
+            esac
+            case "$_check_only" in
+                0|1) ;;
+                *) log "[$_id]: check_only must be 0 or 1: $_check_only"
+                   _validate_rc=2; _PARTLIB_ABORT=1; return ;;
+            esac
+            log "  [$_id] repair target_ref=$_tref filesystem=$_fs check_only=$_check_only"
+            ;;
+        set_string)
+            _tref="$(_partlib_rec_get target_ref)"
+            # "kind" is taken (rec_get returns last match), hence string_kind.
+            _skind="$(_partlib_rec_get string_kind)"
+            _value="$(_partlib_rec_get value)"
+            if [ -z "$_tref" ]; then
+                log "[$_id]: missing target_ref"
+                _validate_rc=2; _PARTLIB_ABORT=1; return
+            fi
+            case "$_skind" in
+                label|gpt_name) ;;
+                *) log "[$_id]: invalid string_kind: $_skind (must be label|gpt_name)"
+                   _validate_rc=2; _PARTLIB_ABORT=1; return ;;
+            esac
+            if _partition_check_devnode "$_tref" && [ ! -b "$_tref" ] \
+                    && [ ! -f "$_tref" ]; then
+                log "[$_id]: not a block device: $_tref"
+                _validate_rc=2; _PARTLIB_ABORT=1; return
+            fi
+            log "  [$_id] set_string target_ref=$_tref string_kind=$_skind value=$_value"
+            ;;
+        set_flags)
+            _tref="$(_partlib_rec_get target_ref)"
+            [ -n "$_tref" ] || {
+                log "[$_id]: missing target_ref"
+                _validate_rc=2; _PARTLIB_ABORT=1; return; }
+            _flags="$(_partlib_rec_get_all flag)"
+            if [ -z "$_flags" ]; then
+                log "[$_id]: set_flags with no flags"
+                _validate_rc=2; _PARTLIB_ABORT=1; return
+            fi
+            for _f in $_flags; do
+                case "$_f" in
+                    boot|legacy_boot|no_automount|read_only|esp) ;;
+                    *) log "[$_id]: unknown flag: $_f"
+                       _validate_rc=2; _PARTLIB_ABORT=1; return ;;
+                esac
+            done
+            log "  [$_id] set_flags target_ref=$_tref flags=$_flags"
+            ;;
+        set_type)
+            _tref="$(_partlib_rec_get target_ref)"
+            _ptype="$(_partlib_rec_get type)"
+            if ! _partition_check_child "$_id" "$_tref"; then
+                _validate_rc=2; _PARTLIB_ABORT=1; return
+            fi
+            if [ -z "$_ptype" ]; then
+                log "[$_id]: missing type"
+                _validate_rc=2; _PARTLIB_ABORT=1; return
+            fi
+            _ptable="$(_partition_effective_table)"
+            case "$_ptype" in
+                esp|linux|linux_swap|bios_boot) ;;
+                *-*)
+                    _guid='^[0-9A-Fa-f]{8}(-[0-9A-Fa-f]{4}){3}-[0-9A-Fa-f]{12}$'
+                    printf '%s' "$_ptype" | grep -Eq "$_guid" || {
+                        log "[$_id]: not a type GUID: $_ptype"
+                        _validate_rc=2; _PARTLIB_ABORT=1; return; }
+                    if [ "$_ptable" = "mbr" ]; then
+                        log "[$_id]: a GUID type needs a gpt table, this plan/disk is mbr"
+                        _validate_rc=2; _PARTLIB_ABORT=1; return
+                    fi
+                    ;;
+                *)
+                    printf '%s' "$_ptype" | grep -Eq '^(0x)?[0-9A-Fa-f]{1,2}$' || {
+                        log "[$_id]: invalid type: $_ptype (want a token, a GUID or a byte)"
+                        _validate_rc=2; _PARTLIB_ABORT=1; return; }
+                    if [ "$_ptable" = "gpt" ]; then
+                        log "[$_id]: an MBR type byte needs an mbr table, this plan/disk is gpt"
+                        _validate_rc=2; _PARTLIB_ABORT=1; return
+                    fi
+                    ;;
+            esac
+            log "  [$_id] set_type target_ref=$_tref type=$_ptype"
+            ;;
+        set_parameters)
+            _tref="$(_partlib_rec_get target_ref)"
+            if ! _partition_check_child "$_id" "$_tref"; then
+                _validate_rc=2; _PARTLIB_ABORT=1; return
+            fi
+            if ! printf '%s\n' "$_RECORD_RAW" | grep -q '^parameters='; then
+                log "[$_id]: missing parameters"
+                _validate_rc=2; _PARTLIB_ABORT=1; return
+            fi
+            _pstr="$(_partlib_rec_get parameters)"
+            if [ -n "$_pstr" ]; then
+                case "$_pstr" in
+                    *:*) ;;
+                    *) log "[$_id]: parameters must be 'key: value': $_pstr"
+                       _validate_rc=2; _PARTLIB_ABORT=1; return ;;
+                esac
+                _pk="$(printf '%s' "${_pstr%%:*}" | sed 's/^ *//; s/ *$//')"
+                _pv="$(printf '%s' "${_pstr#*:}" | sed 's/^ *//; s/ *$//')"
+                case "$_pk" in
+                    active) ;;
+                    *) log "[$_id]: unknown parameter: $_pk (only active is known)"
+                       _validate_rc=2; _PARTLIB_ABORT=1; return ;;
+                esac
+                case "$_pv" in
+                    0|1|true|false|yes|no|on|off) ;;
+                    *) log "[$_id]: invalid value for $_pk: $_pv"
+                       _validate_rc=2; _PARTLIB_ABORT=1; return ;;
+                esac
+            fi
+            log "  [$_id] set_parameters target_ref=$_tref parameters=$_pstr"
+            ;;
+        set_content_parameters)
+            _tref="$(_partlib_rec_get target_ref)"
+            _cfs="$(_partlib_rec_get filesystem)"
+            _cparams="$(_partlib_rec_get parameters)"
+            if ! _partition_check_child "$_id" "$_tref"; then
+                _validate_rc=2; _PARTLIB_ABORT=1; return
+            fi
+            if [ -z "$_cparams" ]; then
+                log "[$_id]: no content parameters given"
+                _validate_rc=2; _PARTLIB_ABORT=1; return
+            fi
+            for _cp in $_cparams; do
+                case "$_cp" in
+                    *=*) _cpk="${_cp%%=*}" ;;
+                    *) log "[$_id]: malformed parameter (want key=value): $_cp"
+                       _validate_rc=2; _PARTLIB_ABORT=1; return ;;
+                esac
+                _cpv="${_cp#*=}"
+                case "$_cpk" in
+                    reserved_percent)
+                        case "$_cpv" in
+                            ''|*[!0-9]*)
+                                log "[$_id]: reserved_percent must be 0-100: $_cpv"
+                                _validate_rc=2; _PARTLIB_ABORT=1; return ;;
+                        esac
+                        if [ "$_cpv" -gt 100 ]; then
+                            log "[$_id]: reserved_percent must be 0-100: $_cpv"
+                            _validate_rc=2; _PARTLIB_ABORT=1; return
+                        fi
+                        ;;
+                    max_mount_count)
+                        _partition_check_int "$_cpv" || {
+                            log "[$_id]: invalid max_mount_count: $_cpv"
+                            _validate_rc=2; _PARTLIB_ABORT=1; return; }
+                        ;;
+                    check_interval)
+                        printf '%s' "$_cpv" | grep -Eq '^[0-9]+[dwm]?$' || {
+                            log "[$_id]: invalid check_interval: $_cpv (want a count with optional d/w/m)"
+                            _validate_rc=2; _PARTLIB_ABORT=1; return; }
+                        ;;
+                    *)
+                        log "[$_id]: unknown content parameter: $_cpk"
+                        _validate_rc=2; _PARTLIB_ABORT=1; return
+                        ;;
+                esac
+            done
+            # tune2fs only; probe when the plan leaves the filesystem out
+            if [ -z "$_cfs" ] && _partition_check_devnode "$_tref"; then
+                _cfs="$(_partition_detect_fs "$_tref")"
+            fi
+            case "$_cfs" in
+                ext4|'') ;;
+                *) log "[$_id]: no in-place content parameters for filesystem: $_cfs"
+                   _validate_rc=2; _PARTLIB_ABORT=1; return ;;
+            esac
+            if _partition_check_devnode "$_tref" \
+                    && _pm_hit="$(_partition_first_mount "$_tref")"; then
+                log "[$_id]: $_pm_hit; unmount it first"
+                _validate_rc=2; _PARTLIB_ABORT=1; return
+            fi
+            log "  [$_id] set_content_parameters target_ref=$_tref filesystem=${_cfs:-probe} parameters=$_cparams"
+            ;;
+        defrag)
+            _tref="$(_partlib_rec_get target_ref)"
+            _dfs="$(_partlib_rec_get filesystem)"
+            if [ -z "$_tref" ]; then
+                log "[$_id]: missing target_ref"
+                _validate_rc=2; _PARTLIB_ABORT=1; return
+            fi
+            if ! _partition_check_devnode "$_tref" || [ ! -b "$_tref" ]; then
+                log "[$_id]: defrag needs an existing partition device: $_tref"
+                _validate_rc=2; _PARTLIB_ABORT=1; return
+            fi
+            if [ "$_tref" = "$_plan_disk" ] \
+                    || [ "$(lsblk -dno TYPE "$_tref" 2>/dev/null)" = "disk" ]; then
+                log "[$_id]: refuses whole-disk target: $_tref"
+                _validate_rc=2; _PARTLIB_ABORT=1; return
+            fi
+            if [ -z "$_dfs" ]; then
+                _dfs="$(_partition_detect_fs "$_tref")"
+            fi
+            case "$_dfs" in
+                ext4|btrfs) ;;
+                *) log "[$_id]: no defragment support for filesystem: ${_dfs:-none}"
+                   _validate_rc=2; _PARTLIB_ABORT=1; return ;;
+            esac
+            _dm="$(findmnt -n -o TARGET --source "$_tref" 2>/dev/null | head -n1)"
+            if [ -z "$_dm" ]; then
+                log "[$_id]: $_tref is not mounted; defragment runs on a mounted filesystem"
+                _validate_rc=2; _PARTLIB_ABORT=1; return
+            fi
+            log "  [$_id] defrag target_ref=$_tref filesystem=$_dfs mount=$_dm"
+            ;;
+        luks_create)
+            log "  [$_id] luks_create (accepted, apply defers to milestone 7)"
+            ;;
+        *)
+            log "[$_id]: unknown op: $_op"
+            _validate_rc=2; _PARTLIB_ABORT=1; return
+            ;;
+    esac
+}
+
+# Captures move-recovery status for a disk into _move_recovery and
+# _move_recovery_detail. action=status|resume|rollback.
+_do_partition_move_recovery_report() {
+    _mr_disk="$1"
+    _mr_action="${2:-status}"
+    _move_recovery="none"
+    _move_recovery_detail=""
+    _mr_out="$(_partlib_move_recover_disk "$_mr_disk" "$_mr_action")" || true
+    _move_recovery="$(printf '%s\n' "$_mr_out" \
+        | sed -n 's/^move_recovery=//p' | tail -n1)"
+    _move_recovery_detail="$(printf '%s\n' "$_mr_out" \
+        | sed -n 's/^move_recovery_detail=//p' | tail -n1)"
+    [ -n "$_move_recovery" ] || _move_recovery="none"
+    return 0
+}
+
+_do_partition_validate() {
+    _plan="${1:-}"
+    _partition_front_door "$_plan" || return $?
+
+    _disk_size_mib=$(( $(lsblk -bdno SIZE "$_plan_disk" 2>/dev/null || echo 0) / 1048576 ))
+    if [ "$_disk_size_mib" -le 0 ]; then
+        log "cannot read size of $_plan_disk"
+        return 2
+    fi
+
+    log "plan: disk=$_plan_disk table_type=${_plan_table_type:-<unchanged>}"
+
+    # Leftover move journal: a previous Move was killed mid-copy.
+    _do_partition_move_recovery_report "$_plan_disk" status
+    if [ "$_move_recovery" != "none" ]; then
+        log "move-recovery pending on $_plan_disk: $_move_recovery_detail"
+    fi
+
+    _validate_rc=0
+    _validate_seen_ids=""
+    _validate_esp_warned=0
+    _validate_op_count=0
+
+    _partlib_foreach_record "$_plan" _validate_one_op
+
+    [ "$_validate_rc" -eq 0 ] || return "$_validate_rc"
+
+    printf 'move_recovery=%s\n' "$_move_recovery"
+    printf 'move_recovery_detail=%s\n' "$_move_recovery_detail"
+    log "plan valid: $_validate_op_count operation(s), disk=$_plan_disk"
+    return 0
+}
+
+_partition_resolve_target() {
+    _ref="$1"
+    _resolved="$(_partlib_id_map_get "$_ref")"
+    if [ -n "$_resolved" ]; then
+        printf '%s\n' "$_resolved"
+    else
+        printf '%s\n' "$_ref"
+    fi
+}
+
+_partition_apply_cleanup() {
+    _partlib_luks_close_all
+    _partlib_umount_all
+}
+
+_partition_detect_fs() {
+    _devnode="$1"
+    # blkid exits 2 when there is no signature; that is data, not an
+    # error, and must not abort an in-flight apply under set -e.
+    _t="$(blkid -p -s TYPE -o value "$_devnode" 2>/dev/null || true)"
+    case "$_t" in
+        ext2|ext3|ext4) printf 'ext4\n' ;;
+        vfat)           printf 'fat32\n' ;;
+        *)              printf '%s\n' "$_t" ;;
+    esac
+}
+
+# Plan values cannot contain newlines; fold them to "; ".
+_partition_flatten() {
+    printf '%s' "$1" | tr '\n' ';' | sed 's/;/; /g; s/[; ]*$//'
+}
+
+_apply_one_op() {
+    _op="$(_partlib_rec_get kind)"
+    _id="$(_partlib_rec_get id)"
+
+    if [ "$_stop" -ne 0 ]; then
+        {
+            printf '[op]\n'
+            printf 'id=%s\n' "$_id"
+            printf 'kind=%s\n' "$_op"
+            printf 'status=not_attempted\n'
+            printf 'detail=\n'
+        } >> "$_ops_out"
+        return
+    fi
+
+    _status="ok"
+    _detail=""
+
+    case "$_op" in
+        create_table)
+            _t="$(_partlib_rec_get type)"
+            if ! _partlib_create_table "$_plan_disk" "$_t"; then
+                _status="failed"; _detail="sfdisk create_table failed"
+            fi
+            ;;
+        create)
+            _start="$(_partlib_rec_get start_mib)"
+            _size="$(_partlib_rec_get size_mib)"
+            _gtype="$(_partlib_rec_get gpt_type)"
+            if _node="$(_partlib_create "$_plan_disk" "$_start" "$_size" "$_gtype")"; then
+                _partlib_id_map_set "$_id" "$_node"
+                _detail="$_node"
+            else
+                _status="failed"; _detail="sfdisk create failed"
+            fi
+            ;;
+        delete)
+            _tref="$(_partlib_rec_get target_ref)"
+            _devnode="$(_partition_resolve_target "$_tref")"
+            if _partlib_delete "$_plan_disk" "$_devnode"; then
+                _detail="$_devnode"
+            else
+                _status="failed"; _detail="delete failed for $_devnode"
+            fi
+            ;;
+        format)
+            _tref="$(_partlib_rec_get target_ref)"
+            _fs="$(_partlib_rec_get filesystem)"
+            _role="$(_partlib_rec_get role)"
+            [ -n "$_role" ] || _role="none"
+            _label="$(_partlib_rec_get label)"
+            _ext4_extra="$(_partlib_rec_get_all ext4_feature_exclude)"
+            _devnode="$(_partition_resolve_target "$_tref")"
+
+            _is_preexisting=1
+            [ -n "$(_partlib_id_map_get "$_tref")" ] && _is_preexisting=0
+
+            if [ "$_role" = "esp" ] && [ "$_is_preexisting" -eq 1 ] \
+                    && [ "$_allow_esp" -eq 0 ]; then
+                _status="failed"
+                _detail="refused: reformatting an existing ESP requires --allow-reformat-esp"
+            elif _uuid="$(_partlib_format "$_devnode" "$_fs" "$_label" "$_ext4_extra")"; then
+                _detail="$_devnode"
+                {
+                    printf '[volume]\n'
+                    printf 'op_id=%s\n' "$_id"
+                    printf 'role=%s\n' "$_role"
+                    printf 'devnode=%s\n' "$_devnode"
+                    printf 'uuid=%s\n' "$_uuid"
+                    printf 'filesystem=%s\n' "$_fs"
+                } >> "$_vols_out"
+            else
+                _status="failed"; _detail="mkfs failed for $_devnode"
+            fi
+            ;;
+        set_flags)
+            _tref="$(_partlib_rec_get target_ref)"
+            _devnode="$(_partition_resolve_target "$_tref")"
+            _flags="$(_partlib_rec_get_all flag | tr '\n' ' ')"
+            if _partlib_set_flags "$_plan_disk" "$_devnode" "$_flags"; then
+                _detail="$_devnode"
+            else
+                _status="failed"; _detail="set_flags failed for $_devnode"
+            fi
+            ;;
+        resize)
+            _tref="$(_partlib_rec_get target_ref)"
+            _newsize="$(_partlib_rec_get new_size_mib)"
+            _target="$(_partition_resolve_target "$_tref")"
+            _rfs="$(_partlib_rec_get filesystem)"
+            [ -n "$_rfs" ] || _rfs="$(_partition_detect_fs "$_target")"
+            # Keep the tool's own message: the UI shows only the detail.
+            if _rerr="$(_partlib_resize "$_plan_disk" "$_target" "$_rfs" "$_newsize" 2>&1)"; then
+                _detail="$_target"
+            else
+                [ -n "$_rerr" ] && printf '%s\n' "$_rerr" >&2
+                _status="failed"
+                _detail="resize failed for $_target: $(printf '%s' "$_rerr" | tail -n1)"
+            fi
+            ;;
+        move)
+            _tref="$(_partlib_rec_get target_ref)"
+            _newstart="$(_partlib_rec_get new_start_mib)"
+            _target="$(_partition_resolve_target "$_tref")"
+            if _partlib_move "$_plan_disk" "$_target" "$_newstart"; then
+                _detail="$_target"
+            else
+                _status="failed"; _detail="move failed for $_target"
+            fi
+            ;;
+        erase)
+            _tref="$(_partlib_rec_get target_ref)"
+            _devnode="$(_partition_resolve_target "$_tref")"
+            if _partlib_erase "$_devnode"; then
+                _detail="$_devnode"
+            else
+                _status="failed"; _detail="erase failed for $_devnode"
+            fi
+            ;;
+        wipe)
+            _tref="$(_partlib_rec_get target_ref)"
+            _mode="$(_partlib_rec_get mode)"
+            _devnode="$(_partition_resolve_target "$_tref")"
+            if _partlib_wipe "$_plan_disk" "$_devnode" "$_mode"; then
+                _detail="$_devnode"
+            else
+                _status="failed"; _detail="wipe failed for $_devnode"
+            fi
+            ;;
+        repair)
+            _tref="$(_partlib_rec_get target_ref)"
+            _rfs="$(_partlib_rec_get filesystem)"
+            _check_only="$(_partlib_rec_get check_only)"
+            _devnode="$(_partition_resolve_target "$_tref")"
+            [ -n "$_rfs" ] || _rfs="$(_partition_detect_fs "$_devnode")"
+            if _partlib_repair "$_devnode" "$_rfs" "$_check_only"; then
+                _detail="$_devnode"
+            else
+                _status="failed"; _detail="repair failed for $_devnode"
+            fi
+            ;;
+        set_string)
+            _tref="$(_partlib_rec_get target_ref)"
+            _skind="$(_partlib_rec_get string_kind)"
+            _value="$(_partlib_rec_get value)"
+            _devnode="$(_partition_resolve_target "$_tref")"
+            case "$_skind" in
+                label)
+                    _rfs="$(_partlib_rec_get filesystem)"
+                    [ -n "$_rfs" ] || _rfs="$(_partition_detect_fs "$_devnode")"
+                    if _partlib_set_label "$_devnode" "$_rfs" "$_value"; then
+                        _detail="$_devnode"
+                    else
+                        _status="failed"; _detail="set_label failed for $_devnode"
+                    fi
+                    ;;
+                gpt_name)
+                    if _partlib_set_gpt_name "$_plan_disk" "$_devnode" "$_value"; then
+                        _detail="$_devnode"
+                    else
+                        _status="failed"; _detail="set_gpt_name failed for $_devnode"
+                    fi
+                    ;;
+                *)
+                    _status="failed"; _detail="unknown set_string string_kind: $_skind"
+                    ;;
+            esac
+            ;;
+        set_type)
+            _tref="$(_partlib_rec_get target_ref)"
+            _ptype="$(_partlib_rec_get type)"
+            _devnode="$(_partition_resolve_target "$_tref")"
+            if _partlib_set_type "$_plan_disk" "$_devnode" "$_ptype"; then
+                _detail="$_devnode"
+            else
+                _status="failed"; _detail="set_type failed for $_devnode"
+            fi
+            ;;
+        set_parameters)
+            _tref="$(_partlib_rec_get target_ref)"
+            _pstr="$(_partlib_rec_get parameters)"
+            _devnode="$(_partition_resolve_target "$_tref")"
+            if _partlib_set_parameters "$_plan_disk" "$_devnode" "$_pstr"; then
+                _detail="$_devnode"
+            else
+                _status="failed"; _detail="set_parameters failed for $_devnode"
+            fi
+            ;;
+        set_content_parameters)
+            _tref="$(_partlib_rec_get target_ref)"
+            _cfs="$(_partlib_rec_get filesystem)"
+            _cparams="$(_partlib_rec_get parameters)"
+            _devnode="$(_partition_resolve_target "$_tref")"
+            [ -n "$_cfs" ] || _cfs="$(_partition_detect_fs "$_devnode")"
+            # Keep the tool's own message: the UI shows only the detail.
+            if _rerr="$(_partlib_set_content_parameters "$_devnode" "$_cfs" "$_cparams" 2>&1)"; then
+                _detail="$_devnode"
+            else
+                [ -n "$_rerr" ] && printf '%s\n' "$_rerr" >&2
+                _status="failed"
+                _detail="set_content_parameters failed for $_devnode: $(printf '%s' "$_rerr" | tail -n1)"
+            fi
+            ;;
+        defrag)
+            _tref="$(_partlib_rec_get target_ref)"
+            _dfs="$(_partlib_rec_get filesystem)"
+            _devnode="$(_partition_resolve_target "$_tref")"
+            [ -n "$_dfs" ] || _dfs="$(_partition_detect_fs "$_devnode")"
+            if _rerr="$(_partlib_defrag "$_devnode" "$_dfs" 2>&1)"; then
+                _detail="$_devnode"
+            else
+                [ -n "$_rerr" ] && printf '%s\n' "$_rerr" >&2
+                _status="failed"
+                _detail="defrag failed for $_devnode: $(printf '%s' "$_rerr" | tail -n1)"
+            fi
+            ;;
+        luks_create)
+            _status="failed"
+            _detail="$_op not yet implemented in apply (see plan-format.md, milestone 7)"
+            ;;
+        *)
+            _status="failed"; _detail="unknown op: $_op"
+            ;;
+    esac
+
+    _detail="$(_partition_flatten "$_detail")"
+    {
+        printf '[op]\n'
+        printf 'id=%s\n' "$_id"
+        printf 'kind=%s\n' "$_op"
+        printf 'status=%s\n' "$_status"
+        printf 'detail=%s\n' "$_detail"
+    } >> "$_ops_out"
+
+    if [ "$_status" = "ok" ]; then
+        _any_ok=1
+    else
+        _stop=1
+        _failed_op="$_id"
+        log "apply: [$_id] $_op failed: $_detail"
+    fi
+}
+
+_do_partition_apply() {
+    _plan="${1:-}"
+    [ $# -gt 0 ] && shift
+    _allow_esp=0
+    for _a in "$@"; do
+        [ "$_a" = "--allow-reformat-esp" ] && _allow_esp=1
+    done
+
+    _do_partition_validate "$_plan" || return $?
+
+    trap '_partition_apply_cleanup' EXIT INT TERM
+
+    # Finish or report any interrupted Move on this disk before new ops.
+    _do_partition_move_recovery_report "$_plan_disk" resume
+    if [ "$_move_recovery" != "none" ]; then
+        log "move-recovery on $_plan_disk: $_move_recovery=$_move_recovery_detail"
+    fi
+
+    _ID_MAP=""
+    _PARTLIB_SETTLE_MS=0
+    _ops_out="$(mktemp)"
+    _vols_out="$(mktemp)"
+    _stop=0
+    _any_ok=0
+    _failed_op=""
+
+    _partlib_foreach_record "$_plan" _apply_one_op
+
+    if [ "$_stop" -eq 0 ]; then
+        _overall="ok"
+    elif [ "$_any_ok" -eq 1 ]; then
+        _overall="partial"
+    else
+        _overall="failed"
+    fi
+
+    _result_file="${_plan}.result"
+    {
+        printf 'status=%s\n' "$_overall"
+        printf 'settle_ms=%s\n' "$_PARTLIB_SETTLE_MS"
+        printf 'failed_op=%s\n' "$_failed_op"
+        printf 'move_recovery=%s\n' "$_move_recovery"
+        printf 'move_recovery_detail=%s\n' "$_move_recovery_detail"
+        printf '\n'
+        cat "$_vols_out"
+        printf '\n'
+        cat "$_ops_out"
+    } > "$_result_file"
+    rm -f "$_ops_out" "$_vols_out"
+
+    # The caller can only unlink it from sticky /tmp if it owns it.
+    case "${PKEXEC_UID:-}" in
+        ''|*[!0-9]*) ;;
+        *) chown "$PKEXEC_UID" "$_result_file" 2>/dev/null || true ;;
+    esac
+    log "apply: $_overall (results: $_result_file)"
+
+    trap - EXIT INT TERM
+    _partition_apply_cleanup
+
+    [ "$_overall" = "ok" ] && return 0
+    return 3
+}
+
+# ============================== dispatch ===================================
+if [ "${1:-}" = "partition" ]; then
+    shift
+    case "${1:-}" in
+        validate)    shift; _do_partition_validate "${1:-}"; exit $? ;;
+        apply)       shift; _do_partition_apply "$@"; exit $? ;;
+        size-limits) shift; _do_partition_size_limits "${1:-}" "${2:-}"; exit $? ;;
+        move-recovery)
+            shift
+            _mr_what="${1:-status}"
+            _mr_disk="${2:-}"
+            case "$_mr_what" in
+                status|resume|rollback) ;;
+                *)
+                    log "move-recovery: unknown action: $_mr_what"
+                    exit 1 ;;
+            esac
+            if [ -n "$_mr_disk" ]; then
+                _partlib_move_recover_disk "$_mr_disk" "$_mr_what"
+                exit 0
+            fi
+            # No disk: act on every disk that has a journal, and print a
+            # single summary for all of them.
+            _mr_dir="$_PARTLIB_MOVE_JOURNAL_DIR"
+            _mr_disks=""
+            if [ -d "$_mr_dir" ]; then
+                for _mr_path in "$_mr_dir"/*.journal; do
+                    [ -f "$_mr_path" ] || continue
+                    _partlib_move_journal_read "$_mr_path" || continue
+                    case " $_mr_disks " in
+                        *" $MJ_DISK "*) ;;
+                        *) _mr_disks="$_mr_disks $MJ_DISK" ;;
+                    esac
+                done
+            fi
+            if [ -z "$_mr_disks" ]; then
+                printf 'move_recovery=none\n'
+                printf 'move_recovery_detail=no pending move journals\n'
+                exit 0
+            fi
+            _mr_overall=""
+            _mr_detail=""
+            for _mr_d in $_mr_disks; do
+                _mr_out="$(_partlib_move_recover_disk "$_mr_d" "$_mr_what")"
+                printf '%s\n' "$_mr_out" | grep -v '^move_recovery'
+                _mr_r="$(printf '%s\n' "$_mr_out" \
+                    | sed -n 's/^move_recovery=//p' | tail -n1)"
+                _mr_t="$(printf '%s\n' "$_mr_out" \
+                    | sed -n 's/^move_recovery_detail=//p' | tail -n1)"
+                [ "$_mr_r" = failed ] && _mr_overall=failed
+                [ -z "$_mr_overall" ] && _mr_overall="$_mr_r"
+                _mr_detail="${_mr_detail:+$_mr_detail; }$_mr_t"
+            done
+            printf 'move_recovery=%s\n' "$_mr_overall"
+            printf 'move_recovery_detail=%s\n' "$_mr_detail"
+            exit 0
+            ;;
+        *)
+           printf 'usage: vos-install-helper partition {validate|apply} <plan> [--allow-reformat-esp]\n' >&2
+           printf '       vos-install-helper partition capabilities [<filesystem>]\n' >&2
+           printf '       vos-install-helper partition size-limits <target> [<filesystem>] (privileged)\n' >&2
+           printf '       vos-install-helper partition move-recovery {status|resume|rollback} [<disk>]\n' >&2
+           exit 1 ;;
+    esac
+fi
+
+if [ "${1:-}" = "bootloader" ]; then
+    shift
+    if [ "${1:-}" = "--setup" ]; then
+        shift
+        _do_bootloader_setup "${1:-}" "${2:-}"
+        exit $?
+    fi
+    _do_bootloader "$@"
+    exit $?
+fi
+
+# True only for a real writable disk root; overlay/squashfs/ro live media never qualify.
+_root_is_persistent_rw() {
+    _rp_fs="$(findmnt -no FSTYPE / 2>/dev/null | head -n1)"
+    case "$_rp_fs" in
+        ext4|xfs|btrfs|f2fs) ;;
+        *) return 1 ;;
+    esac
+    findmnt -no OPTIONS / 2>/dev/null | head -n1 | tr ',' '\n' | grep -qx rw
+}
+
+# Removes what the live session leaves behind, then fails if any trace of it
+# survives. $2=1 when the user chose a root password.
+_purge_live_debris() {
+    _pl_t="$1"; _pl_root_set="${2:-0}"
+    rm -f "$_pl_t/var/lib/systemd/linger/vos-live" \
+        "$_pl_t/etc/vos/live" "$_pl_t/etc/sudoers.d/vos-live" \
+        "$_pl_t/usr/share/polkit-1/rules.d/49-vitruvian-installer.rules"
+    rm -rf "$_pl_t/home/vos-live"
+    if [ "$_pl_t" = "/" ]; then _pl_in=""; else _pl_in="chroot $_pl_t"; fi
+    $_pl_in groupdel vos-live 2>/dev/null || true
+    rm -f "$_pl_t"/etc/systemd/system/*.wants/userbootscript@vos-live.service
+    # Debug images set root:live; never ship it as the installed password.
+    [ "$_pl_root_set" = "1" ] || $_pl_in passwd -l root >/dev/null 2>&1 \
+        || log "warn: could not lock root"
+
+    _pl_bad=""
+    for _f in passwd group shadow gshadow subuid subgid; do
+        grep -q '^vos-live:' "$_pl_t/etc/$_f" 2>/dev/null && _pl_bad="$_pl_bad /etc/$_f"
+    done
+    for _f in /etc/vos/live /etc/sudoers.d/vos-live /home/vos-live \
+            /var/lib/systemd/linger/vos-live \
+            /usr/share/polkit-1/rules.d/49-vitruvian-installer.rules; do
+        [ -e "$_pl_t$_f" ] && _pl_bad="$_pl_bad $_f"
+    done
+    grep -qs 'VOS_DEFAULT_USER=vos-live' \
+        "$_pl_t"/etc/systemd/system/janus.service.d/*.conf && _pl_bad="$_pl_bad janus-default-user"
+    if [ -n "$_pl_bad" ]; then
+        log "live session traces left on target:$_pl_bad"
+        return 1
+    fi
+    return 0
+}
+
+# Overall progress for the Installer's bar; the copy itself fills 5-85%.
+# Optional $2 is a step key the UI translates.
+_stage() { printf 'vos-progress %s%%%s\n' "$1" "${2:+ $2}"; }
+
+# Devnode of the [volume] with the given role in a plan result file.
+_plan_volume_devnode() {
+    awk -v want="role=$2" '
+        function flush() { if (v && r && d != "") { print d; found=1; exit } }
+        /^\[/ { flush(); v=0 }
+        /^\[volume\]$/ { v=1; d=""; r=0; next }
+        v && /^devnode=/ { d=substr($0, 9) }
+        v && $0 == want { r=1 }
+        END { if (!found) flush() }
+    ' "$1" 2>/dev/null
+}
+
+if [ "${1:-}" = "--full-install" ]; then
+    shift
+    DEV=""; FI_PLAN=""; FI_ALLOW_ESP=0
+    FI_ESP=""; FI_BIOS=""; FI_EFI_MODE="vitruvian"
+    FI_ALLOW_CLOBBER=0; FI_NVRAM=0
+    FI_SWAP=""; FI_SWAP_SIZE=""
+    while [ $# -gt 0 ]; do
+        case "$1" in
+            --plan)
+                [ $# -ge 2 ] || { log "--plan needs a value"; exit 2; }
+                FI_PLAN="$2"; shift 2 ;;
+            --allow-reformat-esp) FI_ALLOW_ESP=1; shift ;;
+            --esp)
+                [ $# -ge 2 ] || { log "--esp needs a value"; exit 2; }
+                FI_ESP="$2"
+                [ "$FI_ESP" = "none" ] && FI_EFI_MODE="none"
+                shift 2 ;;
+            --bios)
+                [ $# -ge 2 ] || { log "--bios needs a value"; exit 2; }
+                FI_BIOS="$2"; shift 2 ;;
+            --removable) FI_EFI_MODE="removable"; shift ;;
+            --nvram) FI_NVRAM=1; shift ;;
+            --keep-ssh) _VOS_KEEP_SSH=1; shift ;;
+            --swap)
+                [ $# -ge 2 ] || { log "--swap needs a value"; exit 2; }
+                case "$2" in
+                    partition:*|file|none) FI_SWAP="$2" ;;
+                    *) log "bad --swap value: $2"; exit 2 ;;
+                esac
+                shift 2 ;;
+            --swap-size)
+                [ $# -ge 2 ] || { log "--swap-size needs a value"; exit 2; }
+                case "$2" in
+                    ''|*[!0-9]*|0) log "bad --swap-size value: $2"; exit 2 ;;
+                esac
+                FI_SWAP_SIZE="$2"; shift 2 ;;
+            --allow-clobber-efi) FI_ALLOW_CLOBBER=1; shift ;;
+            --*) log "unknown --full-install option: $1"; exit 2 ;;
+            *)
+                if [ -n "$DEV" ]; then
+                    log "unexpected argument: $1"; exit 2
+                fi
+                DEV="$1"; shift ;;
+        esac
+    done
+
+    # A plan can create the target, so DEV may legitimately arrive from
+    # the plan's role=root volume instead of the command line.
+    if [ -z "$DEV" ] && [ -z "$FI_PLAN" ]; then
+        echo "usage: vos-install-helper --full-install [/dev/DEVICE] [--plan <file>]" >&2
+        echo "       [--esp <devnode>|none] [--bios disk|<devnode>|none] [--removable]" >&2
+        echo "       [--nvram] [--allow-clobber-efi] [--allow-reformat-esp] [--keep-ssh]" >&2
+        echo "       [--swap partition:<devnode>|partition:plan|file|none] [--swap-size <MiB>]" >&2
+        exit 1
+    fi
+    if [ -n "$DEV" ] && [ ! -b "$DEV" ]; then
+        log "not a block device: $DEV"
+        exit 1
+    fi
+
+    # Defense in depth: refuse to run the destructive install pipeline off live media.
+    if [ ! -e /etc/vos/live ]; then
+        log "refusing --full-install: not on live media (/etc/vos/live absent)"
+        exit 2
+    fi
+
+    # The confirmed plan runs first; a failure here aborts before the
+    # copy, so the disk holds only what the plan itself applied.
+    if [ -n "$FI_PLAN" ]; then
+        _stage 1 partition
+        if [ "$FI_ALLOW_ESP" -eq 1 ]; then
+            _do_partition_apply "$FI_PLAN" --allow-reformat-esp || {
+                log "full-install: partition plan failed; nothing copied"
+                exit 3
+            }
+        else
+            _do_partition_apply "$FI_PLAN" || {
+                log "full-install: partition plan failed; nothing copied"
+                exit 3
+            }
+        fi
+        if [ -z "$DEV" ]; then
+            # Prefer the volume the plan labelled as the install root.
+            _root_devnode="$(_plan_volume_devnode "${FI_PLAN}.result" root)"
+            [ -n "$_root_devnode" ] && DEV="$_root_devnode"
+        fi
+        if [ -z "$DEV" ] || [ ! -b "$DEV" ]; then
+            log "full-install: plan applied but no root volume devnode found"
+            exit 3
+        fi
+        log "full-install: plan applied, target is $DEV"
+        _stage 2
+        if [ "$FI_SWAP" = "partition:plan" ]; then
+            _swap_devnode="$(_plan_volume_devnode "${FI_PLAN}.result" swap)"
+            if [ -z "$_swap_devnode" ] || [ ! -b "$_swap_devnode" ]; then
+                log "full-install: plan applied but no swap volume devnode found"
+                exit 3
+            fi
+            FI_SWAP="partition:$_swap_devnode"
+        fi
+    fi
+
+    # Fail before the long copy if BIOS GRUB cannot be embedded on this GPT disk.
+    if [ "$FI_BIOS" = "disk" ]; then
+        _fi_bdisk="$(lsblk -no PKNAME "$DEV" 2>/dev/null | head -n1)"
+        if [ -n "$_fi_bdisk" ] && sfdisk -d "/dev/$_fi_bdisk" 2>/dev/null | grep -q '^label: gpt' \
+                && ! sfdisk -d "/dev/$_fi_bdisk" 2>/dev/null \
+                    | grep -qi '21686148-6449-6e6f-744e-656564454649'; then
+            log "GPT disk /dev/$_fi_bdisk has no BIOS boot partition; legacy BIOS boot needs a 1 MiB one (add it in the plan, or choose UEFI/none)"
+            exit 3
+        fi
+    fi
+
+    MNT="$FULL_INSTALL_MOUNT"
+    mkdir -p "$MNT"
+
+    # Held for the whole run; a mount found without the lock is stale.
+    exec 9>/run/vos/full-install.lock
+    if ! flock -n 9; then
+        log "another install is running"
+        exit 2
+    fi
+    if mountpoint -q "$MNT"; then
+        log "full-install: clearing stale mount at $MNT"
+        _unmount_binds "$MNT"
+        umount -R "$MNT" 2>/dev/null
+        if mountpoint -q "$MNT"; then
+            log "already mounted: $MNT (could not clear it)"
+            exit 2
+        fi
+    fi
+
+    mount "$DEV" "$MNT"
+
+    _full_install_cleanup() {
+        _unmount_binds "$MNT"
+        umount -R "$MNT" 2>/dev/null || true
+    }
+    trap _full_install_cleanup EXIT HUP INT PIPE TERM
+
+    TARGET="$(realpath -e "$MNT")"
+    if [ "$TARGET" = "/" ]; then
+        log "refusing to operate on / as install target"
+        exit 2
+    fi
+
+    log "full-install: mounted $DEV at $TARGET"
+    _stage 4 copy
+
+    # btrfs gets @/@home while the fresh fs is mounted; the copy then
+    # lands inside @ so /home can be the @home subvolume at boot.
+    _FI_BTRFS_SUBVOLS=0
+    if [ "$(findmnt -no FSTYPE "$TARGET" 2>/dev/null)" = "btrfs" ]; then
+        _btrfs_setup_subvols "$TARGET" && _FI_BTRFS_SUBVOLS=1
+    fi
+    _COPY_DEST="$TARGET"
+    [ "$_FI_BTRFS_SUBVOLS" -eq 1 ] && _COPY_DEST="$TARGET/@"
+
+    # du -x stops at the live overlay's root (~0); ask rsync, same excludes.
+    _src_kib="$(rsync -aAXn --stats --exclude-from="$EXCLUDES" / /nonexistent/ \
+        2>/dev/null | awk -F': ' '/^Total file size:/ {
+            gsub(/[^0-9]/, "", $2); print int($2 / 1024) }')"
+    _free_kib="$(df -P -k "$TARGET" 2>/dev/null | awk 'NR==2{print $4}')"
+    if [ -n "$_src_kib" ] && [ -n "$_free_kib" ]; then
+        # 5% headroom for fs metadata rounding / journal growth during copy.
+        _need_kib=$(( _src_kib + _src_kib / 20 ))
+        if [ "$_need_kib" -gt "$_free_kib" ]; then
+            log "target too small: need ~$(( _need_kib / 1024 )) MiB, have $(( _free_kib / 1024 )) MiB free on $DEV"
+            exit 2
+        fi
+        log "space check ok: need ~$(( _need_kib / 1024 )) MiB, have $(( _free_kib / 1024 )) MiB"
+    else
+        log "warn: could not compute free space (src=$_src_kib free=$_free_kib); skipping check"
+    fi
+
+    if [ "$_FI_BTRFS_SUBVOLS" -eq 1 ]; then
+        # Live /home belongs to the live persona; @home stays pristine.
+        rsync -aAX --outbuf=N --info=progress2 --no-inc-recursive --exclude-from="$EXCLUDES" \
+            --exclude=/home / "$_COPY_DEST/"
+        mkdir -p "$_COPY_DEST/etc/vos"
+        : > "$_COPY_DEST/etc/vos/btrfs-subvols"
+        # The user's home must land in @home, where /home is at boot.
+        mkdir -p "$_COPY_DEST/home"
+        mount -o subvol=@home "$DEV" "$_COPY_DEST/home" || {
+            log "full-install: cannot mount @home"; exit 3; }
+    else
+        rsync -aAX --outbuf=N --info=progress2 --no-inc-recursive --exclude-from="$EXCLUDES" \
+            / "$_COPY_DEST/"
+    fi
+
+    _stage 85
+
+    # fstab must name the ESP the user chose, not the first one on the disk
+    [ -n "$FI_ESP" ] && _VOS_CFG_ESP="$FI_ESP"
+    case "$FI_SWAP" in
+        partition:*) _VOS_CFG_SWAP=partition; _VOS_CFG_SWAP_DEV="${FI_SWAP#partition:}" ;;
+        file) _VOS_CFG_SWAP=file; _VOS_CFG_SWAP_SIZE="$FI_SWAP_SIZE" ;;
+        none) _VOS_CFG_SWAP=none ;;
+    esac
+    _stage 86 configure
+    _do_config "$_COPY_DEST" "$DEV"
+    _stage 93 account
+
+    if ! _do_commit_setup "$_COPY_DEST"; then
+        log "full-install: account setup failed"
+        exit 3
+    fi
+    if ! _purge_live_debris "$_COPY_DEST" "$_VOS_ROOT_SET"; then
+        log "full-install: target still carries live session state"
+        exit 3
+    fi
+    _stage 96 bootloader
+
+    if [ "$FI_ESP" = "none" ]; then
+        _fi_esp=""; _fi_esp_chosen=1
+    else
+        _fi_esp="$FI_ESP"; _fi_esp_chosen=0
+    fi
+    if [ -z "$_fi_esp" ] && [ "$FI_EFI_MODE" != "none" ] && [ "$_fi_esp_chosen" -eq 0 ]; then
+        # No explicit choice: reuse the first ESP on the target disk.
+        _fi_disk="$(lsblk -no PKNAME "$DEV" 2>/dev/null | head -n1)"
+        if [ -n "$_fi_disk" ]; then
+            for _cand in $(lsblk -lnpo NAME "/dev/$_fi_disk" 2>/dev/null | tail -n +2); do
+                [ "$(lsblk -no PARTTYPE "$_cand" 2>/dev/null | head -n1)" \
+                    = "c12a7328-f81f-11d2-ba4b-00a0c93ec93b" ] || continue
+                _fi_esp="$_cand"; break
+            done
+        fi
+    fi
+    [ "$FI_BIOS" = "none" ] && FI_BIOS=""
+
+    if [ "$FI_EFI_MODE" = "none" ] && [ -z "$FI_BIOS" ]; then
+        log "full-install: bootloader skipped by choice"
+    else
+        _ruuid="$(blkid -s UUID -o value "$DEV" || true)"
+        [ -n "$_ruuid" ] || { log "cannot read root UUID of $DEV"; exit 3; }
+        # fstab's ESP entry follows the user's choice, not the disk scan.
+        if [ -n "$_fi_esp" ]; then
+            _fi_esp_uuid="$(blkid -s UUID -o value "$_fi_esp" || true)"
+            if [ -n "$_fi_esp_uuid" ] \
+                    && ! grep -q "/boot/efi" "$_COPY_DEST/etc/fstab" 2>/dev/null; then
+                printf 'UUID=%s  /boot/efi  vfat  umask=0077,shortname=mixed,nofail  0  2\n' \
+                    "$_fi_esp_uuid" >> "$_COPY_DEST/etc/fstab"
+            fi
+        fi
+        # Without a menu GRUB stops at its prompt; same as the bootloader action.
+        _kver="$(ls -1 "$_COPY_DEST"/boot/vmlinuz-* 2>/dev/null | sort -V | tail -n1 | sed 's|.*/vmlinuz-||')"
+        if [ -n "$_kver" ]; then
+            mkdir -p "$_COPY_DEST/boot/grub"
+            _write_shim_grubcfg "$_ruuid" "$_COPY_DEST/boot/grub/grub.cfg" "$_kver" "$_COPY_DEST" \
+                || log "warn: could not write /boot/grub/grub.cfg"
+        else
+            log "warn: no /boot/vmlinuz-* under target; skipping grub.cfg"
+        fi
+        if ! _bootloader_core "$_COPY_DEST" "$DEV" "$_ruuid" "$_fi_esp" \
+                "$FI_EFI_MODE" "${FI_BIOS:-none}" "$FI_ALLOW_CLOBBER" "$FI_NVRAM"; then
+            log "full-install: bootloader step failed"
+            exit 3
+        fi
+    fi
+
+    umount -R "$TARGET" 2>/dev/null || true
+    trap - EXIT HUP INT PIPE TERM
+
+    _stage 100
+    log "full-install complete for $DEV"
+    exit 0
+fi
+
+# configure: config stage on an explicitly described target, no live mount.
+if [ "${1:-}" = "configure" ]; then
+    shift
+    _cfg_target="${1:-}"
+    if [ -z "$_cfg_target" ] || [ ! -d "$_cfg_target" ]; then
+        echo "usage: vos-install-helper configure <target-dir> <source-devnode> [<fstype>]" >&2
+        exit 1
+    fi
+    if [ "$_cfg_target" = "/" ]; then
+        log "refusing to operate on / in configure mode"
+        exit 2
+    fi
+    shift
+    _do_config "$_cfg_target" "$@"
+    exit $?
+fi
+
+MODE="config"
+if [ "${1:-}" = "--commit-setup" ]; then
+    MODE="commit-setup"
+    shift
+    if [ "${1:-}" = "--keep-ssh" ]; then
+        _VOS_KEEP_SSH=1
+        shift
+    fi
+fi
+
+_arg="${1:-}"
+if [ -z "$_arg" ]; then
+    echo "usage: vos-install-helper [--commit-setup [--keep-ssh]] /path/to/target" >&2
+    echo "       vos-install-helper configure <target-dir> <source-devnode> [<fstype>]" >&2
+    echo "       vos-install-helper --full-install [/dev/DEVICE] [--plan <file>] [bootloader options]" >&2
+    exit 1
+fi
+
+TARGET="$(realpath -e "$_arg" 2>/dev/null || true)"
+if [ -z "$TARGET" ] || [ ! -d "$TARGET" ]; then
+    log "target path does not exist: $_arg"
+    exit 1
+fi
+
+if [ "$TARGET" = "/" ]; then
+    # Only the live-session in-place setup may touch the running root.
+    if [ "$MODE" != "commit-setup" ] || [ ! -e /etc/vos/live ] \
+            || [ -e /var/lib/vos/first-boot-done ] \
+            || ! _root_is_persistent_rw; then
+        log "refusing to operate on / here"
+        exit 2
+    fi
+    _do_commit_setup / || exit $?
+    _purge_live_debris / "${_VOS_ROOT_SET:-0}" || exit 3
+    exit 0
+fi
+
+if [ "$MODE" = "commit-setup" ]; then
+    _do_commit_setup "$TARGET"
+    exit $?
+fi
+
+trap '_unmount_binds "$TARGET"' EXIT INT TERM
+_do_config "$TARGET"
+exit $?

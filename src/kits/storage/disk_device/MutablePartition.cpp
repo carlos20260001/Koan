@@ -30,7 +30,7 @@ BMutablePartition::UninitializeContents()
 	SetContentName(NULL);
 	SetContentParameters(NULL);
 	SetContentSize(0);
-	// a disk device has no parent and keeps its own block size
+	// this can run on the device itself, whose Parent() is NULL
 	if (Parent() != NULL)
 		SetBlockSize(Parent()->BlockSize());
 	SetContentType(NULL);
@@ -332,6 +332,40 @@ BMutablePartition::SetContentParameters(const char* parameters)
 }
 
 
+// Role
+const char*
+BMutablePartition::Role() const
+{
+	return fRole.String();
+}
+
+
+// SetRole
+status_t
+BMutablePartition::SetRole(const char* role)
+{
+	fRole = role;
+	return B_OK;
+}
+
+
+// Options
+const BMessage&
+BMutablePartition::Options() const
+{
+	return fOptions;
+}
+
+
+// SetOptions
+status_t
+BMutablePartition::SetOptions(const BMessage& options)
+{
+	fOptions = options;
+	return B_OK;
+}
+
+
 // CreateChild
 status_t
 BMutablePartition::CreateChild(int32 index, BMutablePartition** _child)
@@ -566,7 +600,6 @@ BMutablePartition::Init(const user_partition_data* partitionData,
 	fData->size = partitionData->size;
 	fData->content_size = partitionData->content_size;
 	fData->block_size = partitionData->block_size;
-	fData->physical_block_size = partitionData->physical_block_size;
 	fData->status = partitionData->status;
 	fData->flags = partitionData->flags;
 	fData->volume = partitionData->volume;

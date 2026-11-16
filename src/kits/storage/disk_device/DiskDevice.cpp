@@ -1,4 +1,5 @@
 /*
+ * Copyright 2026, Dario Casalinuovo. All rights reserved.
  * Copyright 2003-2007, Ingo Weinhold, ingo_weinhold@gmx.de.
  * Distributed under the terms of the MIT License.
  */
@@ -12,6 +13,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/ioctl.h>
 #include <unistd.h>
 
 #include <DiskDevice.h>
@@ -26,7 +28,6 @@
 #include "DiskDeviceJob.h"
 #include "DiskDeviceJobGenerator.h"
 #include "DiskDeviceJobQueue.h"
-#include <DiskSystemAddOnManager.h>
 
 
 //#define TRACE_DISK_DEVICE
@@ -130,7 +131,7 @@ BDiskDevice::Eject(bool update)
 	// open, eject and close the device
 	int fd = open(fDeviceData->path, O_RDONLY);
 	if (fd < 0)
-		return errno;
+		return -errno;
 
 	status_t status = B_OK;
 	if (ioctl(fd, B_EJECT_DEVICE) != 0)
@@ -188,11 +189,36 @@ BDiskDevice::Update(bool* updated)
 }
 
 
+// _FreePartitionStrings — walks the partition tree freeing the
+// strdup'd string fields (name/type/content_name/content_type/
+// parameters/content_parameters) that libroot2's fill_partition_info
+// allocates. Haiku's kernel-side impl packs these into the flat buffer;
+// on Vitruvian we allocate per-field so they must be released here.
+static void
+_FreePartitionStrings(user_partition_data* data)
+{
+	if (data == NULL)
+		return;
+	free(data->name);              data->name = NULL;
+	free(data->content_name);      data->content_name = NULL;
+	free(data->type);              data->type = NULL;
+	free(data->content_type);      data->content_type = NULL;
+	free(data->parameters);        data->parameters = NULL;
+	free(data->content_parameters); data->content_parameters = NULL;
+	for (int32 i = 0; i < data->child_count; i++)
+		_FreePartitionStrings(data->children[i]);
+}
+
+
 // Unset
 void
 BDiskDevice::Unset()
 {
 	BPartition::_Unset();
+	if (fDeviceData != NULL) {
+		free(fDeviceData->path);
+		_FreePartitionStrings(&fDeviceData->device_partition_data);
+	}
 	free(fDeviceData);
 	fDeviceData = NULL;
 }
@@ -264,13 +290,6 @@ BDiskDevice::PrepareModifications()
 		return B_BAD_VALUE;
 	}
 
-	// make sure the disk system add-ons are loaded
-	error = DiskSystemAddOnManager::Default()->LoadDiskSystems();
-	if (error != B_OK) {
-		TRACE("  failed to load disk systems\n");
-		return error;
-	}
-
 	// recursively create the delegates
 	error = _CreateDelegates();
 
@@ -284,7 +303,6 @@ BDiskDevice::PrepareModifications()
 	if (error != B_OK) {
 		TRACE("  failed to init delegates\n");
 		_DeleteDelegates();
-		DiskSystemAddOnManager::Default()->UnloadDiskSystems();
 	}
 
 	return error;
@@ -303,9 +321,10 @@ BDiskDevice::PrepareModifications()
  */
 status_t
 BDiskDevice::CommitModifications(bool synchronously,
-	BMessenger progressMessenger, bool receiveCompleteProgressUpdates)
+	BMessenger progressMessenger, bool receiveCompleteProgressUpdates,
+	BMessage* outResult)
 {
-// TODO: Support parameters!
+	// TODO: helper call is always synchronous; progress params ignored
 	status_t error = InitCheck();
 	if (error != B_OK)
 		return error;
@@ -317,12 +336,11 @@ BDiskDevice::CommitModifications(bool synchronously,
 	DiskDeviceJobQueue jobQueue;
 	error = DiskDeviceJobGenerator(this, &jobQueue).GenerateJobs();
 
-	// do the jobs
+	// the _kern_* stubs are unprivileged; commit ships one helper plan
 	if (error == B_OK)
-		error = jobQueue.Execute();
+		error = jobQueue.ExecuteViaHelper(this, outResult);
 
 	_DeleteDelegates();
-	DiskSystemAddOnManager::Default()->UnloadDiskSystems();
 
 	if (error == B_OK)
 		error = _SetTo(ID(), true, 0);
@@ -347,7 +365,6 @@ BDiskDevice::CancelModifications()
 		return B_BAD_VALUE;
 
 	_DeleteDelegates();
-	DiskSystemAddOnManager::Default()->UnloadDiskSystems();
 
 	if (error == B_OK)
 		error = _SetTo(ID(), true, 0);

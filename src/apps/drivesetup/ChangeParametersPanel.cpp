@@ -22,7 +22,6 @@
 #include <PopUpMenu.h>
 #include <String.h>
 #include <TextControl.h>
-#include <Variant.h>
 
 #include "Support.h"
 
@@ -53,10 +52,11 @@ ChangeParametersPanel::~ChangeParametersPanel()
 
 
 status_t
-ChangeParametersPanel::Go(BString& name, BString& type, BString& parameters)
+ChangeParametersPanel::Go(BString& name, BString& type, BString& parameters,
+	BString& contentParameters)
 {
 	BMessage storage;
-	return Go(name, type, parameters, storage);
+	return Go(name, type, parameters, contentParameters, storage);
 }
 
 
@@ -65,11 +65,6 @@ ChangeParametersPanel::MessageReceived(BMessage* message)
 {
 	switch (message->what) {
 		case MSG_PARTITION_TYPE:
-			if (fEditor != NULL) {
-				const char* type;
-				if (message->FindString("type", &type) == B_OK)
-					fEditor->ParameterChanged("type", BVariant(type));
-			}
 			break;
 
 		default:
@@ -90,7 +85,7 @@ ChangeParametersPanel::ChangeParametersPanel(BWindow* window)
 
 status_t
 ChangeParametersPanel::Go(BString& name, BString& type, BString& parameters,
-	BMessage& storage)
+	BString& contentParameters, BMessage& storage)
 {
 	// The object will be deleted in Go(), so we need to get the values via
 	// a BMessage
@@ -103,6 +98,15 @@ ChangeParametersPanel::Go(BString& name, BString& type, BString& parameters,
 
 	// get type
 	type.SetTo(storage.GetString("type", NULL));
+
+	// the editor fields, when they were part of the panel
+	const char* value = storage.GetString("parameters", NULL);
+	if (value != NULL)
+		parameters.SetTo(value);
+
+	value = storage.GetString("content_parameters", NULL);
+	if (value != NULL)
+		contentParameters.SetTo(value);
 
 	return B_OK;
 }
@@ -136,7 +140,7 @@ ChangeParametersPanel::CreateChangeControls(BPartition* partition,
 			== B_OK) {
 			BMessage* message = new BMessage(MSG_PARTITION_TYPE);
 			message->AddString("type", supportedType);
-			BMenuItem* item = new BMenuItem(supportedType, message);
+			BMenuItem* item = new BMenuItem(partition_type_label(supportedType), message);
 			fTypePopUpMenu->AddItem(item);
 
 			if (type != NULL) {
@@ -147,9 +151,33 @@ ChangeParametersPanel::CreateChangeControls(BPartition* partition,
 		}
 	}
 
+	// Haiku's BFS default doesn't exist here; mark the first offered type.
+	if (fTypePopUpMenu->FindMarked() == NULL
+		&& fTypePopUpMenu->CountItems() > 0) {
+		fTypePopUpMenu->ItemAt(0)->SetMarked(true);
+	}
+
 	fTypeMenuField = new BMenuField(B_TRANSLATE("Partition type:"),
 		fTypePopUpMenu);
 	fSupportsType = fTypePopUpMenu->CountItems() != 0;
+
+	fParametersTextControl = new BTextControl("Parameters Control",
+		B_TRANSLATE("Partition parameters:"), "", NULL);
+	fSupportsParameters = partition != NULL
+		&& partition->CanEditParameters();
+	if (fSupportsParameters && partition->Parameters() != NULL)
+		fParametersTextControl->SetText(partition->Parameters());
+
+	fContentParametersTextControl = new BTextControl(
+		"Content Parameters Control", B_TRANSLATE("Content parameters:"),
+		"", NULL);
+	fSupportsContentParameters = partition != NULL
+		&& partition->CanEditContentParameters();
+	if (fSupportsContentParameters
+		&& partition->ContentParameters() != NULL) {
+		fContentParametersTextControl->SetText(
+			partition->ContentParameters());
+	}
 
 	fOkButton->SetLabel(B_TRANSLATE("Change"));
 }
@@ -170,7 +198,7 @@ ChangeParametersPanel::ValidWithoutEditor() const
 
 
 status_t
-ChangeParametersPanel::ParametersReceived(const BString& parameters,
+ChangeParametersPanel::ParametersReceived(BString& parameters,
 	BMessage& storage)
 {
 	// get name
@@ -187,6 +215,14 @@ ChangeParametersPanel::ParametersReceived(const BString& parameters,
 			status = storage.SetString("type", type);
 	}
 
+	if (status == B_OK && fSupportsParameters)
+		status = storage.SetString("parameters",
+			fParametersTextControl->Text());
+
+	if (status == B_OK && fSupportsContentParameters)
+		status = storage.SetString("content_parameters",
+			fContentParametersTextControl->Text());
+
 	return status;
 }
 
@@ -195,17 +231,37 @@ void
 ChangeParametersPanel::AddControls(BLayoutBuilder::Group<>& builder,
 	BView* editorView)
 {
-	if (fSupportsName || fSupportsType) {
+	if (fSupportsName || fSupportsType || fSupportsParameters
+		|| fSupportsContentParameters) {
 		BLayoutBuilder::Group<>::GridBuilder gridBuilder
 			= builder.AddGrid(0.0, B_USE_DEFAULT_SPACING);
 
+		int32 row = 0;
 		if (fSupportsName) {
-			gridBuilder.Add(fNameTextControl->CreateLabelLayoutItem(), 0, 0)
-				.Add(fNameTextControl->CreateTextViewLayoutItem(), 1, 0);
+			gridBuilder.Add(fNameTextControl->CreateLabelLayoutItem(), 0,
+					row)
+				.Add(fNameTextControl->CreateTextViewLayoutItem(), 1, row);
+			row++;
 		}
 		if (fSupportsType) {
-			gridBuilder.Add(fTypeMenuField->CreateLabelLayoutItem(), 0, 1)
-				.Add(fTypeMenuField->CreateMenuBarLayoutItem(), 1, 1);
+			gridBuilder.Add(fTypeMenuField->CreateLabelLayoutItem(), 0,
+					row)
+				.Add(fTypeMenuField->CreateMenuBarLayoutItem(), 1, row);
+			row++;
+		}
+		if (fSupportsParameters) {
+			gridBuilder.Add(fParametersTextControl->CreateLabelLayoutItem(),
+					0, row)
+				.Add(fParametersTextControl->CreateTextViewLayoutItem(), 1,
+					row);
+			row++;
+		}
+		if (fSupportsContentParameters) {
+			gridBuilder.Add(
+					fContentParametersTextControl->CreateLabelLayoutItem(),
+					0, row)
+				.Add(fContentParametersTextControl
+					->CreateTextViewLayoutItem(), 1, row);
 		}
 	}
 

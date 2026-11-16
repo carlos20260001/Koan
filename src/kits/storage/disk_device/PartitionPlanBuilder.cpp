@@ -1,0 +1,842 @@
+/*
+ * Copyright 2026, the Vitruvian project.
+ * Distributed under the terms of the MIT License.
+ */
+
+#include "PartitionPlanBuilder.h"
+
+#include <dirent.h>
+#include <errno.h>
+#include <signal.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <sys/wait.h>
+#include <unistd.h>
+
+#include <File.h>
+#include <Path.h>
+
+#include "PartitionReference.h"
+
+
+// Wrapper so two .policy files don't annotate the same pkexec exec.path.
+static const char* kInstallHelper = "/usr/libexec/vos-drivesetup-helper";
+
+
+// Runs the helper, capturing stdout. argv[0] is the exec path; the
+// remaining args follow. Returns B_OK and fills outText on exit 0.
+static status_t
+run_helper_capture(const char* execPath, const char* const argv[],
+	BString& outText)
+{
+	int outPipe[2];
+	if (pipe(outPipe) < 0)
+		return B_ERROR;
+
+	pid_t pid = fork();
+	if (pid < 0) {
+		close(outPipe[0]);
+		close(outPipe[1]);
+		return B_ERROR;
+	}
+
+	if (pid == 0) {
+		close(outPipe[0]);
+		dup2(outPipe[1], STDOUT_FILENO);
+		close(outPipe[1]);
+		execv(execPath, (char* const*)argv);
+		_exit(127);
+	}
+
+	close(outPipe[1]);
+
+	outText.Truncate(0);
+	char buffer[512];
+	ssize_t bytesRead;
+	while ((bytesRead = read(outPipe[0], buffer, sizeof(buffer) - 1)) > 0) {
+		buffer[bytesRead] = '\0';
+		outText << buffer;
+	}
+	close(outPipe[0]);
+
+	int status = 0;
+	while (waitpid(pid, &status, 0) < 0 && errno == EINTR)
+		;
+
+	if (!WIFEXITED(status) || WEXITSTATUS(status) != 0)
+		return B_ERROR;
+
+	return B_OK;
+}
+
+
+// Must mirror _partlib_kv_split() in vos-partition-lib.sh; same encoding.
+static bool
+split_kv(const BString& line, BString& key, BString& value);
+
+
+// Top-level key=value lines before any [section] record.
+static void
+parse_kv_text(const BString& text, BMessage& out)
+{
+	int32 start = 0;
+	int32 length = text.Length();
+	while (start <= length) {
+		int32 nl = text.FindFirst('\n', start);
+		BString line;
+		if (nl < 0) {
+			if (start == length)
+				break;
+			text.CopyInto(line, start, length - start);
+			start = length + 1;
+		} else {
+			text.CopyInto(line, start, nl - start);
+			start = nl + 1;
+		}
+
+		if (line.IsEmpty() || line[0] == '#')
+			break;
+		if (line[0] == '[')
+			break;
+
+		BString key, value;
+		if (split_kv(line, key, value))
+			out.AddString(key.String(), value);
+	}
+}
+
+
+PartitionOpIdMap::~PartitionOpIdMap()
+{
+}
+
+
+void
+PartitionOpIdMap::Set(PartitionReference* ref, const BString& opID)
+{
+	Entry* entry = new Entry;
+	entry->ref = ref;
+	entry->opID = opID;
+	fEntries.AddItem(entry);
+}
+
+
+const BString*
+PartitionOpIdMap::Get(PartitionReference* ref) const
+{
+	for (int32 i = 0; i < fEntries.CountItems(); i++) {
+		if (fEntries.ItemAt(i)->ref == ref)
+			return &fEntries.ItemAt(i)->opID;
+	}
+	return NULL;
+}
+
+
+PartitionPlanBuilder::PartitionPlanBuilder()
+	:
+	fOpCount(0),
+	fValid(true)
+{
+}
+
+
+void
+PartitionPlanBuilder::SetDisk(const char* disk)
+{
+	fDisk = disk;
+}
+
+
+bool
+PartitionPlanBuilder::_CheckField(const char* value)
+{
+	if (value != NULL && strchr(value, '\n') != NULL)
+		fValid = false;
+	return fValid;
+}
+
+
+void
+PartitionPlanBuilder::AddCreateTable(const char* id, const char* type)
+{
+	if (!_CheckField(id) || !_CheckField(type))
+		return;
+
+	fOpCount++;
+	fOps << "\n[op]\n";
+	fOps << "kind=create_table\n";
+	fOps << "id=" << id << "\n";
+	fOps << "type=" << type << "\n";
+
+	if (fTableType.IsEmpty())
+		fTableType = type;
+}
+
+
+void
+PartitionPlanBuilder::AddCreate(const char* id, off_t startMiB,
+	off_t sizeMiB, const char* gptType, const char* role)
+{
+	const char* resolvedRole = (role != NULL && role[0] != '\0') ? role : "none";
+	if (!_CheckField(id) || !_CheckField(gptType) || !_CheckField(resolvedRole))
+		return;
+
+	fOpCount++;
+	fOps << "\n[op]\n";
+	fOps << "kind=create\n";
+	fOps << "id=" << id << "\n";
+	fOps << "start_mib=" << (int64)startMiB << "\n";
+	fOps << "size_mib=" << (int64)sizeMiB << "\n";
+	fOps << "gpt_type=" << gptType << "\n";
+	fOps << "role=" << resolvedRole << "\n";
+}
+
+
+void
+PartitionPlanBuilder::AddDelete(const char* id, const char* targetRef)
+{
+	if (!_CheckField(id) || !_CheckField(targetRef))
+		return;
+
+	fOpCount++;
+	fOps << "\n[op]\n";
+	fOps << "kind=delete\n";
+	fOps << "id=" << id << "\n";
+	fOps << "target_ref=" << targetRef << "\n";
+}
+
+
+void
+PartitionPlanBuilder::_AppendOptions(BString& out, const BMessage* options) const
+{
+	if (options == NULL)
+		return;
+
+	char* name;
+	uint32 type;
+	int32 count;
+	for (int32 i = 0; options->GetInfo(B_STRING_TYPE, i, &name, &type,
+			&count) == B_OK; i++) {
+		for (int32 j = 0; j < count; j++) {
+			BString value;
+			options->FindString(name, j, &value);
+			out << name << "=" << value << "\n";
+		}
+	}
+}
+
+
+void
+PartitionPlanBuilder::AddFormat(const char* id, const char* targetRef,
+	const char* filesystem, const char* label, const char* role,
+	const BMessage* options)
+{
+	const char* resolvedLabel = label != NULL ? label : "";
+	const char* resolvedRole = (role != NULL && role[0] != '\0') ? role : "none";
+	if (!_CheckField(id) || !_CheckField(targetRef) || !_CheckField(filesystem)
+		|| !_CheckField(resolvedLabel) || !_CheckField(resolvedRole)) {
+		return;
+	}
+	if (options != NULL) {
+		char* name;
+		uint32 type;
+		int32 count;
+		for (int32 i = 0; options->GetInfo(B_STRING_TYPE, i, &name, &type,
+				&count) == B_OK; i++) {
+			for (int32 j = 0; j < count; j++) {
+				BString value;
+				options->FindString(name, j, &value);
+				if (!_CheckField(name) || !_CheckField(value.String()))
+					return;
+			}
+		}
+	}
+
+	fOpCount++;
+	fOps << "\n[op]\n";
+	fOps << "kind=format\n";
+	fOps << "id=" << id << "\n";
+	fOps << "target_ref=" << targetRef << "\n";
+	fOps << "filesystem=" << filesystem << "\n";
+	fOps << "label=" << resolvedLabel << "\n";
+	fOps << "role=" << resolvedRole << "\n";
+	_AppendOptions(fOps, options);
+}
+
+
+void
+PartitionPlanBuilder::AddSetFlags(const char* id, const char* targetRef,
+	const BMessage& flags)
+{
+	if (!_CheckField(id) || !_CheckField(targetRef))
+		return;
+
+	BString flag;
+	for (int32 i = 0; flags.FindString("flag", i, &flag) == B_OK; i++) {
+		if (!_CheckField(flag.String()))
+			return;
+	}
+
+	fOpCount++;
+	fOps << "\n[op]\n";
+	fOps << "kind=set_flags\n";
+	fOps << "id=" << id << "\n";
+	fOps << "target_ref=" << targetRef << "\n";
+	for (int32 i = 0; flags.FindString("flag", i, &flag) == B_OK; i++)
+		fOps << "flag=" << flag << "\n";
+}
+
+
+void
+PartitionPlanBuilder::AddResize(const char* id, const char* targetRef,
+	const char* filesystem, off_t newSizeMiB)
+{
+	if (!_CheckField(id) || !_CheckField(targetRef) || !_CheckField(filesystem))
+		return;
+
+	fOpCount++;
+	fOps << "\n[op]\n";
+	fOps << "kind=resize\n";
+	fOps << "id=" << id << "\n";
+	fOps << "target_ref=" << targetRef << "\n";
+	fOps << "filesystem=" << filesystem << "\n";
+	fOps << "new_size_mib=" << (int64)newSizeMiB << "\n";
+}
+
+
+void
+PartitionPlanBuilder::AddMove(const char* id, const char* targetRef,
+	off_t newStartMiB)
+{
+	if (!_CheckField(id) || !_CheckField(targetRef))
+		return;
+
+	fOpCount++;
+	fOps << "\n[op]\n";
+	fOps << "kind=move\n";
+	fOps << "id=" << id << "\n";
+	fOps << "target_ref=" << targetRef << "\n";
+	fOps << "new_start_mib=" << (int64)newStartMiB << "\n";
+}
+
+
+void
+PartitionPlanBuilder::AddErase(const char* id, const char* targetRef)
+{
+	if (!_CheckField(id) || !_CheckField(targetRef))
+		return;
+
+	fOpCount++;
+	fOps << "\n[op]\n";
+	fOps << "kind=erase\n";
+	fOps << "id=" << id << "\n";
+	fOps << "target_ref=" << targetRef << "\n";
+}
+
+
+void
+PartitionPlanBuilder::AddWipe(const char* id, const char* targetRef, bool full)
+{
+	if (!_CheckField(id) || !_CheckField(targetRef))
+		return;
+
+	fOpCount++;
+	fOps << "\n[op]\n";
+	fOps << "kind=wipe\n";
+	fOps << "id=" << id << "\n";
+	fOps << "target_ref=" << targetRef << "\n";
+	fOps << "mode=" << (full ? "full" : "quick") << "\n";
+}
+
+
+void
+PartitionPlanBuilder::AddRepair(const char* id, const char* targetRef,
+	const char* filesystem, bool checkOnly)
+{
+	if (!_CheckField(id) || !_CheckField(targetRef) || !_CheckField(filesystem))
+		return;
+
+	fOpCount++;
+	fOps << "\n[op]\n";
+	fOps << "kind=repair\n";
+	fOps << "id=" << id << "\n";
+	fOps << "target_ref=" << targetRef << "\n";
+	fOps << "filesystem=" << filesystem << "\n";
+	fOps << "check_only=" << (checkOnly ? "1" : "0") << "\n";
+}
+
+
+// "string_kind", not "kind": kind is already this record's op-type key.
+void
+PartitionPlanBuilder::AddSetLabel(const char* id, const char* targetRef,
+	const char* filesystem, const char* value)
+{
+	if (!_CheckField(id) || !_CheckField(targetRef) || !_CheckField(filesystem)
+		|| !_CheckField(value)) {
+		return;
+	}
+
+	fOpCount++;
+	fOps << "\n[op]\n";
+	fOps << "kind=set_string\n";
+	fOps << "id=" << id << "\n";
+	fOps << "target_ref=" << targetRef << "\n";
+	fOps << "string_kind=label\n";
+	fOps << "filesystem=" << filesystem << "\n";
+	fOps << "value=" << value << "\n";
+}
+
+
+void
+PartitionPlanBuilder::AddSetGptName(const char* id, const char* targetRef,
+	const char* value)
+{
+	if (!_CheckField(id) || !_CheckField(targetRef) || !_CheckField(value))
+		return;
+
+	fOpCount++;
+	fOps << "\n[op]\n";
+	fOps << "kind=set_string\n";
+	fOps << "id=" << id << "\n";
+	fOps << "target_ref=" << targetRef << "\n";
+	fOps << "string_kind=gpt_name\n";
+	fOps << "value=" << value << "\n";
+}
+
+
+// "type" is the partition type vocabulary of create (token, GUID or
+// MBR byte), not a content type.
+void
+PartitionPlanBuilder::AddSetType(const char* id, const char* targetRef,
+	const char* type)
+{
+	if (!_CheckField(id) || !_CheckField(targetRef) || !_CheckField(type))
+		return;
+
+	fOpCount++;
+	fOps << "\n[op]\n";
+	fOps << "kind=set_type\n";
+	fOps << "id=" << id << "\n";
+	fOps << "target_ref=" << targetRef << "\n";
+	fOps << "type=" << type << "\n";
+}
+
+
+// Partition parameters are the driver-settings string the partition list
+// parses ("active: 1"); the helper knows that key only.
+void
+PartitionPlanBuilder::AddSetParameters(const char* id, const char* targetRef,
+	const char* parameters)
+{
+	if (!_CheckField(id) || !_CheckField(targetRef)
+		|| !_CheckField(parameters)) {
+		return;
+	}
+
+	fOpCount++;
+	fOps << "\n[op]\n";
+	fOps << "kind=set_parameters\n";
+	fOps << "id=" << id << "\n";
+	fOps << "target_ref=" << targetRef << "\n";
+	fOps << "parameters=" << parameters << "\n";
+}
+
+
+// parameters is a space-separated key=value list; empty only to say the
+// record carries no parameter at all (rejected at validation).
+void
+PartitionPlanBuilder::AddSetContentParameters(const char* id,
+	const char* targetRef, const char* filesystem, const char* parameters)
+{
+	const char* resolvedFs = filesystem != NULL ? filesystem : "";
+	if (!_CheckField(id) || !_CheckField(targetRef)
+		|| !_CheckField(resolvedFs) || !_CheckField(parameters)) {
+		return;
+	}
+
+	fOpCount++;
+	fOps << "\n[op]\n";
+	fOps << "kind=set_content_parameters\n";
+	fOps << "id=" << id << "\n";
+	fOps << "target_ref=" << targetRef << "\n";
+	fOps << "filesystem=" << resolvedFs << "\n";
+	fOps << "parameters=" << parameters << "\n";
+}
+
+
+void
+PartitionPlanBuilder::AddDefrag(const char* id, const char* targetRef,
+	const char* filesystem)
+{
+	const char* resolvedFs = filesystem != NULL ? filesystem : "";
+	if (!_CheckField(id) || !_CheckField(targetRef)
+		|| !_CheckField(resolvedFs)) {
+		return;
+	}
+
+	fOpCount++;
+	fOps << "\n[op]\n";
+	fOps << "kind=defrag\n";
+	fOps << "id=" << id << "\n";
+	fOps << "target_ref=" << targetRef << "\n";
+	fOps << "filesystem=" << resolvedFs << "\n";
+}
+
+
+BString
+PartitionPlanBuilder::ToPlan() const
+{
+	BString plan;
+	plan << "plan_version=1\n";
+	plan << "disk=" << fDisk << "\n";
+	plan << "table_type=" << (fTableType.IsEmpty() ? "gpt" : fTableType.String())
+		<< "\n";
+	plan << fOps;
+	return plan;
+}
+
+
+// Must mirror _partlib_kv_split() in vos-partition-lib.sh; same encoding.
+static bool
+split_kv(const BString& line, BString& key, BString& value)
+{
+	int32 eq = line.FindFirst('=');
+	if (eq < 0)
+		return false;
+	line.CopyInto(key, 0, eq);
+	value.SetTo(line.String() + eq + 1);
+	return true;
+}
+
+
+// "kind=" is stored under field "op": the name ProgressWindow already reads.
+static void
+flush_record(const BString& section, BMessage& record, bool& haveRecord,
+	BMessage& volumes, int32& volumeCount, BMessage& ops, int32& opCount)
+{
+	if (!haveRecord)
+		return;
+	if (section == "volume")
+		volumes.AddMessage(BString() << volumeCount++, &record);
+	else if (section == "op")
+		ops.AddMessage(BString() << opCount++, &record);
+	record.MakeEmpty();
+	haveRecord = false;
+}
+
+
+static void
+parse_result(const BString& text, BMessage& result)
+{
+	BString status, failedOp;
+	BMessage volumes, ops;
+	int32 volumeCount = 0, opCount = 0;
+
+	BString section;
+	BMessage record;
+	bool haveRecord = false;
+
+	int32 start = 0;
+	int32 length = text.Length();
+	while (start <= length) {
+		int32 nl = text.FindFirst('\n', start);
+		BString line;
+		if (nl < 0) {
+			if (start == length)
+				break;
+			text.CopyInto(line, start, length - start);
+			start = length + 1;
+		} else {
+			text.CopyInto(line, start, nl - start);
+			start = nl + 1;
+		}
+
+		if (line.IsEmpty() || line[0] == '#')
+			continue;
+
+		if (line[0] == '[' && line[line.Length() - 1] == ']') {
+			flush_record(section, record, haveRecord, volumes, volumeCount,
+				ops, opCount);
+			line.CopyInto(section, 1, line.Length() - 2);
+			haveRecord = true;
+			continue;
+		}
+
+		BString key, value;
+		if (!split_kv(line, key, value))
+			continue;
+
+		if (!haveRecord) {
+			if (key == "status")
+				status = value;
+			else if (key == "failed_op")
+				failedOp = value;
+			else if (key == "move_recovery")
+				result.AddString("move_recovery", value);
+			else if (key == "move_recovery_detail")
+				result.AddString("move_recovery_detail", value);
+			continue;
+		}
+
+		if (section == "op" && key == "kind")
+			record.AddString("op", value);
+		else
+			record.AddString(key.String(), value);
+	}
+	flush_record(section, record, haveRecord, volumes, volumeCount, ops,
+		opCount);
+
+	result.AddString("status", status);
+	result.AddString("failed_op", failedOp);
+	if (volumeCount > 0)
+		result.AddMessage("volumes", &volumes);
+	if (opCount > 0)
+		result.AddMessage("ops", &ops);
+
+	if (!failedOp.IsEmpty()) {
+		for (int32 i = 0; i < opCount; i++) {
+			BMessage op;
+			if (ops.FindMessage(BString() << i, &op) != B_OK)
+				continue;
+			BString id, detail;
+			op.FindString("id", &id);
+			if (id != failedOp)
+				continue;
+			op.FindString("detail", &detail);
+			if (!detail.IsEmpty())
+				result.AddString("detail", detail);
+			break;
+		}
+	}
+}
+
+
+status_t
+PartitionPlanBuilder::RunPlan(const BString& plan, BMessage& result,
+	bool allowReformatEsp)
+{
+	char planPath[] = "/tmp/vos-partition-plan-XXXXXX";
+	int fd = mkstemp(planPath);
+	if (fd < 0)
+		return B_ERROR;
+
+	ssize_t written = write(fd, plan.String(), plan.Length());
+	close(fd);
+	if (written < 0 || (size_t)written != (size_t)plan.Length()) {
+		unlink(planPath);
+		return B_ERROR;
+	}
+
+	int errPipe[2];
+	if (pipe(errPipe) < 0) {
+		unlink(planPath);
+		return B_ERROR;
+	}
+
+	pid_t pid = fork();
+	if (pid < 0) {
+		close(errPipe[0]);
+		close(errPipe[1]);
+		unlink(planPath);
+		return B_ERROR;
+	}
+	if (pid == 0) {
+		close(errPipe[0]);
+		dup2(errPipe[1], STDERR_FILENO);
+		close(errPipe[1]);
+		if (allowReformatEsp) {
+			execl("/usr/bin/pkexec", "pkexec", kInstallHelper, "partition",
+				"apply", planPath, "--allow-reformat-esp", (char*)NULL);
+		} else {
+			execl("/usr/bin/pkexec", "pkexec", kInstallHelper, "partition",
+				"apply", planPath, (char*)NULL);
+		}
+		_exit(127);
+	}
+
+	close(errPipe[1]);
+
+	BString helperLog;
+	char readBuffer[512];
+	ssize_t bytesRead;
+	while ((bytesRead = read(errPipe[0], readBuffer, sizeof(readBuffer) - 1)) > 0) {
+		readBuffer[bytesRead] = '\0';
+		helperLog << readBuffer;
+	}
+	close(errPipe[0]);
+
+	int status = 0;
+	while (waitpid(pid, &status, 0) < 0 && errno == EINTR)
+		;
+
+	BString resultPath(planPath);
+	resultPath << ".result";
+
+	BFile resultFile(resultPath.String(), B_READ_ONLY);
+	status_t error = resultFile.InitCheck();
+	if (error == B_OK) {
+		off_t size = 0;
+		resultFile.GetSize(&size);
+		char* buffer = (char*)malloc(size + 1);
+		if (buffer != NULL) {
+			ssize_t got = resultFile.Read(buffer, size);
+			if (got < 0)
+				got = 0;
+			buffer[got] = '\0';
+			parse_result(BString(buffer), result);
+			free(buffer);
+		} else {
+			error = B_NO_MEMORY;
+		}
+	}
+
+	if (getenv("VOS_KEEP_PLAN") == NULL) {
+		unlink(planPath);
+		unlink(resultPath.String());
+	} else {
+		fprintf(stderr, "[DriveSetup] plan kept at %s (result: %s)\n",
+			planPath, resultPath.String());
+	}
+
+	if (error != B_OK) {
+		int exitCode = WIFEXITED(status) ? WEXITSTATUS(status) : -1;
+		BString detail;
+		status_t reason = B_ERROR;
+
+		if (!WIFEXITED(status)) {
+			detail = "The helper was killed before it finished.";
+		} else switch (exitCode) {
+			case 0:
+				detail = "The helper reported success but wrote no result "
+					"file.";
+				break;
+			case 1:
+				detail = "The helper failed while applying the plan.";
+				break;
+			case 2:
+				detail = "The plan was rejected as invalid.";
+				result.AddString("failed_op", "validate");
+				reason = B_BAD_VALUE;
+				break;
+			case 126:
+				detail = "Not authorized: the request was denied or "
+					"cancelled.";
+				reason = B_PERMISSION_DENIED;
+				break;
+			case 127:
+				detail.SetToFormat("Could not run %s -- is it installed?",
+					kInstallHelper);
+				reason = B_ENTRY_NOT_FOUND;
+				break;
+			default:
+				detail.SetToFormat("The helper exited with status %d.",
+					exitCode);
+				break;
+		}
+
+		if (helperLog.Length() > 0)
+			detail << "\n\n" << helperLog;
+
+		result.AddString("status", "failed");
+		result.AddString("detail", detail);
+		result.AddInt32("exit_code", exitCode);
+		if (helperLog.Length() > 0)
+			fprintf(stderr, "%s", helperLog.String());
+		return reason;
+	}
+
+	const char* resultStatus = NULL;
+	if (result.FindString("status", &resultStatus) == B_OK
+		&& resultStatus != NULL && strcmp(resultStatus, "ok") != 0) {
+		if (helperLog.Length() > 0) {
+			fprintf(stderr, "%s", helperLog.String());
+			BString detail;
+			if (result.FindString("detail", &detail) == B_OK)
+				detail << "\n\n" << helperLog;
+			else
+				detail = helperLog;
+			result.RemoveName("detail");
+			result.AddString("detail", detail);
+		}
+	}
+
+	return B_OK;
+}
+
+
+// Lists leftover partition-move journals, so a killed Move is visible.
+// Must match _PARTLIB_MOVE_JOURNAL_DIR in vos-partition-lib.sh.
+static const char* kMoveJournalDir = "/var/lib/vos/move-journal";
+
+
+static bool
+has_move_journal()
+{
+	DIR* dir = opendir(kMoveJournalDir);
+	if (dir == NULL)
+		return false;
+
+	bool found = false;
+	struct dirent* entry;
+	while (!found && (entry = readdir(dir)) != NULL) {
+		size_t length = strlen(entry->d_name);
+		found = length > 8
+			&& strcmp(entry->d_name + length - 8, ".journal") == 0;
+	}
+	closedir(dir);
+	return found;
+}
+
+
+status_t
+PartitionPlanBuilder::QueryMoveRecovery(BMessage& result)
+{
+	// The journal directory is world-readable: only ask polkit when a
+	// move was actually interrupted, not on every DriveSetup start.
+	if (!has_move_journal()) {
+		result.AddString("move_recovery", "none");
+		return B_OK;
+	}
+
+	const char* argv[] = { "pkexec", kInstallHelper, "partition",
+		"move-recovery", "status", NULL };
+	BString text;
+	if (run_helper_capture("/usr/bin/pkexec", argv, text) != B_OK)
+		return B_ERROR;
+
+	parse_kv_text(text, result);
+	return B_OK;
+}
+
+
+// RunMoveRecovery takes action "resume" or "rollback"; without a disk path it applies to every pending journal.
+status_t
+PartitionPlanBuilder::RunMoveRecovery(const char* action, BMessage& result)
+{
+	if (action == NULL || (strcmp(action, "resume") != 0
+			&& strcmp(action, "rollback") != 0)) {
+		return B_BAD_VALUE;
+	}
+
+	const char* argv[] = { "pkexec", kInstallHelper, "partition",
+		"move-recovery", action, NULL };
+	BString text;
+	if (run_helper_capture("/usr/bin/pkexec", argv, text) != B_OK)
+		return B_ERROR;
+
+	parse_kv_text(text, result);
+
+	// Surface a failed recovery in the fields DriveSetup already reads.
+	BString status;
+	if (result.FindString("move_recovery", &status) == B_OK
+			&& status == "failed") {
+		BString detail;
+		result.FindString("move_recovery_detail", &detail);
+		if (!detail.IsEmpty())
+			result.AddString("detail", detail);
+		return B_ERROR;
+	}
+
+	return B_OK;
+}

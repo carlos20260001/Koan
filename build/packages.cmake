@@ -88,9 +88,43 @@ include(build/profiles/debug.cmake)
 endif()
 
 # ported subset: VitruvianOS's data/ (systemd units, libexec helpers,
-# polkit, pam, boot scripts) is not in this tree yet.
-if(EXISTS "${CMAKE_SOURCE_DIR}/data/systemd")
+# polkit, pam, boot scripts) is not in this tree yet. data/systemd holds
+# only vos-polkit-agent.service so far, so test for a unit data.cmake
+# needs rather than for the directory.
+if(EXISTS "${CMAKE_SOURCE_DIR}/data/systemd/janus.service")
 include(build/profiles/data.cmake)
+else()
+# ported subset: installer backend. The rules data.cmake has for the
+# DriveSetup/Installer root helpers, their polkit files and GRUB files,
+# verbatim, until data.cmake itself is active.
+install(PROGRAMS data/libexec/vos-firstboot-commit
+  DESTINATION /usr/libexec/)
+install(PROGRAMS data/libexec/vos-install-helper
+  DESTINATION /usr/libexec/)
+install(PROGRAMS data/libexec/vos-partition-lib.sh
+  DESTINATION /usr/libexec/)
+install(FILES data/etc/installer/excludes.list
+  DESTINATION /usr/share/vos/installer/ COMPONENT data)
+install(PROGRAMS data/etc/grub.d/15_vos
+  DESTINATION /etc/grub.d/)
+install(FILES data/etc/default/grub
+  DESTINATION /usr/share/vos/grub/ COMPONENT data)
+install(FILES data/share/vos/user-default-groups
+  DESTINATION /usr/share/vos/ COMPONENT data)
+install(FILES data/polkit-1/actions/org.vitruvian.installer.policy
+  DESTINATION /usr/share/polkit-1/actions/ COMPONENT data)
+install(FILES data/polkit-1/rules.d/49-vitruvian-installer.rules
+  DESTINATION /usr/share/polkit-1/rules.d/ COMPONENT data)
+install(PROGRAMS data/libexec/vos-drivesetup-helper
+  DESTINATION /usr/libexec/)
+install(FILES data/polkit-1/actions/org.vitruvian.drivesetup.policy
+  DESTINATION /usr/share/polkit-1/actions/ COMPONENT data)
+install(PROGRAMS data/libexec/vos-drivesetup-query
+  DESTINATION /usr/libexec/)
+install(FILES data/polkit-1/actions/org.vitruvian.drivesetup-query.policy
+  DESTINATION /usr/share/polkit-1/actions/ COMPONENT data)
+install(FILES data/systemd/vos-polkit-agent.service
+  DESTINATION /usr/share/vos/systemd/ COMPONENT data)
 endif()
 
 string(REPLACE ";" "," RESULT "${RUN_LIST}")

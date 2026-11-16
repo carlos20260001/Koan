@@ -19,12 +19,17 @@ public:
 	virtual						~SetStringJob();
 
 			status_t			Init(const char* string, uint32 jobType);
+			void				SetFileSystem(const char* filesystem);
 
 	virtual	status_t			Do();
+	virtual	status_t			AddToPlan(PartitionPlanBuilder& plan,
+									const BString& opID,
+									PartitionOpIdMap& createdIds);
 
 protected:
 			char*				fString;
 			uint32				fJobType;
+			BString				fFileSystem;
 };
 
 

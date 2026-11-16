@@ -21,6 +21,12 @@ void dump_partition_info(const BPartition* partition);
 
 bool is_valid_partitionable_space(size_t size);
 
+// Friendly label for a child-type short name; falls back to the name itself.
+BString partition_type_label(const char* name);
+
+// Friendly name for a raw MBR hex or GPT GUID type; empty when unknown.
+BString partition_type_display_name(const char* type);
+
 
 class SpaceIDMap : public HashMap<HashString, partition_id> {
 public:
@@ -57,7 +63,7 @@ private:
 			off_t				fSize;
 			off_t				fMaxPartitionSize;
 			uint32				fGranularity;
-	mutable	char				fStatusLabel[64];
+	mutable	char				fStatusLabel[1024];
 };
 
 

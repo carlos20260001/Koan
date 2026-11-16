@@ -91,10 +91,12 @@ BDiskDeviceRoster::GetNextDevice(BDiskDevice* device)
 	size_t neededSize = 0;
 	partition_id id = _kern_get_next_disk_device_id(&fDeviceCookie,
 		&neededSize);
-	if (id < 0)
+	if ((int64)id < 0)
 		return id;
 
-	return device->_SetTo(id, true, neededSize);
+	// deviceOnly=false so libroot2 populates the partition children;
+	// callers rely on VisitEachDescendant walking the full tree.
+	return device->_SetTo(id, false, neededSize);
 }
 
 
@@ -171,7 +173,7 @@ BDiskDeviceRoster::UnregisterFileDevice(const char* filename)
 status_t
 BDiskDeviceRoster::UnregisterFileDevice(partition_id device)
 {
-	if (device < 0)
+	if ((int64)device < 0)
 		return B_BAD_VALUE;
 	return _kern_unregister_file_device(device, NULL);
 }
@@ -370,7 +372,7 @@ BDiskDeviceRoster::FindPartitionByMountPoint(const char* mountPoint,
 {
 	BVolume volume(dev_for_path(mountPoint));
 	if (volume.InitCheck() == B_OK
-		&& FindPartitionByVolume(volume, device, _partition) == B_OK)
+		&& FindPartitionByVolume(volume, device, _partition))
 		return B_OK;
 
 	return B_ENTRY_NOT_FOUND;
@@ -390,7 +392,7 @@ BDiskDeviceRoster::FindPartitionByMountPoint(const char* mountPoint,
 	- other error codes
 */
 status_t
-BDiskDeviceRoster::GetDeviceWithID(int32 id, BDiskDevice* device) const
+BDiskDeviceRoster::GetDeviceWithID(partition_id id, BDiskDevice* device) const
 {
 	if (!device)
 		return B_BAD_VALUE;
@@ -415,7 +417,7 @@ BDiskDeviceRoster::GetDeviceWithID(int32 id, BDiskDevice* device) const
 	- other error codes
 */
 status_t
-BDiskDeviceRoster::GetPartitionWithID(int32 id, BDiskDevice* device,
+BDiskDeviceRoster::GetPartitionWithID(partition_id id, BDiskDevice* device,
 	BPartition** partition) const
 {
 	if (!device || !partition)
@@ -444,7 +446,7 @@ BDiskDeviceRoster::GetDeviceForPath(const char* filename, BDiskDevice* device)
 	// get the device ID
 	size_t neededSize = 0;
 	partition_id id = _kern_find_disk_device(filename, &neededSize);
-	if (id < 0)
+	if ((int64)id < 0)
 		return id;
 
 	// retrieve the device data
@@ -462,7 +464,7 @@ BDiskDeviceRoster::GetPartitionForPath(const char* filename,
 	// get the partition ID
 	size_t neededSize = 0;
 	partition_id id = _kern_find_partition(filename, &neededSize);
-	if (id < 0)
+	if ((int64)id < 0)
 		return id;
 
 	// retrieve the device data
@@ -488,7 +490,7 @@ BDiskDeviceRoster::GetFileDeviceForPath(const char* filename,
 	// get the device ID
 	size_t neededSize = 0;
 	partition_id id = _kern_find_file_disk_device(filename, &neededSize);
-	if (id < 0)
+	if ((int64)id < 0)
 		return id;
 
 	// retrieve the device data
@@ -710,14 +712,15 @@ BDiskDeviceRoster::RewindFileSystems()
 	- other error codes
 */
 status_t
-BDiskDeviceRoster::_GetObjectWithID(const char *fieldName, int32 id,
+BDiskDeviceRoster::_GetObjectWithID(const char *fieldName, partition_id id,
 	BDiskDevice *device) const
 {
 	status_t error = (device ? B_OK : B_BAD_VALUE);
 	// compose request message
 	BMessage request(B_REG_GET_DISK_DEVICE);
 	if (error == B_OK)
-		error = request.AddInt32(fieldName, id);
+		// partition_id is dev_t; Int32 would truncate large IDs.
+		error = request.AddInt64(fieldName, (int64)id);
 	// send request
 	BMessage reply;
 	if (error == B_OK)

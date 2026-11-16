@@ -12,7 +12,6 @@
 
 #include <LayoutBuilder.h>
 #include <Partition.h>
-#include <PartitionParameterEditor.h>
 #include <Window.h>
 
 #include "Support.h"
@@ -41,7 +40,7 @@ protected:
 
 	virtual bool				NeedsEditor() const;
 	virtual bool				ValidWithoutEditor() const;
-	virtual status_t			ParametersReceived(const BString& parameters,
+	virtual status_t			ParametersReceived(BString& parameters,
 									BMessage& storage);
 	virtual	void				AddControls(BLayoutBuilder::Group<>& builder,
 									BView* editorView);
@@ -49,8 +48,6 @@ protected:
 protected:
 			BButton*			fOkButton;
 			status_t			fReturnStatus;
-
-			BPartitionParameterEditor* fEditor;
 
 private:
 	class EscapeFilter;
