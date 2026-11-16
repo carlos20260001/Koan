@@ -6,6 +6,7 @@ target_include_directories(be PRIVATE
 
 target_sources(be PRIVATE
 	AboutWindow.cpp
+	Accessibility.cpp
 	AbstractLayout.cpp
 	AbstractLayoutItem.cpp
 	AbstractSpinner.cpp
@@ -129,3 +130,9 @@ target_sources(be PRIVATE
 )
 
 UsePrivateHeaders(be interface tracker)
+
+# air/OS: BAlert plays the alert sounds named in MediaSounds.h through
+# system_beep() (support kit).
+target_include_directories(be PRIVATE
+	"${PROJECT_SOURCE_DIR}/headers/private/media"
+)

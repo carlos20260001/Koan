@@ -15,15 +15,23 @@ endif()
 
 if(TARGET be AND TARGET localestub)
 
-add_subdirectory(bin)
-add_subdirectory(libs)
-add_subdirectory(servers)
-add_subdirectory(add-ons)
-add_subdirectory(apps)
-add_subdirectory(preferences)
-add_subdirectory(data)
+# ported subset: each of these is added once its CMakeLists.txt exists
+# (W2 adds libs; servers, preferences, data and tests come with W3/W4).
+# src/bin's CMakeLists.txt is VitruvianOS's and still lists directories
+# W4 ports, so outside the buildtools pass it waits for W4 too. src/apps
+# waits as well: vos-polkit-grant-helper needs PAM, which the build
+# container does not install yet.
+foreach(_dir libs servers add-ons preferences data)
+	if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/${_dir}/CMakeLists.txt")
+		add_subdirectory(${_dir})
+	endif()
+endforeach()
 
-if(CMAKE_BUILD_TYPE STREQUAL "Debug")
+# Debug builds add the tests; VOS_BUILD_TESTS adds them to other builds
+# too (a Debug build needs libbacktrace, which the build container lacks).
+option(VOS_BUILD_TESTS "Build the tests in a non-Debug build too" OFF)
+if((CMAKE_BUILD_TYPE STREQUAL "Debug" OR VOS_BUILD_TESTS)
+		AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tests/CMakeLists.txt")
 	add_subdirectory(tests)
 endif()
 
