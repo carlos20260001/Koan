@@ -316,9 +316,15 @@ Every one of the 924 Jamfiles goes. Policy decided by the user:
   air/OS's changes since the common Haiku ancestor are merged on top (features
   kept, Linux mechanics from VitruvianOS). CMakeLists is VitruvianOS's, extended
   for air/OS sources.
-- **Haiku-kernel-only air/OS directories:** deleted, except
-  `src/add-ons/accelerants` and `src/add-ons/kernel/drivers/graphics`, which get
-  CMakeLists behind an option that defaults to OFF (sources untouched).
+- **Haiku-kernel-only air/OS directories:** only Haiku kernel modules and
+  drivers are deleted, except `src/add-ons/accelerants` and
+  `src/add-ons/kernel/drivers/graphics`, which get CMakeLists behind an option
+  that defaults to OFF (sources untouched).
+- **Userland that talks to Haiku kernel stacks is ported, not deleted** (user,
+  2026-11-16): `src/add-ons/disk_systems` (→ blkid/libfdisk/mkfs),
+  `src/add-ons/network_settings` and `src/bin/network/*` (→ netlink /
+  NetworkManager), net-stack and bluetooth-stack userland (→ Linux sockets,
+  BlueZ), `src/bin/makebootable` and `src/tools/makebootable` (→ GRUB/EFI).
 - **Other air/OS-only directories** (apps, add-ons, kits that are userland):
   CMakeLists written new; ported to Linux.
 - **Tests:** port those that build on Linux (CTest); delete tests of deleted code;
