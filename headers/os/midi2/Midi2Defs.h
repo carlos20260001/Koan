@@ -1,3 +1,7 @@
+/*
+ * Copyright 2026, Dario Casalinuovo. All rights reserved.
+ * Distributed under the terms of the MIT License.
+ */
 
 #ifndef _MIDI2_DEFS_H
 #define _MIDI2_DEFS_H

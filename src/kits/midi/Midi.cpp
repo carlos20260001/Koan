@@ -1,353 +1,429 @@
 /*
- * Copyright 2006, Haiku.
- * 
- * Copyright (c) 2002-2003 Matthijs Hollemans
- * Copyright (c) 2002 Michael Pfeiffer
- * Copyright (c) 2002 Jerome Leveque
- * Copyright (c) 2002 Paul Stadler
+ * Copyright 2026, Dario Casalinuovo. All rights reserved.
  * Distributed under the terms of the MIT License.
- *
- * Authors:
- *		Matthijs Hollemans
- *		Michael Pfeiffer
- *		Jérôme Leveque
- *		Paul Stadler
  */
 
+#include <midi/Midi.h>
+#include <midi2/MidiConsumer.h>
+#include <midi2/MidiProducer.h>
+#include <midi2/MidiRoster.h>
+
+#include <new>
+#include <string.h>
+
+#include <Autolock.h>
 #include <List.h>
-#include <Midi.h>
-#include <MidiProducer.h>
-
-#include "MidiGlue.h"
-#include "debug.h"
-
-using namespace BPrivate;
+#include <Locker.h>
 
 
-status_t 
+namespace {
+
+// Hands events that reach a BMidi's consumer to the object's own hooks, as
+// the legacy kit does; a plain BMidiLocalConsumer drops them.
+class MidiForwarder : public BMidiLocalConsumer {
+public:
+	MidiForwarder(BMidi* owner) : fOwner(owner) {}
+
+	void NoteOff(uchar c, uchar n, uchar v, bigtime_t t)
+		{ fOwner->NoteOff(c, n, v, _Ms(t)); }
+	void NoteOn(uchar c, uchar n, uchar v, bigtime_t t)
+		{ fOwner->NoteOn(c, n, v, _Ms(t)); }
+	void KeyPressure(uchar c, uchar n, uchar p, bigtime_t t)
+		{ fOwner->KeyPressure(c, n, p, _Ms(t)); }
+	void ControlChange(uchar c, uchar n, uchar v, bigtime_t t)
+		{ fOwner->ControlChange(c, n, v, _Ms(t)); }
+	void ProgramChange(uchar c, uchar n, bigtime_t t)
+		{ fOwner->ProgramChange(c, n, _Ms(t)); }
+	void ChannelPressure(uchar c, uchar p, bigtime_t t)
+		{ fOwner->ChannelPressure(c, p, _Ms(t)); }
+	void PitchBend(uchar c, uchar l, uchar m, bigtime_t t)
+		{ fOwner->PitchBend(c, l, m, _Ms(t)); }
+	void SystemExclusive(void* d, size_t l, bigtime_t t)
+		{ fOwner->SystemExclusive(d, l, _Ms(t)); }
+	void SystemCommon(uchar s, uchar d1, uchar d2, bigtime_t t)
+		{ fOwner->SystemCommon(s, d1, d2, _Ms(t)); }
+	void SystemRealTime(uchar s, bigtime_t t)
+		{ fOwner->SystemRealTime(s, _Ms(t)); }
+	void TempoChange(int32 bpm, bigtime_t t)
+		{ fOwner->TempoChange(bpm, _Ms(t)); }
+	void AllNotesOff(bool justChannel, bigtime_t t)
+		{ fOwner->AllNotesOff(justChannel, _Ms(t)); }
+
+private:
+	static uint32 _Ms(bigtime_t t) { return (uint32)(t / 1000); }
+
+	BMidi*	fOwner;
+};
+
+}	// namespace
+
+
+static BLocker sConnectionsLock("midi connections");
+
+
+// One clearly named helper each side of the M1/M2 boundary. midi1 time is
+// milliseconds since boot; midi2 is microseconds. A silent unit error here
+// produces events 1000x early or late.
+bigtime_t
+BMidi::_Midi1ToMidi2(uint32 time)
+{
+	if (time == 0)
+		return 0;
+	return (bigtime_t)time * 1000;
+}
+
+
+uint32
+BMidi::_Midi2ToMidi1(bigtime_t time)
+{
+	return (uint32)(time / 1000);
+}
+
+
+status_t
 _run_thread(void* data)
 {
 	BMidi* midi = (BMidi*)data;
+	if (midi == NULL)
+		return B_BAD_VALUE;
 	midi->Run();
-	midi->fIsRunning = false;
-	return 0;
+	return B_OK;
 }
 
 
 BMidi::BMidi()
 {
+	fProducer = new(std::nothrow) BMidiLocalProducer();
+	fConsumer = new(std::nothrow) MidiForwarder(this);
 	fConnections = new BList;
-	fThreadId    = -1;
-	fIsRunning   = false;
-
-	fProducer = new BMidiLocalProducer("MidiGlue(out)");
-	fConsumer = new BMidiGlue(this, "MidiGlue(in)");
+	fThreadId = -1;
+	fIsRunning = false;
+	memset(_reserved2, 0, sizeof(_reserved2));
 }
 
 
 BMidi::~BMidi()
 {
 	Stop();
-
-	status_t result;
-	wait_for_thread(fThreadId, &result);
-
-	fProducer->Release();
-	fConsumer->Release();
-
 	delete fConnections;
+	fConnections = NULL;
+	delete fProducer;
+	fProducer = NULL;
+	delete fConsumer;
+	fConsumer = NULL;
 }
 
 
-void 
+void
 BMidi::NoteOff(uchar channel, uchar note, uchar velocity, uint32 time)
 {
-	// do nothing
+	SprayNoteOff(channel, note, velocity, time);
 }
 
 
-void 
+void
 BMidi::NoteOn(uchar channel, uchar note, uchar velocity, uint32 time)
 {
-	// do nothing
+	SprayNoteOn(channel, note, velocity, time);
 }
 
 
-void 
-BMidi::KeyPressure(
-	uchar channel, uchar note, uchar pressure, uint32 time)
+void
+BMidi::KeyPressure(uchar channel, uchar note, uchar pressure, uint32 time)
 {
-	// do nothing
+	SprayKeyPressure(channel, note, pressure, time);
 }
 
 
-void 
-BMidi::ControlChange(
-	uchar channel, uchar controlNumber, uchar controlValue, uint32 time)
+void
+BMidi::ControlChange(uchar channel, uchar controlNumber, uchar controlValue,
+	uint32 time)
 {
-	// do nothing
+	SprayControlChange(channel, controlNumber, controlValue, time);
 }
 
 
-void 
+void
 BMidi::ProgramChange(uchar channel, uchar programNumber, uint32 time)
 {
-	// do nothing
+	SprayProgramChange(channel, programNumber, time);
 }
 
 
-void 
+void
 BMidi::ChannelPressure(uchar channel, uchar pressure, uint32 time)
 {
-	// do nothing
+	SprayChannelPressure(channel, pressure, time);
 }
 
 
-void 
+void
 BMidi::PitchBend(uchar channel, uchar lsb, uchar msb, uint32 time)
 {
-	// do nothing
+	SprayPitchBend(channel, lsb, msb, time);
 }
 
 
-void 
+void
 BMidi::SystemExclusive(void* data, size_t length, uint32 time)
 {
-	// do nothing
+	SpraySystemExclusive(data, length, time);
 }
 
 
-void 
+void
 BMidi::SystemCommon(uchar status, uchar data1, uchar data2, uint32 time)
 {
-	// do nothing
+	SpraySystemCommon(status, data1, data2, time);
 }
 
 
-void 
+void
 BMidi::SystemRealTime(uchar status, uint32 time)
 {
-	// do nothing
+	SpraySystemRealTime(status, time);
 }
 
 
-void 
+void
 BMidi::TempoChange(int32 beatsPerMinute, uint32 time)
 {
-	// do nothing
+	SprayTempoChange(beatsPerMinute, time);
 }
 
 
-void 
+void
 BMidi::AllNotesOff(bool justChannel, uint32 time)
 {
-	for (uchar channel = 1; channel <= 16; ++channel) {
-		SprayControlChange(channel, B_ALL_NOTES_OFF, 0, time);
-
-		if (!justChannel) {
-			for (uchar note = 0; note <= 0x7F; ++note) {
-				SprayNoteOff(channel, note, 0, time);
-			}
-		}
-	}
+	(void)justChannel;
+	for (int32 channel = 0; channel < 16; channel++)
+		SprayControlChange((uchar)channel, B_ALL_NOTES_OFF, 0, time);
 }
 
 
-status_t 
+status_t
 BMidi::Start()
 {
-	if (fIsRunning) 
+	if (fIsRunning)
 		return B_OK;
-
-	status_t err = spawn_thread(
-		_run_thread, "MidiRunThread", B_URGENT_PRIORITY, this);
-
-	if (err < B_OK) 
-		return err;
-
-	fThreadId  = err;
 	fIsRunning = true;
-
-	err = resume_thread(fThreadId);
-	if (err != B_OK) {
-		fThreadId  = -1;
+	fThreadId = spawn_thread(_run_thread, "midi run", B_NORMAL_PRIORITY,
+		this);
+	if (fThreadId < 0) {
 		fIsRunning = false;
+		return fThreadId;
 	}
-
-	return err;
+	resume_thread(fThreadId);
+	return B_OK;
 }
 
 
-void 
+void
 BMidi::Stop()
 {
-	AllNotesOff();
-	fThreadId = -1;
+	if (!fIsRunning)
+		return;
+	fIsRunning = false;
+	if (fThreadId >= 0) {
+		int32 result;
+		wait_for_thread(fThreadId, &result);
+		fThreadId = -1;
+	}
 }
-    
 
-bool 
+
+bool
 BMidi::IsRunning() const
 {
 	return fIsRunning;
 }
 
 
-void 
+void
 BMidi::Connect(BMidi* toObject)
 {
-	if (toObject != NULL) {
-		if (fProducer->Connect(toObject->fConsumer) == B_OK) {
-			fConnections->AddItem(toObject);
-		}
-	}
+	if (toObject == NULL)
+		return;
+
+	// One way: what we spray reaches them. A return path would feed their
+	// output back in, and a BMidiStore records whatever it receives.
+	if (fProducer != NULL && toObject->fConsumer != NULL)
+		fProducer->Connect(toObject->fConsumer);
+
+	BAutolock lock(sConnectionsLock);
+	fConnections->AddItem(toObject);
 }
 
 
-void 
+void
 BMidi::Disconnect(BMidi* fromObject)
 {
 	if (fromObject == NULL)
 		return;
 
-	if (fProducer->Disconnect(fromObject->fConsumer) == B_OK) {
-		fConnections->RemoveItem(fromObject);
-	}
+	if (fProducer != NULL && fromObject->fConsumer != NULL)
+		fProducer->Disconnect(fromObject->fConsumer);
+
+	BAutolock lock(sConnectionsLock);
+	fConnections->RemoveItem(fromObject);
 }
 
 
-bool 
+bool
 BMidi::IsConnected(BMidi* toObject) const
 {
-	if (toObject != NULL)
-		return fProducer->IsConnected(toObject->fConsumer);
-
-	return false;
+	if (toObject == NULL)
+		return false;
+	BAutolock lock(sConnectionsLock);
+	return fConnections->IndexOf(toObject) >= 0;
 }
 
 
-BList* 
+BList*
 BMidi::Connections() const
 {
+	BAutolock lock(sConnectionsLock);
 	return fConnections;
 }
 
 
-void 
+void
 BMidi::SnoozeUntil(uint32 time) const
 {
-	snooze_until(MAKE_BIGTIME(time), B_SYSTEM_TIMEBASE);
+	// Returns immediately if the time has passed.
+	// Short slices so Stop(), which waits for this thread, is not held up
+	// until the next event.
+	const bigtime_t until = (bigtime_t)time * 1000;
+	while (fIsRunning) {
+		const bigtime_t now = system_time();
+		if (now >= until)
+			return;
+		snooze(until - now < 20000 ? until - now : 20000);
+	}
 }
 
 
-bool 
-BMidi::KeepRunning()
+void
+BMidi::SprayNoteOff(uchar channel, uchar note, uchar velocity, uint32 time) const
 {
-	return (fThreadId != -1);
+	if (fProducer != NULL)
+		fProducer->SprayNoteOff(channel, note, velocity, _Midi1ToMidi2(time));
 }
 
 
-void BMidi::_ReservedMidi1() {}
-void BMidi::_ReservedMidi2() {}
-void BMidi::_ReservedMidi3() {}
-
-
-void 
-BMidi::Run()
+void
+BMidi::SprayNoteOn(uchar channel, uchar note, uchar velocity, uint32 time) const
 {
-	// do nothing
+	if (fProducer != NULL)
+		fProducer->SprayNoteOn(channel, note, velocity, _Midi1ToMidi2(time));
 }
 
 
-void 
-BMidi::SprayNoteOff(
-	uchar channel, uchar note, uchar velocity, uint32 time) const
+void
+BMidi::SprayKeyPressure(uchar channel, uchar note, uchar pressure, uint32 time) const
 {
-	fProducer->SprayNoteOff(
-		channel - 1, note, velocity, MAKE_BIGTIME(time));
+	if (fProducer != NULL)
+		fProducer->SprayKeyPressure(channel, note, pressure,
+			_Midi1ToMidi2(time));
 }
 
 
-void 
-BMidi::SprayNoteOn(
-	uchar channel, uchar note, uchar velocity, uint32 time) const
-{
-	fProducer->SprayNoteOn(
-		channel - 1, note, velocity, MAKE_BIGTIME(time));
-}
-
-
-void 
-BMidi::SprayKeyPressure(
-	uchar channel, uchar note, uchar pressure, uint32 time) const
-{
-	fProducer->SprayKeyPressure(
-		channel - 1, note, pressure, MAKE_BIGTIME(time));
-}
-
-
-void 
-BMidi::SprayControlChange(
-	uchar channel, uchar controlNumber, uchar controlValue, 
+void
+BMidi::SprayControlChange(uchar channel, uchar controlNumber, uchar controlValue,
 	uint32 time) const
 {
-	fProducer->SprayControlChange(
-		channel - 1, controlNumber, controlValue, MAKE_BIGTIME(time));
+	if (fProducer != NULL)
+		fProducer->SprayControlChange(channel, controlNumber, controlValue,
+			_Midi1ToMidi2(time));
 }
 
 
-void 
-BMidi::SprayProgramChange(
-	uchar channel, uchar programNumber, uint32 time) const
+void
+BMidi::SprayProgramChange(uchar channel, uchar programNumber, uint32 time) const
 {
-	fProducer->SprayProgramChange(
-		channel - 1, programNumber, MAKE_BIGTIME(time));
+	if (fProducer != NULL)
+		fProducer->SprayProgramChange(channel, programNumber,
+			_Midi1ToMidi2(time));
 }
 
 
-void 
-BMidi::SprayChannelPressure(
-	uchar channel, uchar pressure, uint32 time) const
+void
+BMidi::SprayChannelPressure(uchar channel, uchar pressure, uint32 time) const
 {
-	fProducer->SprayChannelPressure(
-		channel - 1, pressure, MAKE_BIGTIME(time));
+	if (fProducer != NULL)
+		fProducer->SprayChannelPressure(channel, pressure,
+			_Midi1ToMidi2(time));
 }
 
 
-void 
-BMidi::SprayPitchBend(
-	uchar channel, uchar lsb, uchar msb, uint32 time) const
+void
+BMidi::SprayPitchBend(uchar channel, uchar lsb, uchar msb, uint32 time) const
 {
-	fProducer->SprayPitchBend(channel - 1, lsb, msb, MAKE_BIGTIME(time));
+	if (fProducer != NULL)
+		fProducer->SprayPitchBend(channel, lsb, msb, _Midi1ToMidi2(time));
 }
 
 
-void 
-BMidi::SpraySystemExclusive(
-	void* data, size_t length, uint32 time) const
+void
+BMidi::SpraySystemExclusive(void* data, size_t length, uint32 time) const
 {
-	fProducer->SpraySystemExclusive(data, length, MAKE_BIGTIME(time));
+	if (fProducer != NULL)
+		fProducer->SpraySystemExclusive(data, length, _Midi1ToMidi2(time));
 }
 
 
-void 
-BMidi::SpraySystemCommon(
-	uchar status, uchar data1, uchar data2, uint32 time) const
+void
+BMidi::SpraySystemCommon(uchar status, uchar data1, uchar data2, uint32 time) const
 {
-	fProducer->SpraySystemCommon(status, data1, data2, MAKE_BIGTIME(time));
+	if (fProducer != NULL)
+		fProducer->SpraySystemCommon(status, data1, data2,
+			_Midi1ToMidi2(time));
 }
 
 
-void 
+void
 BMidi::SpraySystemRealTime(uchar status, uint32 time) const
 {
-	fProducer->SpraySystemRealTime(status, MAKE_BIGTIME(time));
+	if (fProducer != NULL)
+		fProducer->SpraySystemRealTime(status, _Midi1ToMidi2(time));
 }
 
 
-void 
+void
 BMidi::SprayTempoChange(int32 beatsPerMinute, uint32 time) const
 {
-	fProducer->SprayTempoChange(beatsPerMinute, MAKE_BIGTIME(time));
+	if (fProducer != NULL)
+		fProducer->SprayTempoChange(beatsPerMinute, _Midi1ToMidi2(time));
 }
 
+
+bool
+BMidi::KeepRunning()
+{
+	return fIsRunning;
+}
+
+
+void
+BMidi::Run()
+{
+	// Default Run does nothing; subclasses provide the app-thread loop.
+}
+
+
+void
+BMidi::_ReservedMidi1()
+{
+}
+
+
+void
+BMidi::_ReservedMidi2()
+{
+}
+
+
+void
+BMidi::_ReservedMidi3()
+{
+}

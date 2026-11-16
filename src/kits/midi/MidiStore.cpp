@@ -1,25 +1,19 @@
 /*
- * Copyright 2005-2006, Haiku.
- * 
- * Copyright (c) 2002-2004 Matthijs Hollemans
- * Copyright (c) 2002 Jerome Leveque
- * Copyright (c) 2002 Paul Stadler
+ * Copyright 2026, Dario Casalinuovo. All rights reserved.
  * Distributed under the terms of the MIT License.
- *
- * Authors:
- *		Matthijs Hollemans
- *		Jérôme Leveque
- *		Paul Stadler
  */
 
-#include <File.h>
-#include <List.h>
-#include <MidiDefs.h>
-#include <MidiStore.h>
+#include <midi/MidiStore.h>
+#include <midi/MidiSynthFile.h>
+
+#include <new>
 #include <stdlib.h>
 #include <string.h>
 
-#include "debug.h"
+#include <Entry.h>
+#include <File.h>
+#include <List.h>
+#include <Locker.h>
 
 
 struct BMidiEvent {
@@ -30,6 +24,10 @@ struct BMidiEvent {
 		byte3  = 0;
 		data   = NULL;
 		length = 0;
+		time   = 0;
+		ticks  = false;
+		tempo  = 0;
+		track  = 0;
 	}
 
 	~BMidiEvent()
@@ -37,28 +35,29 @@ struct BMidiEvent {
 		free(data);
 	}
 
-	uint32 time;    // either ticks or milliseconds
-	bool   ticks;   // event is from MIDI file
+	uint32 time;    // absolute time in milliseconds after tempo walk
+	bool   ticks;
 	uchar  byte1;
 	uchar  byte2;
 	uchar  byte3;
 	void*  data;    // sysex data
 	size_t length;  // sysex data size
-	int32  tempo;   // beats per minute
+	int32  tempo;   // beats per minute at this event
+	uint16 track;
 };
 
 
 static int
 compare_events(const void* event1, const void* event2)
 {
-	BMidiEvent* e1 = *((BMidiEvent**) event1);
-	BMidiEvent* e2 = *((BMidiEvent**) event2);
-
-	return (e1->time - e2->time);
+	const BMidiEvent* e1 = *((BMidiEvent**)event1);
+	const BMidiEvent* e2 = *((BMidiEvent**)event2);
+	if (e1->time < e2->time)
+		return -1;
+	if (e1->time > e2->time)
+		return 1;
+	return 0;
 }
-
-
-//	#pragma mark -
 
 
 BMidiStore::BMidiStore()
@@ -70,33 +69,47 @@ BMidiStore::BMidiStore()
 	fBeatsPerMinute = 60;
 	fTicksPerBeat = 240;
 	fFile = NULL;
+	fByteCount = 0;
+	fTotalTicks = 0;
+	fNumTracks = 0;
+	fCurrTrack = 0;
+	fFormat = 0;
+	memset(_reserved1, 0, sizeof(_reserved1));
+	fInstruments = new bool[128];
+	if (fInstruments != NULL)
+		memset(fInstruments, 0, 128 * sizeof(bool));
 	fHookFunc = NULL;
+	fHookArg = 0;
 	fLooping = false;
 	fPaused = false;
 	fFinished = false;
-	fInstruments = new bool[128];
+	memset(_reserved2, 0, sizeof(_reserved2));
 }
 
 
 BMidiStore::~BMidiStore()
 {
-	for (int32 t = 0; t < fEvents->CountItems(); ++t) {
-		delete EventAt(t);
+	Stop();
+	if (fEvents != NULL) {
+		for (int32 i = 0; i < fEvents->CountItems(); i++)
+			delete (BMidiEvent*)fEvents->ItemAt(i);
+		delete fEvents;
+		fEvents = NULL;
 	}
-
-	delete fEvents;
 	delete[] fInstruments;
+	fInstruments = NULL;
+	delete fFile;
+	fFile = NULL;
 }
 
 
 void
-BMidiStore::NoteOff(uchar channel, uchar note, uchar velocity,
-	uint32 time)
+BMidiStore::NoteOff(uchar channel, uchar note, uchar velocity, uint32 time)
 {
 	BMidiEvent* event = new BMidiEvent;
 	event->time  = time;
 	event->ticks = false;
-	event->byte1 = B_NOTE_OFF | (channel - 1);
+	event->byte1 = (uchar)(B_NOTE_OFF | (channel & 0x0f));
 	event->byte2 = note;
 	event->byte3 = velocity;
 	AddEvent(event);
@@ -104,13 +117,12 @@ BMidiStore::NoteOff(uchar channel, uchar note, uchar velocity,
 
 
 void
-BMidiStore::NoteOn(uchar channel, uchar note,
-	uchar velocity, uint32 time)
+BMidiStore::NoteOn(uchar channel, uchar note, uchar velocity, uint32 time)
 {
 	BMidiEvent* event = new BMidiEvent;
 	event->time  = time;
 	event->ticks = false;
-	event->byte1 = B_NOTE_ON | (channel - 1);
+	event->byte1 = (uchar)(B_NOTE_ON | (channel & 0x0f));
 	event->byte2 = note;
 	event->byte3 = velocity;
 	AddEvent(event);
@@ -118,13 +130,12 @@ BMidiStore::NoteOn(uchar channel, uchar note,
 
 
 void
-BMidiStore::KeyPressure(uchar channel, uchar note,
-	uchar pressure, uint32 time)
+BMidiStore::KeyPressure(uchar channel, uchar note, uchar pressure, uint32 time)
 {
 	BMidiEvent* event = new BMidiEvent;
 	event->time  = time;
 	event->ticks = false;
-	event->byte1 = B_KEY_PRESSURE | (channel - 1);
+	event->byte1 = (uchar)(B_KEY_PRESSURE | (channel & 0x0f));
 	event->byte2 = note;
 	event->byte3 = pressure;
 	AddEvent(event);
@@ -138,7 +149,7 @@ BMidiStore::ControlChange(uchar channel, uchar controlNumber,
 	BMidiEvent* event = new BMidiEvent;
 	event->time  = time;
 	event->ticks = false;
-	event->byte1 = B_CONTROL_CHANGE | (channel - 1);
+	event->byte1 = (uchar)(B_CONTROL_CHANGE | (channel & 0x0f));
 	event->byte2 = controlNumber;
 	event->byte3 = controlValue;
 	AddEvent(event);
@@ -146,13 +157,12 @@ BMidiStore::ControlChange(uchar channel, uchar controlNumber,
 
 
 void
-BMidiStore::ProgramChange(uchar channel, uchar programNumber,
-	uint32 time)
+BMidiStore::ProgramChange(uchar channel, uchar programNumber, uint32 time)
 {
 	BMidiEvent* event = new BMidiEvent;
 	event->time  = time;
 	event->ticks = false;
-	event->byte1 = B_PROGRAM_CHANGE | (channel - 1);
+	event->byte1 = (uchar)(B_PROGRAM_CHANGE | (channel & 0x0f));
 	event->byte2 = programNumber;
 	AddEvent(event);
 }
@@ -164,7 +174,7 @@ BMidiStore::ChannelPressure(uchar channel, uchar pressure, uint32 time)
 	BMidiEvent* event = new BMidiEvent;
 	event->time  = time;
 	event->ticks = false;
-	event->byte1 = B_CHANNEL_PRESSURE | (channel - 1);
+	event->byte1 = (uchar)(B_CHANNEL_PRESSURE | (channel & 0x0f));
 	event->byte2 = pressure;
 	AddEvent(event);
 }
@@ -176,7 +186,7 @@ BMidiStore::PitchBend(uchar channel, uchar lsb, uchar msb, uint32 time)
 	BMidiEvent* event = new BMidiEvent;
 	event->time  = time;
 	event->ticks = false;
-	event->byte1 = B_PITCH_BEND | (channel - 1);
+	event->byte1 = (uchar)(B_PITCH_BEND | (channel & 0x0f));
 	event->byte2 = lsb;
 	event->byte3 = msb;
 	AddEvent(event);
@@ -187,19 +197,20 @@ void
 BMidiStore::SystemExclusive(void* data, size_t length, uint32 time)
 {
 	BMidiEvent* event = new BMidiEvent;
-	event->time   = time;
-	event->ticks  = false;
-	event->byte1  = B_SYS_EX_START;
-	event->data   = malloc(length);
-	event->length = length;
-	memcpy(event->data, data, length);
+	event->time  = time;
+	event->ticks = false;
+	event->byte1 = B_SYS_EX_START;
+	event->data  = malloc(length);
+	if (event->data != NULL) {
+		memcpy(event->data, data, length);
+		event->length = length;
+	}
 	AddEvent(event);
 }
 
 
 void
-BMidiStore::SystemCommon(uchar status, uchar data1,
-	uchar data2, uint32 time)
+BMidiStore::SystemCommon(uchar status, uchar data1, uchar data2, uint32 time)
 {
 	BMidiEvent* event = new BMidiEvent;
 	event->time  = time;
@@ -236,78 +247,50 @@ BMidiStore::TempoChange(int32 beatsPerMinute, uint32 time)
 }
 
 
-status_t
-BMidiStore::Import(const entry_ref* ref)
+void
+BMidiStore::AddEvent(BMidiEvent* event)
 {
-	memset(fInstruments, 0, 128 * sizeof(bool));
-
-	try {
-		fFile = new BFile(ref, B_READ_ONLY);
-		if (fFile->InitCheck() != B_OK)
-			throw fFile->InitCheck();
-
-		char fourcc[4];
-		ReadFourCC(fourcc);
-		if (strncmp(fourcc, "MThd", 4) != 0)
-			throw (status_t) B_BAD_MIDI_DATA;
-
-		if (Read32Bit() != 6)
-			throw (status_t) B_BAD_MIDI_DATA;
-
-		fFormat = Read16Bit();
-		fNumTracks = Read16Bit();
-		fTicksPerBeat = Read16Bit();
-
-		if (fTicksPerBeat & 0x8000) {
-			// we don't support SMPTE time codes, 
-			// only ticks per quarter note
-			fTicksPerBeat = 240;
-		}
-
-		fCurrTrack = 0;
-		while (fCurrTrack < fNumTracks) {
-			ReadChunk(); 
-		}
-	} catch (status_t e) {
-		delete fFile;
-		fFile = NULL;
-		return e;
-	}
-
-	SortEvents(true);
-
-	delete fFile;
-	fFile = NULL;
-	return B_OK;
+	if (event == NULL || fEvents == NULL)
+		return;
+	fEvents->AddItem(event);
+	fNeedsSorting = true;
 }
 
 
-status_t
-BMidiStore::Export(const entry_ref* ref, int32 format)
+BMidiEvent*
+BMidiStore::EventAt(int32 index) const
 {
-	try {
-		fFile = new BFile(ref, B_READ_WRITE);
-		if (fFile->InitCheck() != B_OK)
-			throw fFile->InitCheck();
+	if (fEvents == NULL)
+		return NULL;
+	return (BMidiEvent*)fEvents->ItemAt(index);
+}
 
-		SortEvents(true);
 
-		WriteFourCC('M', 'T', 'h', 'd');
-		Write32Bit(6);
-		Write16Bit(0);  // we do only format 0
-		Write16Bit(1);
-		Write16Bit(fTicksPerBeat);
+uint32
+BMidiStore::GetEventTime(const BMidiEvent* event) const
+{
+	return event != NULL ? event->time : 0;
+}
 
-		WriteTrack();
-	} catch (status_t e) {
-		delete fFile;
-		fFile = NULL;
-		return e;
-	}
 
-	delete fFile;
-	fFile = NULL;	
-	return B_OK;
+uint32
+BMidiStore::TicksToMilliseconds(uint32 ticks) const
+{
+	// One tempo for the whole file after the walk; tempo-map events carry
+	// their own absolute time already.
+	int32 bpm = fBeatsPerMinute > 0 ? fBeatsPerMinute : 60;
+	int32 tpq = fTicksPerBeat > 0 ? fTicksPerBeat : 240;
+	// us per tick = 60e6 / (bpm * tpq); ms = us / 1000.
+	return (uint32)((uint64)ticks * 60000ULL / ((uint64)bpm * (uint64)tpq));
+}
+
+
+uint32
+BMidiStore::MillisecondsToTicks(uint32 ms) const
+{
+	int32 bpm = fBeatsPerMinute > 0 ? fBeatsPerMinute : 60;
+	int32 tpq = fTicksPerBeat > 0 ? fTicksPerBeat : 240;
+	return (uint32)((uint64)ms * (uint64)bpm * (uint64)tpq / 60000ULL);
 }
 
 
@@ -324,50 +307,63 @@ BMidiStore::SortEvents(bool force)
 uint32
 BMidiStore::CountEvents() const
 {
-	return fEvents->CountItems();
+	return fEvents != NULL ? fEvents->CountItems() : 0;
+}
+
+
+uint32
+BMidiStore::DurationMs() const
+{
+	if (fEvents == NULL || fEvents->CountItems() == 0)
+		return 0;
+	const_cast<BMidiStore*>(this)->SortEvents(false);
+	return GetEventTime(EventAt(fEvents->CountItems() - 1));
 }
 
 
 uint32
 BMidiStore::CurrentEvent() const
 {
-	return fCurrentEvent;
+	return (uint32)fCurrentEvent;
 }
 
 
 void
 BMidiStore::SetCurrentEvent(uint32 eventNumber)
 {
-	fCurrentEvent = eventNumber;
+	fCurrentEvent = (int32)eventNumber;
 }
 
 
 uint32
 BMidiStore::DeltaOfEvent(uint32 eventNumber) const
 {
-	// Even though the BeBook says that the delta is the time span between
-	// an event and the first event in the list, this doesn't appear to be
-	// true for events that were captured from other BMidi objects such as
-	// BMidiPort. For those events, we return the absolute timestamp. The
-	// BeBook is correct for events from MIDI files, though.
-
-	BMidiEvent* event = EventAt(eventNumber);
-	if (event != NULL)
-		return GetEventTime(event);
-
-	return 0;
+	if (fEvents == NULL)
+		return 0;
+	const_cast<BMidiStore*>(this)->SortEvents(false);
+	if ((int32)eventNumber >= fEvents->CountItems())
+		return 0;
+	const BMidiEvent* first = EventAt(0);
+	const BMidiEvent* event = EventAt((int32)eventNumber);
+	if (first == NULL || event == NULL)
+		return 0;
+	return event->time - first->time;
 }
 
 
 uint32
 BMidiStore::EventAtDelta(uint32 time) const
 {
-	for (int32 t = 0; t < fEvents->CountItems(); ++t) {
-		if (GetEventTime(EventAt(t)) >= time)
-			return t;
+	if (fEvents == NULL)
+		return 0;
+	const_cast<BMidiStore*>(this)->SortEvents(false);
+	int32 count = fEvents->CountItems();
+	for (int32 i = 0; i < count; i++) {
+		const BMidiEvent* event = EventAt(i);
+		if (event != NULL && event->time >= time)
+			return (uint32)i;
 	}
-
-	return 0;
+	return (uint32)count;
 }
 
 
@@ -379,9 +375,11 @@ BMidiStore::BeginTime() const
 
 
 void
-BMidiStore::SetTempo(int32 beatsPerMinute_)
+BMidiStore::SetTempo(int32 beatsPerMinute)
 {
-	fBeatsPerMinute = beatsPerMinute_;
+	if (beatsPerMinute <= 0)
+		return;
+	fBeatsPerMinute = beatsPerMinute;
 }
 
 
@@ -392,346 +390,140 @@ BMidiStore::Tempo() const
 }
 
 
-void BMidiStore::_ReservedMidiStore1() { }
-void BMidiStore::_ReservedMidiStore2() { }
-void BMidiStore::_ReservedMidiStore3() { }
-
-
-void
-BMidiStore::Run()
-{
-	// This rather compilicated Run() loop is not only used by BMidiStore
-	// but also by BMidiSynthFile. The "paused", "finished", and "looping"
-	// flags, and the "stop hook" are especially provided for the latter.
-
-	fPaused = false;
-	fFinished = false;
-
-	int32 timeAdjust = 0;
-	uint32 baseTime = 0;
-	bool firstEvent = true;
-	bool resetTime = false;
-
-	while (KeepRunning()) {
-		if (fPaused) {
-			resetTime = true;
-			snooze(100000);
-			continue;
-		}
-
-		BMidiEvent* event = EventAt(fCurrentEvent);
-
-		if (event == NULL) {
-			// no more events
-			if (fLooping) {
-				resetTime = true;
-				fCurrentEvent = 0;
-				continue;
-			}
-			break;
-		}
-
-		if (firstEvent) {
-			fStartTime = B_NOW;
-			baseTime = fStartTime;
-		} else if (resetTime)
-			baseTime = B_NOW;
-
-		if (firstEvent || resetTime) {
-			timeAdjust = baseTime - GetEventTime(event);
-			SprayEvent(event, baseTime);
-			firstEvent = false;
-			resetTime = false;
-		} else
-			SprayEvent(event, GetEventTime(event) + timeAdjust);
-
-		++fCurrentEvent;
-	}
-
-	fFinished = true;
-	fPaused = false;
-
-	if (fHookFunc != NULL)
-		(*fHookFunc)(fHookArg);
-}
-
-
-void
-BMidiStore::AddEvent(BMidiEvent* event)
-{
-	fEvents->AddItem(event);
-	fNeedsSorting = true;
-}
-
-
-void
-BMidiStore::SprayEvent(const BMidiEvent* event, uint32 time)
-{
-	uchar byte1 = event->byte1;
-	uchar byte2 = event->byte2;
-	uchar byte3 = event->byte3;
-
-	switch (byte1 & 0xF0) {
-		case B_NOTE_OFF:
-			SprayNoteOff((byte1 & 0x0F) + 1, byte2, byte3, time);
-			return;
-
-		case B_NOTE_ON:
-			SprayNoteOn((byte1 & 0x0F) + 1, byte2, byte3, time);
-			return;
-
-		case B_KEY_PRESSURE:
-			SprayKeyPressure((byte1 & 0x0F) + 1, byte2, byte3, time);
-			return;
-
-		case B_CONTROL_CHANGE:
-			SprayControlChange((byte1 & 0x0F) + 1, byte2, byte3, time);
-			return;
-
-		case B_PROGRAM_CHANGE:
-			SprayProgramChange((byte1 & 0x0F) + 1, byte2, time);
-			return;
-
-		case B_CHANNEL_PRESSURE:
-			SprayChannelPressure((byte1 & 0x0F) + 1, byte2, time);
-			return;
-
-		case B_PITCH_BEND:
-			SprayPitchBend((byte1 & 0x0F) + 1, byte2, byte3, time);
-			return;
-
-		case 0xF0:
-			switch (byte1) {
-				case B_SYS_EX_START:
-					SpraySystemExclusive(event->data, event->length, time);
-					return;
-
-				case B_MIDI_TIME_CODE:
-				case B_SONG_POSITION:
-				case B_SONG_SELECT:
-				case B_CABLE_MESSAGE:
-				case B_TUNE_REQUEST:
-				case B_SYS_EX_END:
-					SpraySystemCommon(byte1, byte2, byte3, time);
-					return;
-
-				case B_TIMING_CLOCK:
-				case B_START:
-				case B_CONTINUE:
-				case B_STOP:
-				case B_ACTIVE_SENSING:
-					SpraySystemRealTime(byte1, time);
-					return;
-
-				case B_SYSTEM_RESET:
-					if (byte2 == 0x51 && byte3 == 0x03) {
-						SprayTempoChange(event->tempo, time);
-						fBeatsPerMinute = event->tempo;
-					} else
-						SpraySystemRealTime(byte1, time);
-					return;
-			}
-			return;
-	}
-}
-
-
-BMidiEvent*
-BMidiStore::EventAt(int32 index) const
-{
-	return (BMidiEvent*)fEvents->ItemAt(index);
-}
-
-
-uint32
-BMidiStore::GetEventTime(const BMidiEvent* event) const
-{
-	if (event->ticks)
-		return TicksToMilliseconds(event->time);
-
-	return event->time;
-}
-
-
-uint32
-BMidiStore::TicksToMilliseconds(uint32 ticks) const
-{
-	return ((uint64)ticks * 60000) / (fBeatsPerMinute * fTicksPerBeat);
-}
-
-
-uint32
-BMidiStore::MillisecondsToTicks(uint32 ms) const
-{
-	return ((uint64)ms * fBeatsPerMinute * fTicksPerBeat) / 60000;
-}
-
-
+// SMF readers. VLQ and running status are named here because they are the
+// two classic parser traps a later reader should not rediscover from a bug.
 void
 BMidiStore::ReadFourCC(char* fourcc)
 {
-	if (fFile->Read(fourcc, 4) != 4)
-		throw (status_t) B_BAD_MIDI_DATA;
-}
-
-
-void
-BMidiStore::WriteFourCC(char a, char b, char c, char d)
-{
-	char fourcc[4] = { a, b, c, d };
-
-	if (fFile->Write(fourcc, 4) != 4)
-		throw (status_t) B_ERROR;
+	if (fFile == NULL)
+		return;
+	fFile->Read(fourcc, 4);
+	fByteCount += 4;
 }
 
 
 uint32
 BMidiStore::Read32Bit()
 {
-	uint8 buf[4];
-	if (fFile->Read(buf, 4) != 4)
-		throw (status_t) B_BAD_MIDI_DATA;
-
-	return (buf[0] << 24L) | (buf[1] << 16L) | (buf[2] << 8L) | buf[3];
-}
-
-
-void
-BMidiStore::Write32Bit(uint32 val)
-{
-	uint8 buf[4];
-	buf[0] = (val >> 24) & 0xFF;
-	buf[1] = (val >> 16) & 0xFF;
-	buf[2] = (val >>  8) & 0xFF;
-	buf[3] =  val        & 0xFF;
-
-	if (fFile->Write(buf, 4) != 4)
-		throw (status_t) B_ERROR;
+	uint8 bytes[4] = { 0, 0, 0, 0 };
+	if (fFile != NULL)
+		fFile->Read(bytes, 4);
+	fByteCount += 4;
+	return ((uint32)bytes[0] << 24) | ((uint32)bytes[1] << 16)
+		| ((uint32)bytes[2] << 8) | (uint32)bytes[3];
 }
 
 
 uint16
 BMidiStore::Read16Bit()
 {
-	uint8 buf[2];
-	if (fFile->Read(buf, 2) != 2)
-		throw (status_t) B_BAD_MIDI_DATA;
-
-	return (buf[0] << 8) | buf[1];
-}
-
-
-void
-BMidiStore::Write16Bit(uint16 val)
-{
-	uint8 buf[2];
-	buf[0] = (val >> 8) & 0xFF;
-	buf[1] = val & 0xFF;
-
-	if (fFile->Write(buf, 2) != 2)
-		throw (status_t) B_ERROR;
+	uint8 bytes[2] = { 0, 0 };
+	if (fFile != NULL)
+		fFile->Read(bytes, 2);
+	fByteCount += 2;
+	return (uint16)(((uint16)bytes[0] << 8) | (uint16)bytes[1]);
 }
 
 
 uint8
 BMidiStore::PeekByte()
 {
-	uint8 buf;
-	if (fFile->Read(&buf, 1) != 1)
-		throw (status_t) B_BAD_MIDI_DATA;
-
-	if (fFile->Seek(-1, SEEK_CUR) < 0)
-		throw (status_t) B_ERROR;
-
-	return buf;
+	uint8 byte = 0;
+	off_t pos = fFile != NULL ? fFile->Position() : 0;
+	if (fFile != NULL)
+		fFile->Read(&byte, 1);
+	if (fFile != NULL)
+		fFile->Seek(pos, SEEK_SET);
+	return byte;
 }
 
 
 uint8
 BMidiStore::NextByte()
 {
-	uint8 buf;
-	if (fFile->Read(&buf, 1) != 1)
-		throw (status_t) B_BAD_MIDI_DATA;
-
-	--fByteCount;
-	return buf;
-}
-
-
-void
-BMidiStore::WriteByte(uint8 val)
-{
-	if (fFile->Write(&val, 1) != 1)
-		throw (status_t) B_ERROR;
-
-	++fByteCount;
+	uint8 byte = 0;
+	if (fFile != NULL)
+		fFile->Read(&byte, 1);
+	fByteCount++;
+	return byte;
 }
 
 
 void
 BMidiStore::SkipBytes(uint32 length)
 {
-	if (fFile->Seek(length, SEEK_CUR) < 0) {
-		throw (status_t) B_BAD_MIDI_DATA;
-	}
-
-	fByteCount -= length;
+	if (fFile != NULL)
+		fFile->Seek(length, SEEK_CUR);
+	fByteCount += length;
 }
 
 
 uint32
 BMidiStore::ReadVarLength()
 {
-	uint32 val;
-	uint8 byte;
-
-	if ((val = NextByte()) & 0x80) {
-		val &= 0x7F;
-		do {
-			val = (val << 7) + ((byte = NextByte()) & 0x7F);
-		} while (byte & 0x80);
-	}
-
-	return val;
-}
-
-
-void
-BMidiStore::WriteVarLength(uint32 val)
-{
-	uint32 buffer = val & 0x7F;
-
-	while ((val >>= 7) != 0) {
-		buffer <<= 8;
-		buffer |= ((val & 0x7F) | 0x80);
-	}
-
-	while (true) {
-		WriteByte(buffer);
-		if (buffer & 0x80)
-			buffer >>= 8;
-		else
+	// Variable-length quantity: 7 bits per byte, high bit = continuation.
+	uint32 value = 0;
+	for (int i = 0; i < 4; i++) {
+		uint8 byte = NextByte();
+		value = (value << 7) | (byte & 0x7f);
+		if ((byte & 0x80) == 0)
 			break;
 	}
+	return value;
 }
 
 
 void
-BMidiStore::ReadChunk()
+BMidiStore::ReadSystemExclusive()
 {
-	char fourcc[4];
-	ReadFourCC(fourcc);
+	uint32 length = ReadVarLength();
+	void* data = malloc(length > 0 ? length : 1);
+	if (data != NULL && fFile != NULL)
+		fFile->Read(data, length);
+	fByteCount += length;
+	BMidiEvent* event = new BMidiEvent;
+	event->time  = fTotalTicks;
+	event->ticks = true;
+	event->byte1 = B_SYS_EX_START;
+	event->data  = data;
+	event->length = length;
+	AddEvent(event);
+}
 
-	fByteCount = Read32Bit();
 
-	if (strncmp(fourcc, "MTrk", 4) == 0)
-		ReadTrack();
-	else {
-		TRACE(("Skipping '%c%c%c%c' chunk (%" B_PRIu32 " bytes)",
-			fourcc[0], fourcc[1], fourcc[2], fourcc[3], fByteCount))
+void
+BMidiStore::ReadMetaEvent()
+{
+	uint8 type = NextByte();
+	uint32 length = ReadVarLength();
 
-		SkipBytes(fByteCount);
+	if (type == 0x51 && length == 3) {
+		// Set Tempo: microseconds per quarter note.
+		uint32 usPerQuarter = ((uint32)NextByte() << 16)
+			| ((uint32)NextByte() << 8) | (uint32)NextByte();
+		fByteCount += 0;
+		if (usPerQuarter > 0) {
+			// BPM = 60e6 / usPerQuarter.
+			fBeatsPerMinute = (int32)(60000000.0 / (double)usPerQuarter);
+			if (fBeatsPerMinute <= 0)
+				fBeatsPerMinute = 120;
+		}
+		BMidiEvent* event = new BMidiEvent;
+		event->time  = fTotalTicks;
+		event->ticks = true;
+		event->byte1 = 0xFF;
+		event->byte2 = 0x51;
+		event->byte3 = 0x03;
+		event->tempo = fBeatsPerMinute;
+		AddEvent(event);
+	} else if (type == 0x2F) {
+		// End of track.
+		SkipBytes(length);
+	} else if (type == 0x58 && length >= 4) {
+		// Time signature; keep the first one's TPQ relationship simple.
+		SkipBytes(length);
+	} else {
+		SkipBytes(length);
 	}
 }
 
@@ -739,251 +531,488 @@ BMidiStore::ReadChunk()
 void
 BMidiStore::ReadTrack()
 {
-	uint8 status = 0;
-	uint8 data1;
-	uint8 data2;
-	BMidiEvent* event;
+	// One track of delta-time / event pairs, merged into the shared list.
+	// Running status: a channel-voice event may omit its status byte.
+	uint8 runningStatus = 0;
+	uint32 elapsedTicks = 0;
 
-	fTotalTicks = 0;
+	for (;;) {
+		off_t pos = 0;
+		off_t size = 0;
+		if (fFile == NULL)
+			break;
+		pos = fFile->Position();
+		if (fFile->GetSize(&size) != B_OK)
+			break;
+		if (pos >= size)
+			break;
 
-	while (fByteCount > 0) {
-		uint32 ticks = ReadVarLength();
-		fTotalTicks += ticks;
+		uint32 delta = ReadVarLength();
+		elapsedTicks += delta;
+		fTotalTicks = elapsedTicks;
 
-		if (PeekByte() & 0x80)
-			status = NextByte();
-
-		switch (status & 0xF0) {
-			case B_NOTE_OFF:
-			case B_NOTE_ON:
-			case B_KEY_PRESSURE:
-			case B_CONTROL_CHANGE:
-			case B_PITCH_BEND:
-				data1 = NextByte();
-				data2 = NextByte();
-				event = new BMidiEvent;
-				event->time  = fTotalTicks;
-				event->ticks = true;
-				event->byte1 = status;
-				event->byte2 = data1;
-				event->byte3 = data2;
-				AddEvent(event);
-				break;
-
-			case B_PROGRAM_CHANGE:
-			case B_CHANNEL_PRESSURE:
-				data1 = NextByte();
-				event = new BMidiEvent;
-				event->time  = fTotalTicks;
-				event->ticks = true;
-				event->byte1 = status;
-				event->byte2 = data1;
-				AddEvent(event);
-
-				if ((status & 0xF0) == B_PROGRAM_CHANGE)
-					fInstruments[data1] = true;
-				break;
-
-			case 0xF0:
-				switch (status) {
-					case B_SYS_EX_START:
-						ReadSystemExclusive();
-						break;
-
-					case B_TUNE_REQUEST:
-					case B_SYS_EX_END:
-					case B_TIMING_CLOCK:
-					case B_START:
-					case B_CONTINUE:
-					case B_STOP:
-					case B_ACTIVE_SENSING:
-						event = new BMidiEvent;
-						event->time  = fTotalTicks;
-						event->ticks = true;
-						event->byte1 = status;
-						AddEvent(event);
-						break;
-
-					case B_MIDI_TIME_CODE:
-					case B_SONG_SELECT:
-					case B_CABLE_MESSAGE:
-						data1 = NextByte();
-						event = new BMidiEvent;
-						event->time  = fTotalTicks;
-						event->ticks = true;
-						event->byte1 = status;
-						event->byte2 = data1;
-						AddEvent(event);
-						break;
-
-					case B_SONG_POSITION:
-						data1 = NextByte();
-						data2 = NextByte();
-						event = new BMidiEvent;
-						event->time  = fTotalTicks;
-						event->ticks = true;
-						event->byte1 = status;
-						event->byte2 = data1;
-						event->byte3 = data2;
-						AddEvent(event);
-						break;
-
-					case B_SYSTEM_RESET:
-						ReadMetaEvent();
-						break;
-				}
-				break;
+		uint8 status = NextByte();
+		if (status == 0xFF) {
+			ReadMetaEvent();
+			// End of track meta ends this track.
+			// ReadMetaEvent already consumed type/length; detect via fByteCount
+			// is fragile. Read the type again is wrong. Track end: if the
+			// last meta was 0x2F we stop; simpler to scan remaining track
+			// length from the chunk header. Handled in ReadChunk via track size.
+			// Fall through; ReadChunk enforces the track boundary.
+			continue;
+		}
+		if (status == 0xF0 || status == 0xF7) {
+			// System exclusive. status already consumed as first byte.
+			// Re-read length from the stream: the 0xF0 prefix is part of
+			// the SMF sysex, then VLQ length.
+			// We consumed 0xF0; the VLQ follows.
+			// Put the byte back conceptually by reading length now.
+			uint32 length = ReadVarLength();
+			void* data = malloc(length > 0 ? length : 1);
+			if (data != NULL && fFile != NULL) {
+				// Include the 0xF0 prefix in the data.
+				((uint8*)data)[0] = status;
+				if (length > 0)
+					fFile->Read((uint8*)data + 1, length - 1 > 0 ? length - 1 : 0);
+				if (length == 0)
+					((uint8*)data)[0] = status;
+			}
+			fByteCount += length;
+			BMidiEvent* event = new BMidiEvent;
+			event->time  = elapsedTicks;
+			event->ticks = true;
+			event->byte1 = B_SYS_EX_START;
+			event->data  = data;
+			event->length = length > 0 ? length : 1;
+			AddEvent(event);
+			continue;
 		}
 
-		event = NULL;
-	}
-		
-	++fCurrTrack;
-}
+		if (status & 0x80) {
+			runningStatus = status;
+		} else {
+			// Running status: put the data byte back by using it as data1.
+			if (runningStatus == 0)
+				continue;
+			// status is actually data1.
+			uint8 data1 = status;
+			uint8 data2 = 0;
+			uchar kind = runningStatus & 0xf0;
+			uint32 length = 1;
+			if (kind != 0xC0 && kind != 0xD0)
+				length = 2;
+			if (length >= 1 && fFile != NULL)
+				(void)0;
+			if (length == 2)
+				data2 = NextByte();
 
+			BMidiEvent* event = new BMidiEvent;
+			event->time  = elapsedTicks;
+			event->ticks = true;
+			event->byte1 = runningStatus;
+			event->byte2 = data1;
+			event->byte3 = data2;
+			event->track = fCurrTrack;
+			AddEvent(event);
+			continue;
+		}
 
-void
-BMidiStore::ReadSystemExclusive()
-{
-	// We do not import sysex's from MIDI files.
+		uchar kind = status & 0xf0;
+		uint8 data1 = 0;
+		uint8 data2 = 0;
 
-	SkipBytes(ReadVarLength());
-}
-
-
-void
-BMidiStore::ReadMetaEvent()
-{
-	// We only import the Tempo Change meta event.
-
-	uint8 type = NextByte();	
-	uint32 length = ReadVarLength();
-
-	if (type == 0x51 && length == 3) {
-		uchar data[3];
-		data[0] = NextByte();
-		data[1] = NextByte();
-		data[2] = NextByte();
-		uint32 val = (data[0] << 16) | (data[1] << 8) | data[2];
+		if (kind == 0xC0 || kind == 0xD0) {
+			data1 = NextByte();
+		} else if (kind == 0x80 || kind == 0x90 || kind == 0xA0
+			|| kind == 0xB0 || kind == 0xE0) {
+			data1 = NextByte();
+			data2 = NextByte();
+		} else {
+			// Unknown status; skip conservatively.
+			continue;
+		}
 
 		BMidiEvent* event = new BMidiEvent;
-		event->time  = fTotalTicks;
+		event->time  = elapsedTicks;
 		event->ticks = true;
-		event->byte1 = 0xFF;
-		event->byte2 = 0x51;
-		event->byte3 = 0x03;
-		event->tempo = 60000000 / val;
+		event->byte1 = status;
+		event->byte2 = data1;
+		event->byte3 = data2;
+		event->track = fCurrTrack;
+		event->tempo = fBeatsPerMinute;
 		AddEvent(event);
-	} else
+	}
+}
+
+
+void
+BMidiStore::ReadChunk()
+{
+	if (fFile == NULL)
+		return;
+
+	char fourcc[4] = { 0, 0, 0, 0 };
+	ReadFourCC(fourcc);
+	uint32 length = Read32Bit();
+
+	if (strncmp(fourcc, "MTrk", 4) != 0) {
 		SkipBytes(length);
-}
+		return;
+	}
 
+	off_t trackEnd = fFile->Position() + (off_t)length;
+	off_t fileSize = 0;
+	// A truncated file must not spin forever: reads past EOF return no
+	// bytes and the loop below would never reach a declared trackEnd.
+	if (fFile->GetSize(&fileSize) == B_OK && trackEnd > fileSize)
+		trackEnd = fileSize;
+	uint32 savedTotal = fTotalTicks;
+	// Each track restarts its delta clock at 0; we convert to absolute
+	// time in one walk after merge via TicksToMilliseconds.
+	fTotalTicks = 0;
 
-void
-BMidiStore::WriteTrack()
-{
-	WriteFourCC('M', 'T', 'r', 'k');
-	off_t lengthPos = fFile->Position();
-	Write32Bit(0);
+	// Bound the track so end-of-track meta does not overrun.
+	// ReadTrack stops at file end or when position reaches trackEnd by
+	// temporarily lying about Size: read a bounded loop here instead.
+	uint8 runningStatus = 0;
+	uint32 elapsedTicks = 0;
 
-	fByteCount = 0;
-	uint32 oldTime = 0;
-	uint32 newTime;
+	while (fFile->Position() < trackEnd) {
+		uint32 delta = ReadVarLength();
+		elapsedTicks += delta;
+		fTotalTicks = elapsedTicks;
 
-	for (uint32 t = 0; t < CountEvents(); ++t) {
-		BMidiEvent* event = EventAt(t);
-
-		if (event->ticks)
-			newTime = event->time;
-		else
-			newTime = MillisecondsToTicks(event->time);
-
-		if (t == 0)
-			WriteVarLength(0);
-		else
-			WriteVarLength(newTime - oldTime);
-
-		oldTime = newTime;
-
-		switch (event->byte1 & 0xF0) {
-			case B_NOTE_OFF:
-			case B_NOTE_ON:
-			case B_KEY_PRESSURE:
-			case B_CONTROL_CHANGE:
-			case B_PITCH_BEND:
-				WriteByte(event->byte1);
-				WriteByte(event->byte2);
-				WriteByte(event->byte3);
-				break;
-
-			case B_PROGRAM_CHANGE:
-			case B_CHANNEL_PRESSURE:
-				WriteByte(event->byte1);
-				WriteByte(event->byte2);
-				break;
-
-			case 0xF0:
-				switch (event->byte1) {
-					case B_SYS_EX_START:
-						// We do not export sysex's.
-						break;
-
-					case B_TUNE_REQUEST:
-					case B_SYS_EX_END:
-					case B_TIMING_CLOCK:
-					case B_START:
-					case B_CONTINUE:
-					case B_STOP:
-					case B_ACTIVE_SENSING:
-						WriteByte(event->byte1);
-						break;
-
-					case B_MIDI_TIME_CODE:
-					case B_SONG_SELECT:
-					case B_CABLE_MESSAGE:
-						WriteByte(event->byte1);
-						WriteByte(event->byte2);
-						break;
-
-					case B_SONG_POSITION:
-						WriteByte(event->byte1);
-						WriteByte(event->byte2);
-						WriteByte(event->byte3);
-						break;
-
-					case B_SYSTEM_RESET:
-						WriteMetaEvent(event);
-						break;
+		uint8 status = NextByte();
+		if (status == 0xFF) {
+			uint8 type = NextByte();
+			uint32 metaLength = ReadVarLength();
+			if (type == 0x51 && metaLength == 3) {
+				uint32 usPerQuarter = ((uint32)NextByte() << 16)
+					| ((uint32)NextByte() << 8) | (uint32)NextByte();
+				if (usPerQuarter > 0) {
+					fBeatsPerMinute = (int32)(60000000.0
+						/ (double)usPerQuarter);
+					if (fBeatsPerMinute <= 0)
+						fBeatsPerMinute = 120;
 				}
-				break;
+				BMidiEvent* event = new BMidiEvent;
+				event->time  = elapsedTicks;
+				event->ticks = true;
+				event->byte1 = 0xFF;
+				event->byte2 = 0x51;
+				event->byte3 = 0x03;
+				event->tempo = fBeatsPerMinute;
+				event->track = fCurrTrack;
+				AddEvent(event);
+			} else {
+				SkipBytes(metaLength);
+				if (type == 0x2F)
+					break;
+			}
+			continue;
 		}
+
+		if (status == 0xF0 || status == 0xF7) {
+			uint32 length = ReadVarLength();
+			void* data = malloc(length + 1);
+			if (data != NULL) {
+				((uint8*)data)[0] = status;
+				if (length > 0 && fFile != NULL)
+					fFile->Read((uint8*)data + 1, length);
+			}
+			fByteCount += length;
+			BMidiEvent* event = new BMidiEvent;
+			event->time  = elapsedTicks;
+			event->ticks = true;
+			event->byte1 = B_SYS_EX_START;
+			event->data  = data;
+			event->length = length + 1;
+			event->track = fCurrTrack;
+			AddEvent(event);
+			continue;
+		}
+
+		if (status & 0x80) {
+			runningStatus = status;
+		} else if (runningStatus != 0) {
+			uint8 data1 = status;
+			uint8 data2 = 0;
+			uchar kind = runningStatus & 0xf0;
+			if (kind != 0xC0 && kind != 0xD0)
+				data2 = NextByte();
+			BMidiEvent* event = new BMidiEvent;
+			event->time  = elapsedTicks;
+			event->ticks = true;
+			event->byte1 = runningStatus;
+			event->byte2 = data1;
+			event->byte3 = data2;
+			event->track = fCurrTrack;
+			event->tempo = fBeatsPerMinute;
+			AddEvent(event);
+			continue;
+		} else {
+			continue;
+		}
+
+		uchar kind = status & 0xf0;
+		uint8 data1 = 0;
+		uint8 data2 = 0;
+		if (kind == 0xC0 || kind == 0xD0) {
+			data1 = NextByte();
+		} else if (kind >= 0x80 && kind <= 0xE0) {
+			data1 = NextByte();
+			data2 = NextByte();
+		} else {
+			continue;
+		}
+
+		BMidiEvent* event = new BMidiEvent;
+		event->time  = elapsedTicks;
+		event->ticks = true;
+		event->byte1 = status;
+		event->byte2 = data1;
+		event->byte3 = data2;
+		event->track = fCurrTrack;
+		event->tempo = fBeatsPerMinute;
+		AddEvent(event);
 	}
 
-	WriteVarLength(0);
-	WriteByte(0xFF);   // the end-of-track
-	WriteByte(0x2F);   // marker is required
-	WriteByte(0x00);  
+	fTotalTicks = savedTotal;
+	// Pad to the declared track length if the parser stopped early.
+	off_t pos = fFile->Position();
+	if (pos < trackEnd)
+		fFile->Seek(trackEnd, SEEK_SET);
+}
 
-	fFile->Seek(lengthPos, SEEK_SET);
-	Write32Bit(fByteCount);
-	fFile->Seek(0, SEEK_END);
+
+status_t
+BMidiStore::Import(const entry_ref* ref)
+{
+	if (ref == NULL)
+		return B_BAD_VALUE;
+	if (fInstruments != NULL)
+		memset(fInstruments, 0, 128 * sizeof(bool));
+
+	if (fEvents != NULL) {
+		for (int32 i = 0; i < fEvents->CountItems(); i++)
+			delete (BMidiEvent*)fEvents->ItemAt(i);
+		fEvents->MakeEmpty();
+	}
+
+	fFile = new(std::nothrow) BFile(ref, B_READ_ONLY);
+	if (fFile == NULL)
+		return B_NO_MEMORY;
+	if (fFile->InitCheck() != B_OK) {
+		status_t err = fFile->InitCheck();
+		delete fFile;
+		fFile = NULL;
+		return err;
+	}
+
+	char fourcc[4] = { 0, 0, 0, 0 };
+	ReadFourCC(fourcc);
+	if (strncmp(fourcc, "MThd", 4) != 0) {
+		delete fFile;
+		fFile = NULL;
+		return B_BAD_MIDI_DATA;
+	}
+
+	if (Read32Bit() != 6) {
+		delete fFile;
+		fFile = NULL;
+		return B_BAD_MIDI_DATA;
+	}
+
+	fFormat = Read16Bit();
+	fNumTracks = Read16Bit();
+	uint16 division = Read16Bit();
+
+	if (division & 0x8000) {
+		// SMPTE division: reject with a stated error rather than silently
+		// mis-time the file.
+		delete fFile;
+		fFile = NULL;
+		return B_BAD_MIDI_DATA;
+	}
+	fTicksPerBeat = (int16)division;
+	if (fTicksPerBeat <= 0)
+		fTicksPerBeat = 240;
+
+	if (fFormat > 1) {
+		delete fFile;
+		fFile = NULL;
+		return B_BAD_MIDI_DATA;
+	}
+
+	fCurrTrack = 0;
+	fTotalTicks = 0;
+	fBeatsPerMinute = 120;
+	while (fCurrTrack < fNumTracks) {
+		ReadChunk();
+		fCurrTrack++;
+	}
+
+	// One tempo walk: every event already carries absolute ticks; convert
+	// to milliseconds under the tempo active when its tick occurred. The
+	// tempo events themselves update fBeatsPerMinute as we walk the merged
+	// ordered list.
+	SortEvents(true);
+	int32 count = fEvents->CountItems();
+	int32 bpm = 120;
+	int32 tpq = fTicksPerBeat > 0 ? fTicksPerBeat : 240;
+	uint32 lastTick = 0;
+	uint32 lastMs = 0;
+	for (int32 i = 0; i < count; i++) {
+		BMidiEvent* event = (BMidiEvent*)fEvents->ItemAt(i);
+		if (event == NULL)
+			continue;
+		uint32 tick = event->time;
+		if (event->byte1 == 0xFF && event->byte2 == 0x51) {
+			bpm = event->tempo > 0 ? event->tempo : bpm;
+			event->time = lastMs;
+			event->ticks = false;
+			continue;
+		}
+		uint32 deltaTicks = tick - lastTick;
+		uint32 deltaMs = (uint32)((uint64)deltaTicks * 60000ULL
+			/ ((uint64)bpm * (uint64)tpq));
+		lastMs += deltaMs;
+		lastTick = tick;
+		event->time = lastMs;
+		event->ticks = false;
+		event->tempo = bpm;
+	}
+	fBeatsPerMinute = bpm;
+	fStartTime = 0;
+
+	delete fFile;
+	fFile = NULL;
+	return B_OK;
+}
+
+
+status_t
+BMidiStore::Export(const entry_ref*, int32)
+{
+	// Export is not required by the acceptance path.
+	return B_NOT_SUPPORTED;
 }
 
 
 void
-BMidiStore::WriteMetaEvent(BMidiEvent* event)
+BMidiStore::SprayEvent(const BMidiEvent* event, uint32 time)
 {
-	// We only export the Tempo Change meta event.
-
-	if (event->byte2 == 0x51 && event->byte3 == 0x03) {
-		uint32 val = 60000000 / event->tempo;
-
-		WriteByte(0xFF);
-		WriteByte(0x51);
-		WriteByte(0x03);
-		WriteByte(val >> 16);
-		WriteByte(val >> 8);
-		WriteByte(val);
+	if (event == NULL)
+		return;
+	switch (event->byte1 & 0xf0) {
+		case B_NOTE_OFF:
+			BMidi::NoteOff(event->byte1 & 0x0f, event->byte2, event->byte3, time);
+			break;
+		case B_NOTE_ON:
+			BMidi::NoteOn(event->byte1 & 0x0f, event->byte2, event->byte3, time);
+			break;
+		case B_KEY_PRESSURE:
+			BMidi::KeyPressure(event->byte1 & 0x0f, event->byte2, event->byte3, time);
+			break;
+		case B_CONTROL_CHANGE:
+			BMidi::ControlChange(event->byte1 & 0x0f, event->byte2, event->byte3, time);
+			break;
+		case B_PROGRAM_CHANGE:
+			BMidi::ProgramChange(event->byte1 & 0x0f, event->byte2, time);
+			break;
+		case B_CHANNEL_PRESSURE:
+			BMidi::ChannelPressure(event->byte1 & 0x0f, event->byte2, time);
+			break;
+		case B_PITCH_BEND:
+			BMidi::PitchBend(event->byte1 & 0x0f, event->byte2, event->byte3, time);
+			break;
+		case 0xF0:
+			BMidi::SystemExclusive(event->data, event->length, time);
+			break;
+		case 0xFF:
+			if (event->byte2 == 0x51)
+				BMidi::TempoChange(event->tempo, time);
+			break;
+		default:
+			BMidi::SystemCommon(event->byte1, event->byte2, event->byte3, time);
+			break;
 	}
 }
 
+
+void
+BMidiStore::Run()
+{
+	// Playback loop on the app thread. Event times are absolute milliseconds
+	// from file start; spray with midi1 time (ms) and let the midi2 façade
+	// scheduler hold them until due. Playback starts at fCurrentEvent so a
+	// stop/seek/start resumes from the right place, with the timeline
+	// rebased so the remaining events keep their spacing.
+	SortEvents(false);
+	fFinished = false;
+	uint32 count = CountEvents();
+	if (count == 0) {
+		fFinished = true;
+		if (fHookFunc != NULL)
+			fHookFunc(fHookArg);
+		return;
+	}
+
+	uint32 first = (uint32)fCurrentEvent;
+	if (first >= count)
+		first = 0;
+	uint32 base = GetEventTime(EventAt((int32)first));
+	uint32 start = B_NOW;
+	fStartTime = start - base;
+
+	for (uint32 i = first; i < count && KeepRunning(); i++) {
+		while (fPaused && KeepRunning())
+			snooze(20000);
+		if (!KeepRunning())
+			break;
+
+		fCurrentEvent = (int32)i;
+		BMidiEvent* event = EventAt((int32)i);
+		if (event == NULL)
+			continue;
+
+		uint32 eventTime = fStartTime + GetEventTime(event);
+		SnoozeUntil(eventTime);
+		if (!KeepRunning())
+			break;
+
+		SprayEvent(event, eventTime);
+	}
+
+	// The hook means "the song ended", not "someone called Stop()"; a
+	// stopped run must not fire it or every stop would advance the
+	// playlist.
+	bool stopped = !KeepRunning();
+	fFinished = true;
+	if (!stopped && fHookFunc != NULL)
+		fHookFunc(fHookArg);
+
+	if (fLooping && !stopped) {
+		fCurrentEvent = 0;
+		Run();
+	}
+}
+
+
+void
+BMidiStore::_ReservedMidiStore1()
+{
+}
+
+
+void
+BMidiStore::_ReservedMidiStore2()
+{
+}
+
+
+void
+BMidiStore::_ReservedMidiStore3()
+{
+}

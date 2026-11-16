@@ -1,18 +1,22 @@
+/*
+ * Copyright 2026, Dario Casalinuovo. All rights reserved.
+ * Distributed under the terms of the MIT License.
+ */
 
 #ifndef _MIDI_SYNTH_H
 #define _MIDI_SYNTH_H
 
 #include <BeBuild.h>
-#include <Midi.h>
-#include <Synth.h>
-#include <MidiDefs.h>
+#include <midi/Midi.h>
+#include <midi/Synth.h>
+#include <midi/MidiDefs.h>
 
 class BSynth;
 
 class BMidiSynth : public BMidi {
 public:
 
-	BMidiSynth(); 
+	BMidiSynth();
 	virtual ~BMidiSynth();
 
 	status_t EnableInput(bool enable, bool loadInstruments);
@@ -48,7 +52,7 @@ public:
 		uchar channel, uchar note, uchar pressure, uint32 time = B_NOW);
 
 	virtual void ControlChange(
-		uchar channel, uchar controlNumber, uchar controlValue, 
+		uchar channel, uchar controlNumber, uchar controlValue,
 		uint32 time = B_NOW);
 
 	virtual void ProgramChange(
@@ -60,14 +64,14 @@ public:
 	virtual void PitchBend(
 		uchar channel, uchar lsb, uchar msb, uint32 time = B_NOW);
 
-	virtual void AllNotesOff(bool justChannel, uint32 time = B_NOW);
+	virtual void AllNotesOff(bool justChannel = true, uint32 time = B_NOW);
 
 protected:
 
 	void* fSongVariables;
 	void* fPerformanceVariables;
 	bool fMidiQueue;
-	
+
 private:
 
 	friend class BSynth;

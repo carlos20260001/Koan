@@ -2,12 +2,12 @@
  * Master include file for the Midi Kit.
  *
  */
-#include <Midi.h>
-#include <MidiDefs.h>
-#include <MidiPort.h>
-#include <MidiStore.h>
-#include <MidiSynth.h>
-#include <MidiSynthFile.h>
-#include <MidiText.h>
-#include <Samples.h>
-#include <Synth.h>
+#include <midi/MidiDefs.h>
+#include <midi/Midi.h>
+#include <midi/MidiPort.h>
+#include <midi/MidiStore.h>
+#include <midi/MidiSynth.h>
+#include <midi/MidiSynthFile.h>
+#include <midi/MidiText.h>
+#include <midi/Samples.h>
+#include <midi/Synth.h>

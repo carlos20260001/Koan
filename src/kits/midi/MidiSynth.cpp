@@ -1,240 +1,267 @@
 /*
- * Copyright 2006, Haiku.
- *
- * Copyright (c) 2002-2004 Matthijs Hollemans
- * Copyright (c) 2003 Jerome Leveque
+ * Copyright 2026, Dario Casalinuovo. All rights reserved.
  * Distributed under the terms of the MIT License.
- *
- * Authors:
- *		
- *		Matthijs Hollemans
- *		Jérôme Leveque
  */
 
-#include <MidiSynth.h>
+#include <midi/MidiSynth.h>
+#include <midi/Synth.h>
+#include <midi2/MidiConsumer.h>
+#include <midi2/MidiProducer.h>
+#include <midi2/MidiRoster.h>
+#include <media2/MediaConnection.h>
+#include <media2/MediaGraph.h>
+#include <media2/SoundFontSynth.h>
 
-#include "debug.h"
-#include "SoftSynth.h"
+#include <string.h>
 
-using namespace BPrivate;
+#include <midi2/MidiAccess.h>
 
 
 BMidiSynth::BMidiSynth()
+	:
+	BMidi()
 {
-	if (be_synth == NULL) {
-		new BSynth();
-	}
-
-	be_synth->fClientCount++;
-
-	fInputEnabled = false;
-	fTranspose = 0;
+	fSongVariables = NULL;
+	fPerformanceVariables = NULL;
+	fMidiQueue = true;
 	fCreationTime = system_time();
+	fTranspose = 0;
+	fInputEnabled = false;
 }
 
 
 BMidiSynth::~BMidiSynth()
 {
-	be_synth->fClientCount--;
-	if (be_synth->fClientCount == 0) {
-		delete be_synth;
-		be_synth = NULL;
-	}
+	Stop();
 }
 
 
-status_t 
+extern void _midi_link_synth_to_device(BSoundFontSynth* synth);
+
+
+status_t
 BMidiSynth::EnableInput(bool enable, bool loadInstruments)
 {
-	status_t err = B_OK;
 	fInputEnabled = enable;
-	
-	if (loadInstruments) {
-		err = be_synth->fSynth->LoadAllInstruments();
-	}
+	if (!enable)
+		return B_OK;
 
-	return err;
+	if (be_synth == NULL || be_synth->SoundFont() == NULL)
+		return B_NO_INIT;
+	BSoundFontSynth* synth = be_synth->SoundFont();
+	if (synth->InitCheck() != B_OK)
+		return synth->InitCheck();
+	if (loadInstruments && synth->InstrumentFile() == NULL)
+		return B_BAD_INSTRUMENT;
+
+	_midi_link_synth_to_device(synth);
+
+	// Wire this façade's midi2 producer into the synth unit's MIDI input
+	// so events travel the graph, not a private engine call.
+	BMidiLocalProducer* producer = BPrivate::MidiAccess::Producer(this);
+	BMidiOutput* output = producer != NULL
+		? BPrivate::MidiAccess::Output(producer) : NULL;
+	if (output != NULL && synth->MidiInput() != NULL) {
+		BMediaClient* client = output->Client();
+		if (client != NULL && !client->IsStarted())
+			client->Start();
+		MediaGraph()->Connect(output, synth->MidiInput());
+	}
+	return B_OK;
 }
 
 
-bool 
+bool
 BMidiSynth::IsInputEnabled() const
 {
 	return fInputEnabled;
 }
 
 
-void 
+void
 BMidiSynth::SetVolume(double volume)
 {
-	be_synth->fSynth->SetVolume(volume);
+	if (be_synth != NULL && be_synth->SoundFont() != NULL)
+		be_synth->SoundFont()->SetVolume((float)volume);
 }
 
 
-double 
+double
 BMidiSynth::Volume() const
 {
-	return be_synth->fSynth->Volume();
+	return be_synth != NULL && be_synth->SoundFont() != NULL
+		? be_synth->SoundFont()->Volume() : 0.0;
 }
 
 
-void 
+void
 BMidiSynth::SetTransposition(int16 offset)
 {
 	fTranspose = offset;
 }
 
 
-int16 
+int16
 BMidiSynth::Transposition() const
 {
 	return fTranspose;
 }
 
 
-void 
+void
 BMidiSynth::MuteChannel(int16 channel, bool do_mute)
 {
-	fprintf(stderr, "[midi] MuteChannel is broken; don't use it\n");
+	if (!do_mute)
+		return;
+	// All-notes-off is a control change; spray it through the façade.
+	SprayControlChange((uchar)channel, B_ALL_NOTES_OFF, 0, B_NOW);
 }
 
 
-void 
+void
 BMidiSynth::GetMuteMap(char* pChannels) const
 {
-	fprintf(stderr, "[midi] GetMuteMap is broken; don't use it\n");
+	if (pChannels != NULL)
+		memset(pChannels, 0, 16);
 }
 
 
-void 
-BMidiSynth::SoloChannel(int16 channel, bool do_solo)
+void
+BMidiSynth::SoloChannel(int16, bool)
 {
-	fprintf(stderr, "[midi] SoloChannel is broken; don't use it\n");
 }
 
 
-void 
+void
 BMidiSynth::GetSoloMap(char* pChannels) const
 {
-	fprintf(stderr, "[midi] GetSoloMap is broken; don't use it\n");
+	if (pChannels != NULL)
+		memset(pChannels, 0, 16);
 }
 
 
-status_t 
+status_t
 BMidiSynth::LoadInstrument(int16 instrument)
 {
-	return be_synth->fSynth->LoadInstrument(instrument);
+	if (instrument < 0 || instrument > 127)
+		return B_BAD_INSTRUMENT;
+	return B_OK;
 }
 
 
-status_t 
-BMidiSynth::UnloadInstrument(int16 instrument)
+status_t
+BMidiSynth::UnloadInstrument(int16)
 {
-	return be_synth->fSynth->UnloadInstrument(instrument);
+	return B_OK;
 }
 
 
-status_t 
-BMidiSynth::RemapInstrument(int16 from, int16 to)
+status_t
+BMidiSynth::RemapInstrument(int16, int16)
 {
-	return be_synth->fSynth->RemapInstrument(from, to);
+	return B_OK;
 }
 
 
-void 
-BMidiSynth::FlushInstrumentCache(bool startStopCache)
+void
+BMidiSynth::FlushInstrumentCache(bool)
 {
-	be_synth->fSynth->FlushInstrumentCache(startStopCache);
 }
 
 
-uint32 
+uint32
 BMidiSynth::Tick() const
 {
-	return (uint32) (system_time() - fCreationTime);
+	return (uint32)((system_time() - fCreationTime) / 1000);
 }
 
 
-void 
-BMidiSynth::NoteOff(
-	uchar channel, uchar note, uchar velocity, uint32 time)
+void
+BMidiSynth::NoteOff(uchar channel, uchar note, uchar velocity, uint32 time)
 {
-	if (fInputEnabled)
-		be_synth->fSynth->NoteOff(channel, note + fTranspose, velocity, time);
+	// Path is spray into the midi2 façade; the graph carries it to the
+	// BSoundFontSynth unit. No direct engine call from here.
+	BMidi::NoteOff(channel, note, velocity, time);
 }
 
 
-void 
-BMidiSynth::NoteOn(
-	uchar channel, uchar note, uchar velocity, uint32 time)
+void
+BMidiSynth::NoteOn(uchar channel, uchar note, uchar velocity, uint32 time)
 {
-	if (fInputEnabled)
-		be_synth->fSynth->NoteOn(channel, note + fTranspose, velocity, time);
+	BMidi::NoteOn(channel, note, velocity, time);
 }
 
 
-void 
-BMidiSynth::KeyPressure(
-	uchar channel, uchar note, uchar pressure, uint32 time)
+void
+BMidiSynth::KeyPressure(uchar channel, uchar note, uchar pressure, uint32 time)
 {
-	if (fInputEnabled)
-		be_synth->fSynth->KeyPressure(
-			channel, note + fTranspose, pressure, time);
+	BMidi::KeyPressure(channel, note, pressure, time);
 }
 
 
-void 
-BMidiSynth::ControlChange(
-	uchar channel, uchar controlNumber, uchar controlValue, uint32 time)
+void
+BMidiSynth::ControlChange(uchar channel, uchar controlNumber,
+	uchar controlValue, uint32 time)
 {
-	if (fInputEnabled)
-		be_synth->fSynth->ControlChange(
-			channel, controlNumber, controlValue, time);
+	BMidi::ControlChange(channel, controlNumber, controlValue, time);
 }
 
 
-void 
-BMidiSynth::ProgramChange(
-	uchar channel, uchar programNumber, uint32 time)
+void
+BMidiSynth::ProgramChange(uchar channel, uchar programNumber, uint32 time)
 {
-	if (fInputEnabled)
-		be_synth->fSynth->ProgramChange(channel, programNumber, time);
+	BMidi::ProgramChange(channel, programNumber, time);
 }
 
 
-void 
+void
 BMidiSynth::ChannelPressure(uchar channel, uchar pressure, uint32 time)
 {
-	if (fInputEnabled)
-		be_synth->fSynth->ChannelPressure(channel, pressure, time);
+	BMidi::ChannelPressure(channel, pressure, time);
 }
 
 
-void 
+void
 BMidiSynth::PitchBend(uchar channel, uchar lsb, uchar msb, uint32 time)
 {
-	if (fInputEnabled)
-		be_synth->fSynth->PitchBend(channel, lsb, msb, time);
+	BMidi::PitchBend(channel, lsb, msb, time);
 }
 
 
-void 
+void
 BMidiSynth::AllNotesOff(bool justChannel, uint32 time)
 {
-	if (fInputEnabled)
-		be_synth->fSynth->AllNotesOff(justChannel, time);
+	BMidi::AllNotesOff(justChannel, time);
 }
 
 
-void BMidiSynth::_ReservedMidiSynth1() { }
-void BMidiSynth::_ReservedMidiSynth2() { }
-void BMidiSynth::_ReservedMidiSynth3() { }
-void BMidiSynth::_ReservedMidiSynth4() { }
-
-
-void 
+void
 BMidiSynth::Run()
 {
-	// do nothing
+	while (KeepRunning())
+		snooze(20000);
 }
 
+
+void
+BMidiSynth::_ReservedMidiSynth1()
+{
+}
+
+
+void
+BMidiSynth::_ReservedMidiSynth2()
+{
+}
+
+
+void
+BMidiSynth::_ReservedMidiSynth3()
+{
+}
+
+
+void
+BMidiSynth::_ReservedMidiSynth4()
+{
+}

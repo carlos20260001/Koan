@@ -1,9 +1,13 @@
+/*
+ * Copyright 2026, Dario Casalinuovo. All rights reserved.
+ * Distributed under the terms of the MIT License.
+ */
 
 #ifndef _MIDI_ROSTER_H
 #define _MIDI_ROSTER_H
 
 #include <Application.h>
-#include <MidiEndpoint.h>
+#include <midi2/MidiEndpoint.h>
 
 enum BMidiOp
 {
@@ -35,11 +39,11 @@ public:
 	static BMidiEndpoint *NextEndpoint(int32 *id);
 	static BMidiProducer *NextProducer(int32 *id);
 	static BMidiConsumer *NextConsumer(int32 *id);
-	
+
 	static BMidiEndpoint *FindEndpoint(int32 id, bool localOnly = false);
 	static BMidiProducer *FindProducer(int32 id, bool localOnly = false);
 	static BMidiConsumer *FindConsumer(int32 id, bool localOnly = false);
-	
+
 	static void StartWatching(const BMessenger *msngr);
 	static void StopWatching();
 
@@ -47,7 +51,7 @@ public:
 	static status_t Unregister(BMidiEndpoint *endp);
 
 	static BMidiRoster *MidiRoster();
-	
+
 private:
 
 	friend class BMidiConsumer;
@@ -69,14 +73,21 @@ private:
 	virtual void _Reserved6();
 	virtual void _Reserved7();
 	virtual void _Reserved8();
-	
+
 	void CreateLocal(BMidiEndpoint*);
 	void DeleteLocal(BMidiEndpoint*);
 
 	status_t SendRequest(BMessage*, BMessage*);
 
+	// media2 realisation: enumeration over local endpoints plus graph MIDI nodes.
+	void _RefreshFromGraph();
+
 	BPrivate::BMidiRosterLooper* fLooper;
 	BMessenger *fServer;
+	BList* fEndpoints;
+	int32 fWatchCursor;
+	int32 fNextLocalId;
+	bool fGraphDirty;
 
 	uint32 _reserved[16];
 };

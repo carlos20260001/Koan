@@ -1,3 +1,7 @@
+/*
+ * Copyright 2026, Dario Casalinuovo. All rights reserved.
+ * Distributed under the terms of the MIT License.
+ */
 
 #ifndef _SAMPLES_H
 #define _SAMPLES_H
@@ -8,7 +12,7 @@
 typedef void (*sample_exit_hook)(int32 arg);
 typedef bool (*sample_loop_hook)(int32 arg);
 
-class BSamples 
+class BSamples
 {
 public:
 
@@ -43,6 +47,16 @@ private:
 	virtual void _ReservedSamples1();
 	virtual void _ReservedSamples2();
 	virtual void _ReservedSamples3();
+
+	// Direct sample playback via a BMediaNode output, not the synth unit.
+	void* fNode;
+	void* fOutput;
+	double fVolume;
+	double fRate;
+	double fPlacement;
+	bool fReverb;
+	bool fPlaying;
+	bool fPaused;
 
 	uint32 _reserved[8];
 };

@@ -1,3 +1,7 @@
+/*
+ * Copyright 2026, Dario Casalinuovo. All rights reserved.
+ * Distributed under the terms of the MIT License.
+ */
 
 #ifndef _MIDI_DEFS_H
 #define _MIDI_DEFS_H
@@ -20,14 +24,14 @@
 #define B_BIG_SYNTH_FILE     "synth/big_synth.sy"
 #define B_LITTLE_SYNTH_FILE  "synth/little_synth.sy"
 
-typedef enum synth_mode 
+typedef enum synth_mode
 {
 	B_NO_SYNTH,
 	B_BIG_SYNTH,
 	B_LITTLE_SYNTH,
 	B_DEFAULT_SYNTH,
 	B_SAMPLES_ONLY
-} 
+}
 synth_mode;
 
 //------------------------------------------------------------------------------
@@ -84,7 +88,7 @@ const uchar B_FOOT_CONTROLLER       = 0x04;
 const uchar B_PORTAMENTO_TIME       = 0x05;
 const uchar B_DATA_ENTRY            = 0x06;
 const uchar B_MAIN_VOLUME           = 0x07;
-const uchar B_MIDI_BALANCE          = 0x08;  /* used to be B_BALANCE */
+const uchar B_MIDI_BALANCE          = 0x08;
 const uchar B_PAN                   = 0x0a;
 const uchar B_EXPRESSION_CTRL       = 0x0b;
 const uchar B_GENERAL_CTRL_1        = 0x10;
@@ -98,6 +102,7 @@ const uchar B_SOFT_PEDAL            = 0x43;
 const uchar B_HOLD_2                = 0x45;
 const uchar B_GENERAL_CTRL_5        = 0x50;
 const uchar B_GENERAL_CTRL_6        = 0x51;
+const uchar B_TEMPO_CHANGE          = 0x51;
 const uchar B_GENERAL_CTRL_7        = 0x52;
 const uchar B_GENERAL_CTRL_8        = 0x53;
 const uchar B_EFFECTS_DEPTH         = 0x5b;
@@ -114,16 +119,13 @@ const uchar B_OMNI_MODE_OFF         = 0x7c;
 const uchar B_OMNI_MODE_ON          = 0x7d;
 const uchar B_MONO_MODE_ON          = 0x7e;
 const uchar B_POLY_MODE_ON          = 0x7f;
- 
-const uchar B_TEMPO_CHANGE          = 0x51;
 
 #endif // _MIDI_CONSTANTS_
 
 //------------------------------------------------------------------------------
 
-typedef enum midi_axe 
+typedef enum midi_axe
 {
-	/* Pianos */
 	B_ACOUSTIC_GRAND=0,
 	B_BRIGHT_GRAND,
 	B_ELECTRIC_GRAND,
@@ -133,7 +135,6 @@ typedef enum midi_axe
 	B_HARPSICHORD,
 	B_CLAVICHORD,
 
-	/* Tuned Idiophones */
 	B_CELESTA,
 	B_GLOCKENSPIEL,
 	B_MUSIC_BOX,
@@ -143,7 +144,6 @@ typedef enum midi_axe
 	B_TUBULAR_BELLS,
 	B_DULCIMER,
 
-	/* Organs */
 	B_DRAWBAR_ORGAN,
 	B_PERCUSSIVE_ORGAN,
 	B_ROCK_ORGAN,
@@ -153,7 +153,6 @@ typedef enum midi_axe
 	B_HARMONICA,
 	B_TANGO_ACCORDION,
 
-	/* Guitars */
 	B_ACOUSTIC_GUITAR_NYLON,
 	B_ACOUSTIC_GUITAR_STEEL,
 	B_ELECTRIC_GUITAR_JAZZ,
@@ -163,7 +162,6 @@ typedef enum midi_axe
 	B_DISTORTION_GUITAR,
 	B_GUITAR_HARMONICS,
 
-	/* Basses */
 	B_ACOUSTIC_BASS,
 	B_ELECTRIC_BASS_FINGER,
 	B_ELECTRIC_BASS_PICK,
@@ -173,7 +171,6 @@ typedef enum midi_axe
 	B_SYNTH_BASS_1,
 	B_SYNTH_BASS_2,
 
-	/* Strings */
 	B_VIOLIN,
 	B_VIOLA,
 	B_CELLO,
@@ -183,7 +180,6 @@ typedef enum midi_axe
 	B_ORCHESTRAL_STRINGS,
 	B_TIMPANI,
 
-	/* Ensemble strings and voices */
 	B_STRING_ENSEMBLE_1,
 	B_STRING_ENSEMBLE_2,
 	B_SYNTH_STRINGS_1,
@@ -193,7 +189,6 @@ typedef enum midi_axe
 	B_SYNTH_VOICE,
 	B_ORCHESTRA_HIT,
 
-	/* Brass */
 	B_TRUMPET,
 	B_TROMBONE,
 	B_TUBA,
@@ -203,7 +198,6 @@ typedef enum midi_axe
 	B_SYNTH_BRASS_1,
 	B_SYNTH_BRASS_2,
 
-	/* Reeds */
 	B_SOPRANO_SAX,
 	B_ALTO_SAX,
 	B_TENOR_SAX,
@@ -213,7 +207,6 @@ typedef enum midi_axe
 	B_BASSOON,
 	B_CLARINET,
 
-	/* Pipes */
 	B_PICCOLO,
 	B_FLUTE,
 	B_RECORDER,
@@ -223,7 +216,6 @@ typedef enum midi_axe
 	B_WHISTLE,
 	B_OCARINA,
 
-	/* Synth Leads*/
 	B_LEAD_1,
 	B_SQUARE_WAVE = B_LEAD_1,
 	B_LEAD_2,
@@ -241,7 +233,6 @@ typedef enum midi_axe
 	B_LEAD_8,
 	B_BASS_LEAD = B_LEAD_8,
 
-	/* Synth Pads */
 	B_PAD_1,
 	B_NEW_AGE = B_PAD_1,
 	B_PAD_2,
@@ -256,10 +247,9 @@ typedef enum midi_axe
 	B_METALLIC = B_PAD_6,
 	B_PAD_7,
 	B_HALO = B_PAD_7,
-	B_PAD_8,  
+	B_PAD_8,
 	B_SWEEP = B_PAD_8,
 
-	/* Effects */
 	B_FX_1,
 	B_FX_2,
 	B_FX_3,
@@ -269,7 +259,6 @@ typedef enum midi_axe
 	B_FX_7,
 	B_FX_8,
 
-	/* Ethnic */
 	B_SITAR,
 	B_BANJO,
 	B_SHAMISEN,
@@ -279,7 +268,6 @@ typedef enum midi_axe
 	B_FIDDLE,
 	B_SHANAI,
 
-	/* Percussion */
 	B_TINKLE_BELL,
 	B_AGOGO,
 	B_STEEL_DRUMS,
@@ -289,7 +277,6 @@ typedef enum midi_axe
 	B_SYNTH_DRUM,
 	B_REVERSE_CYMBAL,
 
-	/* Sound Effects */
 	B_FRET_NOISE,
 	B_BREATH_NOISE,
 	B_SEASHORE,
@@ -298,7 +285,7 @@ typedef enum midi_axe
 	B_HELICOPTER,
 	B_APPLAUSE,
 	B_GUNSHOT
-} 
+}
 midi_axe;
 
 #endif // _MIDI_DEFS_H

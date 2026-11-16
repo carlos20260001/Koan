@@ -1,10 +1,14 @@
+/*
+ * Copyright 2026, Dario Casalinuovo. All rights reserved.
+ * Distributed under the terms of the MIT License.
+ */
 
 #ifndef _MIDI_STORE_H
 #define _MIDI_STORE_H
 
 #include <BeBuild.h>
-#include <Midi.h>
-#include <MidiSynthFile.h>
+#include <midi/Midi.h>
+#include <midi/MidiSynthFile.h>
 
 struct entry_ref;
 
@@ -55,6 +59,9 @@ public:
 
 	void SortEvents(bool force = false);
 	uint32 CountEvents() const;
+
+	// Song length in milliseconds (time of the last sorted event).
+	uint32 DurationMs() const;
 
 	uint32 CurrentEvent() const;
 	void SetCurrentEvent(uint32 eventNumber);

@@ -522,8 +522,8 @@ AddOnManager::_RegisterWriter(WriterPlugin* writer, const entry_ref& ref)
 		// Generate a proper ID before inserting this format, this encodes
 		// the specific plugin in the media_file_format.
 		media_file_format fileFormat = fileFormats[i];
-		fileFormat.id.node = ref.directory;
-		fileFormat.id.device = ref.device;
+		fileFormat.id.node = ref.directory();
+		fileFormat.id.device = ref.device();
 		fileFormat.id.internal_id = info.internalID;
 
 		fWriterFileFormats.Insert(fileFormat);
@@ -608,7 +608,7 @@ AddOnManager::_FindDecoder(const media_format& format, const BPath& path,
 
 	decoder_info* info;
 	for (fDecoderList.Rewind(); fDecoderList.GetNext(&info);) {
-		if (info->ref.directory != nref.node)
+		if (info->ref.directory() != nref.node())
 			continue;
 
 		media_format* decoderFormat;
@@ -638,7 +638,7 @@ AddOnManager::_FindEncoder(const media_format& format, const BPath& path,
 
 	encoder_info* info;
 	for (fEncoderList.Rewind(); fEncoderList.GetNext(&info);) {
-		if (info->ref.directory != nref.node)
+		if (info->ref.directory() != nref.node())
 			continue;
 
 		// check if the encoder matches the supplied format
@@ -666,7 +666,7 @@ AddOnManager::_GetReaders(const BPath& path, entry_ref* outRefs,
 	reader_info* info;
 	for (fReaderList.Rewind(); fReaderList.GetNext(&info)
 		&& *outCount < maxCount;) {
-		if (info->ref.directory != nref.node)
+		if (info->ref.directory() != nref.node())
 			continue;
 
 		outRefs[*outCount] = info->ref;

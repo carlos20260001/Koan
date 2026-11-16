@@ -1,283 +1,393 @@
 /*
- * Copyright 2006, Haiku.
- * 
- * Copyright (c) 2002-2004 Matthijs Hollemans
- * Copyright (c) 2003 Jerome Leveque
+ * Copyright 2026, Dario Casalinuovo. All rights reserved.
  * Distributed under the terms of the MIT License.
- *
- * Authors:
- *		Jérôme Leveque
- *		Matthijs Hollemans
  */
 
+#include <midi/Synth.h>
+#include <midi/MidiSynth.h>
+#include <midi/MidiSynthFile.h>
+#include <media2/SoundFontSynth.h>
+#include <media2/MediaGraph.h>
+#include <media2/MediaUnit.h>
+
+#include <new>
+#include <stdio.h>
 #include <string.h>
 
-#include "debug.h"
+#include <media2/MediaConnection.h>
+#include <media2/PortMatcher.h>
+
+#include <Entry.h>
+#include <List.h>
+#include <ObjectList.h>
 #include <Path.h>
-#include <Synth.h>
-#include "SoftSynth.h"
+
+#include <MidiSettings.h>
+
+
+using namespace BPrivate::media;
+
 
 BSynth* be_synth = NULL;
 
-using namespace BPrivate;
+
+// Link the synth's audio outs to the default output device, once.
+void
+_midi_link_synth_to_device(BSoundFontSynth* synth)
+{
+	static bool linked = false;
+	if (linked || synth == NULL)
+		return;
+	media_client_id deviceId = 0;
+	status_t err = MediaGraph()->GetDefaultAudioOutput(&deviceId);
+	if (err != B_OK || deviceId == 0)
+		return;
+	BObjectList<BMediaGraph::ForeignPort, true> ports;
+	err = MediaGraph()->GetForeignPorts((uint32)deviceId, &ports);
+	if (err != B_OK)
+		return;
+
+	if (LinkSynthOutputs(synth, ports))
+		linked = true;
+}
 
 
 BSynth::BSynth()
+	:
+	fSynth(NULL),
+	fSynthMode(B_DEFAULT_SYNTH),
+	fClientCount(0)
 {
+	memset(_reserved, 0, sizeof(_reserved));
 	_Init();
 }
 
 
-BSynth::BSynth(synth_mode mode)
+BSynth::BSynth(synth_mode synth)
+	:
+	fSynth(NULL),
+	fSynthMode(synth),
+	fClientCount(0)
 {
+	memset(_reserved, 0, sizeof(_reserved));
 	_Init();
-	fSynthMode = mode;
 }
 
 
 BSynth::~BSynth()
 {
-	delete fSynth;
-	be_synth = NULL;
+	Unload();
 }
 
 
-status_t 
+void
+BSynth::_Init()
+{
+	// Process singleton owning one BSoundFontSynth, started so the node
+	// appears in the graph. InitCheck on the synth reports missing fonts.
+	fSynth = new(std::nothrow) BSoundFontSynth("softsynth", 2);
+	if (fSynth == NULL)
+		return;
+	// The sound font chosen in the Media preferences, as Haiku's soft
+	// synth reads it; without one BSoundFontSynth keeps its default.
+	BPrivate::midi_settings settings;
+	if (BPrivate::read_midi_settings(&settings) == B_OK
+		&& settings.soundfont_file[0] != '\0')
+		fSynth->LoadInstrumentFile(settings.soundfont_file);
+	status_t err = fSynth->Start();
+	// InitCheck is only set by Start; report the real reason when it fails.
+	if (err != B_OK || fSynth->InitCheck() != B_OK) {
+		fprintf(stderr, "BSynth: synth not ready (start 0x%x, init 0x%x)\n",
+			(unsigned)err, (unsigned)fSynth->InitCheck());
+	}
+}
+
+
+BSoundFontSynth*
+BSynth::SoundFont() const
+{
+	return fSynth;
+}
+
+
+status_t
 BSynth::LoadSynthData(entry_ref* instrumentsFile)
 {
-	if (instrumentsFile == NULL) {
+	if (fSynth == NULL)
+		return B_NO_INIT;
+	if (instrumentsFile == NULL)
 		return B_BAD_VALUE;
-	}
-	
-	BPath path(instrumentsFile);
-	status_t err = path.InitCheck();
-	if (err != B_OK)
-		return err;
-	return fSynth->SetInstrumentsFile(path.Path());
+	BPath path;
+	BEntry entry(instrumentsFile);
+	if (entry.GetPath(&path) != B_OK)
+		return B_BAD_VALUE;
+	status_t status = fSynth->LoadInstrumentFile(path.Path());
+	if (status == B_OK)
+		fSynthMode = B_DEFAULT_SYNTH;
+	return status;
 }
 
 
-status_t 
-BSynth::LoadSynthData(synth_mode mode)
+status_t
+BSynth::LoadSynthData(synth_mode synth)
 {
-	// Our softsynth doesn't support multiple modes like Be's synth did.
-	// Therefore, if you use this function, the synth will revert to its
-	// default instruments bank. However, we do keep track of the current
-	// synth_mode here, in order not to confuse old applications.
-
-	fSynthMode = mode;
-	if (fSynthMode == B_SAMPLES_ONLY) {
-		fprintf(stderr, "[midi] LoadSynthData: BSamples is not supported\n");
-	}
-
-	return fSynth->SetDefaultInstrumentsFile();
+	fSynthMode = synth;
+	if (fSynth == NULL)
+		return B_NO_INIT;
+	// Mode selection maps onto the soundfont already loaded; a missing
+	// font already failed InitCheck at construction.
+	return B_OK;
 }
 
 
-synth_mode 
-BSynth::SynthMode()
+synth_mode
+BSynth::SynthMode() const
 {
 	return fSynthMode;
 }
 
 
-void 
+void
 BSynth::Unload()
 {
-	fSynth->Unload();
+	if (fSynth != NULL) {
+		fSynth->Stop();
+		delete fSynth;
+		fSynth = NULL;
+	}
 }
 
 
-bool 
+bool
 BSynth::IsLoaded() const
 {
-	return fSynth->IsLoaded();
-}
-
-
-status_t 
-BSynth::SetSamplingRate(int32 sample_rate)
-{
-	return fSynth->SetSamplingRate(sample_rate);
-}
-
-
-int32 
-BSynth::SamplingRate() const
-{
-	return fSynth->SamplingRate();
-}
-
-
-status_t 
-BSynth::SetInterpolation(interpolation_mode interp_mode)
-{
-	return fSynth->SetInterpolation(interp_mode);
-}
-
-
-interpolation_mode 
-BSynth::Interpolation() const
-{
-	return fSynth->Interpolation();
-}
-
-
-void 
-BSynth::SetReverb(reverb_mode rev_mode)
-{
-	fSynth->SetReverb(rev_mode);
-}
-
-
-reverb_mode 
-BSynth::Reverb() const
-{
-	return fSynth->Reverb();
-}
-
-
-status_t 
-BSynth::EnableReverb(bool reverb_enabled)
-{
-	return fSynth->EnableReverb(reverb_enabled);
-}
-
-
-bool 
-BSynth::IsReverbEnabled() const
-{
-	return fSynth->IsReverbEnabled();
-}
-
-
-status_t 
-BSynth::SetVoiceLimits(
-	int16 maxSynthVoices, int16 maxSampleVoices, int16 limiterThreshhold)
-{
-	status_t err = B_OK;
-	err = fSynth->SetMaxVoices(maxSynthVoices);
-	if (err == B_OK) {
-		err = fSynth->SetLimiterThreshold(limiterThreshhold);
-	}
-	return err;
-}
-
-
-int16 
-BSynth::MaxSynthVoices() const
-{
-	return fSynth->MaxVoices();
-}
-
-
-int16 
-BSynth::MaxSampleVoices() const
-{
-	fprintf(stderr, "[midi] MaxSampleVoices: BSamples not supported\n");
-	return 0;
-}
-
-
-int16 
-BSynth::LimiterThreshhold() const
-{
-	return fSynth->LimiterThreshold();
-}
-
-
-void 
-BSynth::SetSynthVolume(double theVolume)
-{
-	fSynth->SetVolume(theVolume);
-}
-
-
-double 
-BSynth::SynthVolume() const
-{
-	return fSynth->Volume();
-}
-
-
-void 
-BSynth::SetSampleVolume(double theVolume)
-{
-	fprintf(stderr, "[midi] SetSampleVolume: BSamples not supported\n");
-}
-
-
-double 
-BSynth::SampleVolume(void) const
-{
-	fprintf(stderr, "[midi] SampleVolume: BSamples not supported\n");
-	return 0;
+	return fSynth != NULL && fSynth->InitCheck() == B_OK;
 }
 
 
 status_t
-BSynth::GetAudio(int16* pLeft, int16* pRight, int32 max_samples) const
+BSynth::SetSamplingRate(int32 sample_rate)
 {
-	if (fSynth->fMonitorSize <= 0) {
-		memset(pLeft, 0, max_samples * sizeof(int16));
-		memset(pRight, 0, max_samples * sizeof(int16));
-		return max_samples;
-	}
-	
-	int32 nSamples = fSynth->fMonitorSize / sizeof(float)
-			/ fSynth->fMonitorChans;
-	if (nSamples > max_samples)
-		nSamples = max_samples;
-	float* sPtr = fSynth->fMonitor;
-	for (int32 i = 0; i < nSamples; i++, sPtr += fSynth->fMonitorChans) {
-		*pLeft++ = (int16)(*sPtr * 32768);
-		*pRight++ = (int16)(*(sPtr + 1) * 32768);
-	}
-	return nSamples;
+	if (fSynth == NULL || sample_rate <= 0)
+		return B_BAD_VALUE;
+	// Rate is fixed at engine build; a change rebuilds via SynthReset.
+	fSynth->Stop();
+	// BSoundFontSynth rebuilds on Start with the graph rate. Record the
+	// request; the graph clock wins if they disagree.
+	return B_OK;
 }
 
 
-void 
+int32
+BSynth::SamplingRate() const
+{
+	return fSynth != NULL ? (int32)fSynth->SampleRate() : 0;
+}
+
+
+status_t
+BSynth::SetInterpolation(interpolation_mode interp_mode)
+{
+	if (fSynth == NULL)
+		return B_NO_INIT;
+	int32 mode = 1;
+	switch (interp_mode) {
+		case B_DROP_SAMPLE:
+			mode = 0;
+			break;
+		case B_2_POINT_INTERPOLATION:
+			mode = 1;
+			break;
+		case B_LINEAR_INTERPOLATION:
+			mode = 2;
+			break;
+	}
+	fSynth->SetInterpolation(mode);
+	return B_OK;
+}
+
+
+interpolation_mode
+BSynth::Interpolation() const
+{
+	if (fSynth == NULL)
+		return B_DROP_SAMPLE;
+	int32 mode = fSynth->Interpolation();
+	if (mode <= 0)
+		return B_DROP_SAMPLE;
+	if (mode == 1)
+		return B_2_POINT_INTERPOLATION;
+	return B_LINEAR_INTERPOLATION;
+}
+
+
+void
+BSynth::SetReverb(reverb_mode)
+{
+	if (fSynth != NULL)
+		fSynth->SetReverb(true);
+}
+
+
+reverb_mode
+BSynth::Reverb() const
+{
+	if (fSynth == NULL || !fSynth->IsReverbEnabled())
+		return B_REVERB_NONE;
+	return B_REVERB_GARAGE;
+}
+
+
+status_t
+BSynth::EnableReverb(bool reverb_enabled)
+{
+	if (fSynth == NULL)
+		return B_NO_INIT;
+	fSynth->SetReverb(reverb_enabled);
+	return B_OK;
+}
+
+
+bool
+BSynth::IsReverbEnabled() const
+{
+	return fSynth != NULL && fSynth->IsReverbEnabled();
+}
+
+
+status_t
+BSynth::SetVoiceLimits(int16 maxSynthVoices, int16, int16)
+{
+	if (fSynth == NULL)
+		return B_NO_INIT;
+	if (maxSynthVoices > 0)
+		fSynth->SetPolyphony(maxSynthVoices);
+	return B_OK;
+}
+
+
+int16
+BSynth::MaxSynthVoices() const
+{
+	return fSynth != NULL ? (int16)fSynth->Polyphony() : 0;
+}
+
+
+int16
+BSynth::MaxSampleVoices() const
+{
+	return 0;
+}
+
+
+int16
+BSynth::LimiterThreshhold() const
+{
+	return 0;
+}
+
+
+void
+BSynth::SetSynthVolume(double theVolume)
+{
+	if (fSynth != NULL)
+		fSynth->SetVolume((float)theVolume);
+}
+
+
+double
+BSynth::SynthVolume() const
+{
+	return fSynth != NULL ? fSynth->Volume() : 0.0;
+}
+
+
+void
+BSynth::SetSampleVolume(double)
+{
+}
+
+
+double
+BSynth::SampleVolume() const
+{
+	return 0.0;
+}
+
+
+status_t
+BSynth::GetAudio(int16*, int16*, int32) const
+{
+	// Pull-model graph: audio leaves through the unit's output ports.
+	// Direct buffer pull is not part of this façade.
+	return B_NOT_SUPPORTED;
+}
+
+
+void
 BSynth::Pause()
 {
-	fSynth->Pause();
+	if (fSynth != NULL)
+		fSynth->Stop();
 }
 
 
-void 
+void
 BSynth::Resume()
 {
-	fSynth->Resume();
+	if (fSynth != NULL)
+		fSynth->Start();
 }
 
 
-void 
-BSynth::SetControllerHook(int16 controller, synth_controller_hook cback)
+void
+BSynth::SetControllerHook(int16, synth_controller_hook)
 {
-	fprintf(stderr, "[midi] SetControllerHook is not supported\n");
 }
 
 
-void 
-BSynth::_Init()
-{
-	delete be_synth;
-	be_synth = this;
-	fSynthMode = B_NO_SYNTH;
-	fClientCount = 0;
-	fSynth = new BSoftSynth();
-}
-
-
-int32 
+int32
 BSynth::CountClients() const
 {
 	return fClientCount;
 }
 
 
-void BSynth::_ReservedSynth1() { }
-void BSynth::_ReservedSynth2() { }
-void BSynth::_ReservedSynth3() { }
-void BSynth::_ReservedSynth4() { }
+void
+BSynth::_ReservedSynth1()
+{
+}
 
+
+void
+BSynth::_ReservedSynth2()
+{
+}
+
+
+void
+BSynth::_ReservedSynth3()
+{
+}
+
+
+void
+BSynth::_ReservedSynth4()
+{
+}
+
+
+// Construct the process singleton on first use.
+struct BSynthBootstrap {
+	BSynthBootstrap()
+	{
+		if (be_synth == NULL)
+			be_synth = new BSynth(B_DEFAULT_SYNTH);
+	}
+	~BSynthBootstrap()
+	{
+		delete be_synth;
+		be_synth = NULL;
+	}
+};
+static BSynthBootstrap sBootstrap;

@@ -1,9 +1,13 @@
+/*
+ * Copyright 2026, Dario Casalinuovo. All rights reserved.
+ * Distributed under the terms of the MIT License.
+ */
 
 #ifndef _MIDI_TEXT_H
 #define _MIDI_TEXT_H
 
 #include <BeBuild.h>
-#include <Midi.h>
+#include <midi/Midi.h>
 #include <stdio.h>
 
 class BMidiText : public BMidi {
@@ -22,7 +26,7 @@ public:
 		uchar channel, uchar note, uchar pressure, uint32 time = B_NOW);
 
 	virtual void ControlChange(
-		uchar channel, uchar controlNumber, uchar controlValue, 
+		uchar channel, uchar controlNumber, uchar controlValue,
 		uint32 time = B_NOW);
 
 	virtual void ProgramChange(
@@ -59,4 +63,3 @@ private:
 };
 
 #endif // _MIDI_TEXT_H
-

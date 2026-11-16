@@ -1,14 +1,20 @@
+/*
+ * Copyright 2026, Dario Casalinuovo. All rights reserved.
+ * Distributed under the terms of the MIT License.
+ */
 
 #ifndef _MIDI_H
 #define _MIDI_H
 
 #include <BeBuild.h>
-#include <MidiDefs.h>
+#include <midi/MidiDefs.h>
 #include <OS.h>
 
 class BList;
 class BMidiLocalProducer;
 class BMidiLocalConsumer;
+
+namespace BPrivate { class MidiAccess; }
 
 class BMidi {
 public:
@@ -31,7 +37,7 @@ public:
 
 	virtual void ProgramChange(
 		uchar channel, uchar programNumber, uint32 time = B_NOW);
- 
+
 	virtual void ChannelPressure(
 		uchar channel, uchar pressure, uint32 time = B_NOW);
 
@@ -78,7 +84,7 @@ protected:
 		uint32 time) const;
 
 	void SprayProgramChange(
-		uchar channel, uchar programNumber, uint32 time) const; 
+		uchar channel, uchar programNumber, uint32 time) const;
 
 	void SprayChannelPressure(
 		uchar channel, uchar pressure, uint32 time) const;
@@ -101,12 +107,17 @@ protected:
 private:
 
 	friend status_t _run_thread(void* data);
+	friend class BPrivate::MidiAccess;
 
 	virtual void _ReservedMidi1();
 	virtual void _ReservedMidi2();
 	virtual void _ReservedMidi3();
 
 	virtual void Run();
+
+	// midi1 time is milliseconds; midi2 is microseconds. One helper each.
+	static	bigtime_t		_Midi1ToMidi2(uint32 time);
+	static	uint32			_Midi2ToMidi1(bigtime_t time);
 
 	BMidiLocalProducer* fProducer;
 	BMidiLocalConsumer* fConsumer;
