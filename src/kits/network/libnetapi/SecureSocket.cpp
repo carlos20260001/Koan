@@ -177,7 +177,7 @@ BSecureSocket::Private::ErrorCode(int returnValue)
 			{
 				// unexpected EOF, the remote host closed the socket without
 				// telling us why.
-				return ECONNREFUSED;
+				return -ECONNREFUSED;
 			}
 
 			if (returnValue == -1)
