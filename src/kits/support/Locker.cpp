@@ -1,5 +1,3 @@
-/* VitruvianOS: BLocker on a user_sem (UserSemaphore.h) instead of a
-   kernel semaphore; the Haiku implementation follows in the #else branch. */
 /*
  * Copyright 2001-2009 Haiku, Inc. All rights reserved.
  * Copyright 2026, Dario Casalinuovo. All rights reserved.
