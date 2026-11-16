@@ -379,6 +379,19 @@ Waves (each on its own `port/*` branch, merged here when green):
       were restored (`b30650969d`). Jamfiles: 923 → 766
 - [ ] W2: `src/kits/{interface,locale,translation,shared,tracker,...}`, `localestub`;
       `be`, `tracker`, `translation`, `shared`, `localestub` link
+      - [x] W2-A merged `2d885506c7`: interface kit merged (air/OS DeviceScale,
+            WaitForOutputRetrace, scan timing, multi-monitor kept; VitruvianOS rotation,
+            reflection, temperature, connector, change-confirm, grabs, fire-and-forget
+            MoveTo/ResizeTo on top; no air/OS feature dropped), locale (system ICU),
+            libicon (VitruvianOS supersampling + air/OS density icons), agg, linprog,
+            alm; `localestub` defined; libbe embeds air/OS `Icons.rdef`. `be` links;
+            left undefined: 5 libshared symbols (HSL, EmojiTables, DragTrackingFilter).
+            CTest 2/2. `src/CMakeLists.txt` adds userland dirs only where a CMakeLists
+            exists; new `VOS_BUILD_TESTS` option. For W3: app_server must not reply to
+            AS_WINDOW_MOVE/RESIZE and must handle AS_ACQUIRE/RELEASE_POINTER/KEYBOARD_GRAB
+      - [ ] W2-B shared/tracker/translation/textencoding/screensaver
+      - [ ] W2-C media/media2/midi/game/opengl/hwaccel/neural
+      - [ ] W2-D network/bluetooth/mail/device/package/print/quicklook/debug + VitruvianOS-only kits and libs
 - [ ] W3: `src/servers/app` on a new Linux display backend (design below),
       registrar, input_server, the other servers
 - [ ] W4: `src/apps`, `src/preferences`, `src/add-ons`, `src/bin`, `src/libs`,
@@ -454,3 +467,4 @@ counterparts and Mesa:
 | 2026-11-16 | `b92bdc0170` | M7: original splash on Linux (DRM/fbdev, initramfs, systemd stages) merged |
 | 2026-11-16 | `c774b58282` | M9 W1-C: GPU trees on CMake behind an OFF option; userland kept; kernel tests removed |
 | 2026-11-16 | `3d55d7c27b` | M9 W1-K1: headers, support/app/storage kits, buildtools merged; libbe (partial) links, buildtools from this tree |
+| 2026-11-16 | `2d885506c7` | M9 W2-A: interface/locale kits merged, be complete except libshared |
