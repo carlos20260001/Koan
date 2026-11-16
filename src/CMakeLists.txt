@@ -26,6 +26,12 @@ if(CMAKE_BUILD_TYPE STREQUAL "Debug")
 	add_subdirectory(tests)
 endif()
 
+else()
+
+# add-ons/CMakeLists.txt leaves out what needs libbe; the optional Haiku GPU
+# drivers (VOS_WITH_HAIKU_GPU_DRIVERS) do not need it.
+add_subdirectory(add-ons)
+
 endif()
 
 else()

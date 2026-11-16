@@ -1,0 +1,9 @@
+HaikuGpuKernelAddon(3dfx
+	SOURCES
+		driver.cpp
+	INCLUDES
+		${HAIKU_GPU_PRIVATE_HEADERS}/graphics/3dfx
+		${HAIKU_GPU_PRIVATE_HEADERS}/graphics/common
+		${HAIKU_GPU_PRIVATE_HEADERS}/graphics
+		${HAIKU_GPU_PRIVATE_HEADERS}/kernel
+)

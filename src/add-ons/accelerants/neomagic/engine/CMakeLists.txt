@@ -1,0 +1,14 @@
+HaikuGpuStaticLibrary(neomagic_engine
+	SOURCES
+		nm_acc.c
+		nm_bes.c
+		nm_crtc.c
+		nm_dac.c
+		nm_general.c
+		nm_globals.c
+		nm_info.c
+		nm_support.c
+	INCLUDES
+		${HAIKU_GPU_PRIVATE_HEADERS}/graphics
+		${HAIKU_GPU_PRIVATE_HEADERS}/graphics/neomagic
+)

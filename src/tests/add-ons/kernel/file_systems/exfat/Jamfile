@@ -1,3 +1,0 @@
-SubDir HAIKU_TOP src tests add-ons kernel file_systems exfat ;
-
-SubInclude HAIKU_TOP src tests add-ons kernel file_systems exfat exfat_shell ;

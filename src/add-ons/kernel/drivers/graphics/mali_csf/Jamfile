@@ -1,5 +1,0 @@
-SubDir HAIKU_TOP src add-ons kernel drivers graphics mali_csf ;
-
-UsePrivateKernelHeaders ;
-
-KernelAddon mali_csf : driver.cpp CsfDevice.cpp CsfFirmware.cpp CsfClient.cpp CsfRuntime.cpp CsfSync.cpp ;

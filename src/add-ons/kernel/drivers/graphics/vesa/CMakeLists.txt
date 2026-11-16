@@ -1,0 +1,14 @@
+HaikuGpuKernelAddon(vesa
+	SOURCES
+		device.cpp
+		driver.cpp
+		patch.cpp
+		vesa.cpp
+		vga.cpp
+	INCLUDES
+		${HAIKU_GPU_PRIVATE_HEADERS}/graphics/common
+		${HAIKU_GPU_PRIVATE_HEADERS}/graphics/radeon_hd/atombios
+		${HAIKU_GPU_PRIVATE_HEADERS}/graphics/vesa
+		${PROJECT_SOURCE_DIR}/headers/compatibility/gnu
+		${PROJECT_SOURCE_DIR}/headers/posix
+)

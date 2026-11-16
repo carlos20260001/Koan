@@ -1,6 +1,0 @@
-SubDir HAIKU_TOP src tests add-ons kernel busses usb ;
-
-SimpleTest uhci_decode : uhci_decode.cpp ;
-
-SimpleTest usb_hub_child_test : usb_hub_child_test.cpp
-	: libdevice.so be [ TargetLibstdc++ ] ;

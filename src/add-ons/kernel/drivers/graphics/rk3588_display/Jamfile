@@ -1,6 +1,0 @@
-SubDir HAIKU_TOP src add-ons kernel drivers graphics rk3588_display ;
-
-UsePrivateKernelHeaders ;
-UsePrivateHeaders [ FDirName graphics common ] ;
-
-KernelAddon rk3588_display : driver.cpp ;

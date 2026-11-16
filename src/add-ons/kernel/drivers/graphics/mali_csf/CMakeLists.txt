@@ -1,0 +1,9 @@
+HaikuGpuKernelAddon(mali_csf
+	SOURCES
+		driver.cpp
+		CsfDevice.cpp
+		CsfFirmware.cpp
+		CsfClient.cpp
+		CsfRuntime.cpp
+		CsfSync.cpp
+)

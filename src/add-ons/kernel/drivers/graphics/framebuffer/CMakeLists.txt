@@ -1,0 +1,9 @@
+HaikuGpuKernelAddon(framebuffer
+	SOURCES
+		device.cpp
+		driver.cpp
+		framebuffer.cpp
+	INCLUDES
+		${HAIKU_GPU_PRIVATE_HEADERS}/graphics/common
+		${HAIKU_GPU_PRIVATE_HEADERS}/graphics/vesa
+)

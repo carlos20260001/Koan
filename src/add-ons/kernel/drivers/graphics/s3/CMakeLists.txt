@@ -1,0 +1,9 @@
+HaikuGpuKernelAddon(s3
+	SOURCES
+		driver.cpp
+	INCLUDES
+		${HAIKU_GPU_PRIVATE_HEADERS}/graphics/s3
+		${HAIKU_GPU_PRIVATE_HEADERS}/graphics/common
+		${HAIKU_GPU_PRIVATE_HEADERS}/graphics
+		${HAIKU_GPU_PRIVATE_HEADERS}/kernel
+)

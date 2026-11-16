@@ -1,0 +1,19 @@
+HaikuGpuStaticLibrary(matrox_engine
+	SOURCES
+		mga_acc.c
+		mga_bes.c
+		mga_crtc.c
+		mga_crtc2.c
+		mga_dac.c
+		mga_general.c
+		mga_globals.c
+		mga_i2c.c
+		mga_info.c
+		mga_maven.c
+		mga_maventv.c
+		mga_support.c
+		tvp3026.c
+	INCLUDES
+		${HAIKU_GPU_PRIVATE_HEADERS}/graphics
+		${HAIKU_GPU_PRIVATE_HEADERS}/graphics/matrox
+)

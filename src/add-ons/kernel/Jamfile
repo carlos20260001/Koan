@@ -1,5 +1,0 @@
-SubDir HAIKU_TOP src add-ons kernel ;
-
-# Only the GPU drivers remain (they pair with the accelerants); the rest of
-# the Haiku kernel add-ons was replaced by the Linux kernel.
-SubInclude HAIKU_TOP src add-ons kernel drivers ;

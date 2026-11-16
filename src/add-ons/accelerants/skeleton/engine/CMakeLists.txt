@@ -1,0 +1,19 @@
+HaikuGpuStaticLibrary(skeleton_engine
+	SOURCES
+		acc.c
+		bes.c
+		tvout.c
+		crtc.c
+		crtc2.c
+		dac.c
+		dac2.c
+		general.c
+		agp.c
+		globals.c
+		i2c.c
+		info.c
+		support.c
+	INCLUDES
+		${HAIKU_GPU_PRIVATE_HEADERS}/graphics
+		${HAIKU_GPU_PRIVATE_HEADERS}/graphics/skeleton
+)

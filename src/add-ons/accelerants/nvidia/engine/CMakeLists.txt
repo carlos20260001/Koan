@@ -1,0 +1,21 @@
+HaikuGpuStaticLibrary(nvidia_engine
+	SOURCES
+		nv_acc.c
+		nv_acc_dma.c
+		nv_bes.c
+		nv_brooktreetv.c
+		nv_crtc.c
+		nv_crtc2.c
+		nv_dac.c
+		nv_dac2.c
+		nv_general.c
+		nv_agp.c
+		nv_globals.c
+		nv_i2c.c
+		nv_info.c
+		nv_support.c
+	INCLUDES
+		${HAIKU_GPU_PRIVATE_HEADERS}/graphics
+		${HAIKU_GPU_PRIVATE_HEADERS}/graphics/nvidia
+		${HAIKU_GPU_PRIVATE_HEADERS}/graphics/common
+)
