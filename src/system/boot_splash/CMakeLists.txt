@@ -60,3 +60,17 @@ target_link_libraries(vos-splash PRIVATE vos_splash_core
 # Static: the initramfs hook copies one file and needs no library closure.
 target_link_options(vos-splash PRIVATE -static -no-pie)
 set_target_properties(vos-splash PROPERTIES POSITION_INDEPENDENT_CODE OFF)
+
+# Host tests: no hardware, they draw into memory.
+add_executable(vos_splash_test EXCLUDE_FROM_ALL test/vos_splash_test.cpp)
+target_link_libraries(vos_splash_test PRIVATE vos_splash_core ZLIB::ZLIB)
+
+add_custom_target(check-vos-splash
+	COMMAND vos_splash_test
+	DEPENDS vos_splash_test
+	COMMENT "Running the vos-splash host tests"
+	USES_TERMINAL
+)
+
+enable_testing()
+add_test(NAME vos_splash_test COMMAND vos_splash_test)
