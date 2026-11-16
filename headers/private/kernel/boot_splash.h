@@ -24,11 +24,16 @@ enum {
 };
 
 
+struct splash_frame_buffer;
+	// Linux port (vos-splash): the frame buffer that the boot loader used to
+	// pass as a FRAME_BUFFER_BOOT_INFO boot item.
+
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-void boot_splash_init(uint8 * boot_splash);
+void boot_splash_init(uint8 * boot_splash,
+	const struct splash_frame_buffer * info);
 void boot_splash_uninit(void);
 void boot_splash_set_stage(int stage);
 

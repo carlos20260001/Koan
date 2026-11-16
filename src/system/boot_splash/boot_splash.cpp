@@ -7,34 +7,34 @@
  */
 
 
+// Linux port (vos-splash): the frame buffer comes from splash_display.cpp
+// instead of the FRAME_BUFFER_BOOT_INFO boot item, and there is no kernel
+// debug screen to defer to; the stage drawing below is the kernel's.
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
 
-#include <KernelExport.h>
-
 #define __BOOTSPLASH_KERNEL__
-#include <boot/images.h>
+#include <splash_images.h>
 #include <boot/platform/generic/video_blitter.h>
 #include <boot/platform/generic/video_splash.h>
 
-#include <boot_item.h>
-#include <debug.h>
-#include <frame_buffer_console.h>
+#include "splash_platform.h"
 
 #include <boot_splash.h>
 
 
 //#define TRACE_BOOT_SPLASH 1
 #ifdef TRACE_BOOT_SPLASH
-#	define TRACE(x...) dprintf(x);
+#	define TRACE(x...) printf(x);
 #else
 #	define TRACE(x...) ;
 #endif
 
 
-static struct frame_buffer_boot_info *sInfo;
+static const struct splash_frame_buffer *sInfo;
 static uint8 *sUncompressedIcons;
 
 
@@ -42,17 +42,15 @@ static uint8 *sUncompressedIcons;
 
 
 void
-boot_splash_init(uint8 *bootSplash)
+boot_splash_init(uint8 *bootSplash, const struct splash_frame_buffer *info)
 {
 	TRACE("boot_splash_init: enter\n");
 
-	// A loader that showed no splash screen (debug output on the frame
-	// buffer, for example) has no icons for us either.
-	if (debug_screen_output_enabled() || bootSplash == NULL)
+	// A loader that showed no splash screen has no icons for us either.
+	if (bootSplash == NULL || info == NULL)
 		return;
 
-	sInfo = (frame_buffer_boot_info *)get_boot_item(FRAME_BUFFER_BOOT_INFO,
-		NULL);
+	sInfo = info;
 
 	sUncompressedIcons = bootSplash;
 }
@@ -77,6 +75,12 @@ boot_splash_set_stage(int stage)
 	compute_splash_icons_placement(sInfo->width, sInfo->height,
 		width, height, x, y);
 
+	// Linux port: the boot loader never drew on a screen too small for the
+	// icon row; a tiny fbdev mode must not make this write past the buffer.
+	if (x < 0 || y < 0 || (uint32)(x + width) > sInfo->width
+		|| (uint32)(y + height) > sInfo->height)
+		return;
+
 	int stageLeftEdge = width * stage / BOOT_SPLASH_STAGE_MAX;
 	int stageRightEdge = width * (stage + 1) / BOOT_SPLASH_STAGE_MAX;
 
@@ -87,7 +91,7 @@ boot_splash_set_stage(int stage)
 	params.fromTop = 0;
 	params.fromRight = stageRightEdge;
 	params.fromBottom = height;
-	params.to = (uint8*)sInfo->frame_buffer;
+	params.to = sInfo->frame_buffer;
 	params.toBytesPerRow = sInfo->bytes_per_row;
 	params.toLeft = stageLeftEdge + x;
 	params.toTop = y;
