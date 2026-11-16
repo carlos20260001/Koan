@@ -158,10 +158,10 @@ BDaemonClient::CreateTransaction(BPackageInstallationLocation location,
 		return error;
 
 	// open admin directory
-	entry_ref entryRef;
-	entryRef.device = info.PackagesDirectoryRef().device;
-	entryRef.directory = info.PackagesDirectoryRef().node;
-	error = entryRef.set_name(PACKAGES_DIRECTORY_ADMIN_DIRECTORY);
+	// libroot2's entry_ref and node_ref keep their fields private.
+	entry_ref entryRef(info.PackagesDirectoryRef(),
+		PACKAGES_DIRECTORY_ADMIN_DIRECTORY);
+	error = entryRef.init_check();
 	if (error != B_OK)
 		return error;
 
