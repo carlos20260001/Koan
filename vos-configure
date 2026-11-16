@@ -79,7 +79,7 @@ for arg in "$@"; do
             ;;
         *)
             echo "Unknown option: $arg"
-            echo "Run ./configure --help for usage."
+            echo "Run ./vos-configure --help for usage."
             exit 1
             ;;
     esac
@@ -108,8 +108,8 @@ if [ -z "$BUILDTOOLS_DIR" ]; then
         echo "Native Vitruvian host detected — building without a buildtools tree."
     else
         echo "Error: --buildtools=PATH is required on non-Vitruvian hosts."
-        echo "First run: ./configure --build-buildtools"
-        echo "Then:      ./configure --buildtools=../buildtools [other opts]"
+        echo "First run: ./vos-configure --build-buildtools"
+        echo "Then:      ../vos-configure --buildtools=../buildtools [other opts] (from the build dir)"
         exit 1
     fi
 else
@@ -125,7 +125,7 @@ else
     for _tool in rc xres resattr; do
         if [ ! -x "$_abs_buildtools/src/bin/$_tool" ]; then
             echo "Error: $BUILDTOOLS_DIR looks incomplete — missing $_tool binary."
-            echo "Run ./configure --build-buildtools first."
+            echo "Run ./vos-configure --build-buildtools first."
             exit 1
         fi
     done

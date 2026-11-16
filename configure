@@ -11,9 +11,6 @@ usage()
 	cat << EOF
 
 Usage: $0 <options>
-
-The CMake/Debian build takes other options; see vos-configure --help.
-
 options:
   --help                      Prints out this help.
   --update                    Re-runs last configure invocation [must be given
@@ -526,18 +523,6 @@ is_in_list()
 	done
 	return 1
 }
-
-# The CMake/Debian build (VitruvianOS) has its own configure, vos-configure.
-# None of its options exist here, so any of them selects it.
-for arg in "$@"; do
-	case "$arg" in
-		--build-buildtools|--buildtools=*|--build-type=*|--chroot-build|\
-		--chroot-path=*|--arch=*|--override-toolchain=*|--sshdebug|\
-		--sanitize=*)
-			exec "`dirname "$0"`/vos-configure" "$@"
-			;;
-	esac
-done
 
 # check for --help or -h and show usage immediately
 if [ "$1" = "--help" ] || [ "$1" = "-h" ]; then

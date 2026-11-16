@@ -2,7 +2,9 @@
 
 This tree carries two builds side by side (see `PORTING.md`):
 
-- **Jam** (air/OS/Haiku): `./configure` + `jam`, unchanged.
+- **Jam** (air/OS/Haiku): `./configure` + `jam`. Being retired: the Haiku
+  kernel is gone and directories drop their Jamfile once CMake builds them,
+  so Jam no longer produces a bootable image.
 - **CMake/Debian** (VitruvianOS, ported subset): `vos-configure` + `ninja` +
   `bake`, run inside Koan's Podman container by `docker/build.sh`.
 
@@ -42,8 +44,8 @@ Steps run by `docker/build.sh`, in order:
 `vos-configure` is VitruvianOS's `configure`, renamed because the root
 `configure` is Haiku's. Run it from inside a build directory as
 `../vos-configure`, or from anywhere with `VOS_CMAKE_SOURCE_DIR=<source dir>`.
-Haiku's `configure` forwards the VitruvianOS options it knows to
-`vos-configure`, but not `--with-wlroots`/`--without-wlroots`.
+Always call `vos-configure` directly; Haiku's `configure` does not know its
+options.
 
 ## Environment
 
