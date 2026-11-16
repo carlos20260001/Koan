@@ -1,0 +1,485 @@
+/*
+ * Copyright 2025-2026, Dario Casalinuovo. All rights reserved.
+ * Distributed under the terms of the LGPL License.
+ */
+
+#include <media2/MediaNode.h>
+#include <media2/MediaGraph.h>
+
+#include <new>
+#include <stdio.h>
+#include <string.h>
+#include <utility>
+#include <vector>
+
+#include <Autolock.h>
+
+#include <pipewire/pipewire.h>
+#include <pipewire/core.h>
+#include <pipewire/link.h>
+#include <pipewire/proxy.h>
+#include <spa/param/props.h>
+
+#include <MediaClientPrivate.h>
+#include <MediaNodePrivate.h>
+
+#include "PipeWireBackend.h"
+
+
+using namespace BPrivate::media;
+
+
+static void
+_OnLinkInfo(void* data, const struct pw_link_info* info)
+{
+	NodeLinkState::Info* linkInfo = (NodeLinkState::Info*)data;
+
+	if (info == NULL || linkInfo == NULL || linkInfo->owner == NULL)
+		return;
+
+	{
+		BAutolock _(linkInfo->owner->lock);
+		linkInfo->state = info->state;
+	}
+
+	if (info->state == PW_LINK_STATE_ERROR || info->state == PW_LINK_STATE_UNLINKED) {
+		PipeWireBackend* backend = PipeWireBackend::GetInstance();
+		if (backend != NULL)
+			backend->_Broadcast(BMediaGraph::B_MEDIA_LINKS_CHANGED,
+				pw_proxy_get_bound_id(linkInfo->proxy));
+	}
+}
+
+static const struct pw_link_events sLinkEvents = {
+	PW_VERSION_LINK_EVENTS,
+	.info = &_OnLinkInfo
+};
+
+
+BMediaNode::BMediaNode(const char* name, media_type type,
+	media_client_kinds kinds)
+	:
+	BMediaClient(name, kinds),
+	fFormat(),
+	fLinkState(new NodeLinkState)
+{
+	fFormat.SetToDefault();
+	fFormat.format.type = type;
+}
+
+
+BMediaNode::~BMediaNode()
+{
+	Stop();
+	delete fLinkState;
+}
+
+
+status_t
+BMediaNode::GetPreferredFormat(BMediaFormat* format) const
+{
+	if (format == NULL)
+		return B_BAD_VALUE;
+	*format = fFormat;
+	return B_OK;
+}
+
+
+status_t
+BMediaNode::SetFormat(const BMediaFormat& format)
+{
+	if (IsStarted())
+		return B_NOT_ALLOWED;
+	fFormat = format;
+	return B_OK;
+}
+
+
+status_t
+BMediaNode::Start()
+{
+	return BMediaClient::Start();
+}
+
+
+status_t
+BMediaNode::Stop()
+{
+	return BMediaClient::Stop();
+}
+
+
+status_t
+BMediaNode::_StartConnections(void* backendPtr)
+{
+	PipeWireBackend* backend = (PipeWireBackend*)backendPtr;
+	if (backend == NULL)
+		return B_BAD_VALUE;
+
+	BString groupName(Name());
+	groupName << "-group";
+
+	for (int32 i = 0; i < CountOutputs(); i++) {
+		BMediaOutput* output = OutputAt(i);
+		if (output == NULL)
+			continue;
+
+		BMediaFormat format = output->Format();
+		if (format.Type() == B_MEDIA_NO_TYPE) {
+			format = fFormat;
+			// The process callback reads the connection's format; without
+			// this it saw no type and queued empty buffers forever.
+			output->fFormat = format;
+		}
+
+		if (!format.IsRawAudio() && !format.IsRawVideo())
+			return B_NOT_SUPPORTED;
+
+		pw_direction direction = PW_DIRECTION_OUTPUT;
+		pw_stream* stream = backend->CreateAndConnectStream(
+			output->Name(), direction, format,
+			ClientAccess::StreamEvents(),
+			static_cast<BMediaConnection*>(output), NULL, false, true);
+		if (stream == NULL)
+			return B_ERROR;
+
+		output->fStream = stream;
+	}
+
+	for (int32 i = 0; i < CountInputs(); i++) {
+		BMediaInput* input = InputAt(i);
+		if (input == NULL)
+			continue;
+
+		BMediaFormat format = input->Format();
+		if (format.Type() == B_MEDIA_NO_TYPE) {
+			format = fFormat;
+			// The process callback reads the connection's format; without
+			// this it saw no type and queued empty buffers forever.
+			input->fFormat = format;
+		}
+
+		if (!format.IsRawAudio() && !format.IsRawVideo())
+			return B_NOT_SUPPORTED;
+
+		pw_direction direction = PW_DIRECTION_INPUT;
+		pw_stream* stream = backend->CreateAndConnectStream(
+			input->Name(), direction, format,
+			ClientAccess::StreamEvents(),
+			static_cast<BMediaConnection*>(input), NULL, false, false);
+		if (stream == NULL)
+			return B_ERROR;
+
+		input->fStream = stream;
+	}
+
+	return B_OK;
+}
+
+
+void
+BMediaNode::_StopConnections()
+{
+	_DestroyLinks();
+
+	PipeWireBackend* backend = PipeWireBackend::GetInstance();
+	if (backend == NULL)
+		return;
+
+	for (int32 i = 0; i < CountOutputs(); i++) {
+		BMediaOutput* output = OutputAt(i);
+		if (output != NULL && output->fStream != NULL) {
+			pw_stream* stream = (pw_stream*)output->fStream;
+			// Clear before destroying: destroy can reenter state_changed, which uses a NULL fStream to spot
+			// an intentional teardown.
+			output->fStream = NULL;
+			backend->DestroyStream(stream);
+		}
+	}
+
+	for (int32 i = 0; i < CountInputs(); i++) {
+		BMediaInput* input = InputAt(i);
+		if (input != NULL && input->fStream != NULL) {
+			pw_stream* stream = (pw_stream*)input->fStream;
+			input->fStream = NULL;
+			backend->DestroyStream(stream);
+		}
+	}
+}
+
+
+void
+BMediaNode::_StreamFault(BMediaConnection* conn)
+{
+	if (conn == NULL || !IsStarted())
+		return;
+
+	PipeWireBackend* backend = PipeWireBackend::GetInstance();
+	if (backend == NULL)
+		return;
+
+	pw_stream* badStream = (pw_stream*)conn->fStream;
+	if (badStream == NULL)
+		return;
+	conn->fStream = NULL;
+
+	BMediaConnection* binding = conn->Binding();
+
+	// The dead stream's node is gone, so any link we had tracked for it is
+	// already gone on the graph side; just drop our bookkeeping.
+	{
+		BAutolock _(fLinkState->lock);
+		auto it = fLinkState->links.find(badStream);
+		if (it != fLinkState->links.end()) {
+			for (size_t i = 0; i < it->second.size(); i++)
+				fLinkState->infos.erase(it->second[i]);
+			fLinkState->links.erase(it);
+		}
+	}
+
+	backend->DestroyStream(badStream);
+
+	BMediaFormat format = conn->Format();
+	if (format.Type() == B_MEDIA_NO_TYPE)
+		format = fFormat;
+
+	BMediaOutput* output = dynamic_cast<BMediaOutput*>(conn);
+	BMediaInput* input = dynamic_cast<BMediaInput*>(conn);
+	pw_direction direction = (output != NULL) ? PW_DIRECTION_OUTPUT : PW_DIRECTION_INPUT;
+
+	// A brand new stream also means a brand new clock/latency estimate
+	// instead of trying to make up for however long we were gone.
+	pw_stream* stream = backend->CreateAndConnectStream(conn->Name(),
+		direction, format, ClientAccess::StreamEvents(), conn, NULL, false,
+		direction == PW_DIRECTION_OUTPUT);
+	// conn is already the BMediaConnection*; callbacks cast userdata back
+	// to it, which is only valid for that exact pointer (virtual base).
+	if (stream == NULL)
+		return;
+
+	conn->fStream = stream;
+
+	if (binding == NULL)
+		return;
+
+	pw_core* core = backend->GetCore();
+	if (core == NULL)
+		return;
+
+	if (output != NULL)
+		_CreateLink(output, dynamic_cast<BMediaInput*>(binding), core);
+	else if (input != NULL)
+		_CreateLink(dynamic_cast<BMediaOutput*>(binding), input, core);
+}
+
+
+status_t
+BMediaNode::Bind(BMediaInput* input, BMediaOutput* output)
+{
+	if (input == NULL || output == NULL)
+		return B_BAD_VALUE;
+
+	if (input->Client() != this || output->Client() != this)
+		return B_BAD_VALUE;
+
+	PipeWireBackend* backend = PipeWireBackend::GetInstance();
+	if (backend == NULL)
+		return B_DEVICE_NOT_FOUND;
+
+	pw_core* core = backend->GetCore();
+	if (core == NULL)
+		return B_ERROR;
+
+	return _CreateLink(output, input, core);
+}
+
+
+status_t
+BMediaNode::Unbind(BMediaInput* input, BMediaOutput* output)
+{
+	if (input == NULL || output == NULL)
+		return B_BAD_VALUE;
+
+	if (input->Client() != this || output->Client() != this)
+		return B_BAD_VALUE;
+
+	if (output->fStream == NULL)
+		return B_NOT_SUPPORTED;
+
+	PipeWireBackend* backend = PipeWireBackend::GetInstance();
+	if (backend == NULL)
+		return B_DEVICE_NOT_FOUND;
+
+	backend->Lock();
+	status_t result = B_ENTRY_NOT_FOUND;
+	{
+		BAutolock _(fLinkState->lock);
+		auto it = fLinkState->links.find(output->fStream);
+		if (it != fLinkState->links.end()) {
+			for (size_t i = 0; i < it->second.size(); i++) {
+				auto infoIt = fLinkState->infos.find(it->second[i]);
+				if (infoIt != fLinkState->infos.end()) {
+					spa_hook_remove(&infoIt->second.listener);
+					pw_proxy_destroy(infoIt->second.proxy);
+					fLinkState->infos.erase(infoIt);
+				}
+			}
+			fLinkState->links.erase(it);
+			result = B_OK;
+		}
+	}
+	backend->Unlock();
+
+	if (result == B_OK) {
+		input->fBinding = NULL;
+		output->fBinding = NULL;
+	}
+
+	return result;
+}
+
+
+status_t
+BMediaNode::_CreateLink(BMediaOutput* output, BMediaInput* input, void* corePtr)
+{
+	pw_core* core = (pw_core*)corePtr;
+	PipeWireBackend* backend = PipeWireBackend::GetInstance();
+	if (backend == NULL)
+		return B_DEVICE_NOT_FOUND;
+
+	uint32 outNodeId = output->_GetNodeId();
+	uint32 inNodeId = input->_GetNodeId();
+	if (outNodeId == 0 || inNodeId == 0)
+		return B_ERROR;
+
+	uint32 outPortBuf[64], inPortBuf[64];
+	uint32 outCount = output->_GetPortIds(outPortBuf, 64);
+	uint32 inCount = input->_GetPortIds(inPortBuf, 64);
+	if (outCount == 0 || inCount == 0)
+		return B_ERROR;
+
+	std::vector<std::pair<uint32, uint32> > pairs;
+	if (outCount == inCount && outCount <= 64) {
+		for (uint32 i = 0; i < outCount; i++)
+			pairs.push_back(std::make_pair(outPortBuf[i], inPortBuf[i]));
+	} else {
+		pairs.push_back(std::make_pair((uint32)0, (uint32)0));
+	}
+
+
+	backend->Lock();
+
+	std::vector<uint32> createdKeys;
+	status_t result = B_OK;
+
+	for (size_t i = 0; i < pairs.size(); i++) {
+		pw_properties* props = pw_properties_new(NULL, NULL);
+		if (props == NULL) {
+			result = B_NO_MEMORY;
+			break;
+		}
+
+		pw_properties_setf(props, PW_KEY_LINK_OUTPUT_NODE, "%u", outNodeId);
+		if (pairs[i].first != 0)
+			pw_properties_setf(props, PW_KEY_LINK_OUTPUT_PORT, "%u", pairs[i].first);
+		pw_properties_setf(props, PW_KEY_LINK_INPUT_NODE, "%u", inNodeId);
+		if (pairs[i].second != 0)
+			pw_properties_setf(props, PW_KEY_LINK_INPUT_PORT, "%u", pairs[i].second);
+
+		pw_proxy* proxy = (pw_proxy*)pw_core_create_object(core, "link-factory",
+			PW_TYPE_INTERFACE_Link, PW_VERSION_LINK, &props->dict, 0);
+		pw_properties_free(props);
+
+		if (proxy == NULL) {
+			result = B_ERROR;
+			break;
+		}
+
+		uint32 key = pw_proxy_get_bound_id(proxy);
+		{
+			BAutolock linksLock(fLinkState->lock);
+			NodeLinkState::Info& info = fLinkState->infos[key];
+			info.proxy = proxy;
+			info.state = PW_LINK_STATE_INIT;
+			info.owner = fLinkState;
+			memset(&info.listener, 0, sizeof(info.listener));
+			pw_link_add_listener((struct pw_link*)proxy, &info.listener,
+				&sLinkEvents, &info);
+		}
+
+		createdKeys.push_back(key);
+	}
+
+	if (result == B_OK) {
+		result = backend->RoundtripLocked();
+	}
+
+	if (result == B_OK) {
+		BAutolock linksLock(fLinkState->lock);
+		for (size_t j = 0; j < createdKeys.size(); j++) {
+			auto it = fLinkState->infos.find(createdKeys[j]);
+			if (it != fLinkState->infos.end() && it->second.state == PW_LINK_STATE_ERROR) {
+				result = B_ERROR;
+				break;
+			}
+		}
+	}
+
+	if (result != B_OK) {
+		BAutolock linksLock(fLinkState->lock);
+		for (size_t j = 0; j < createdKeys.size(); j++) {
+			auto it = fLinkState->infos.find(createdKeys[j]);
+			if (it != fLinkState->infos.end()) {
+				spa_hook_remove(&it->second.listener);
+				pw_proxy_destroy(it->second.proxy);
+				fLinkState->infos.erase(it);
+			}
+		}
+		backend->Unlock();
+		return result;
+	}
+
+	{
+		BAutolock linksLock(fLinkState->lock);
+		fLinkState->links[output->fStream] = createdKeys;
+	}
+	backend->Unlock();
+
+	input->fBinding = output;
+	output->fBinding = input;
+
+	return B_OK;
+}
+
+
+void
+BMediaNode::_DestroyLinks()
+{
+	PipeWireBackend* backend = PipeWireBackend::GetInstance();
+
+	if (backend != NULL)
+		backend->Lock();
+	{
+		BAutolock _(fLinkState->lock);
+		for (auto it = fLinkState->infos.begin(); it != fLinkState->infos.end(); ++it) {
+			spa_hook_remove(&it->second.listener);
+			pw_proxy_destroy(it->second.proxy);
+		}
+		fLinkState->infos.clear();
+		fLinkState->links.clear();
+	}
+	if (backend != NULL)
+		backend->Unlock();
+
+	for (int32 i = 0; i < CountInputs(); i++) {
+		BMediaInput* input = InputAt(i);
+		if (input != NULL)
+			input->fBinding = NULL;
+	}
+
+	for (int32 i = 0; i < CountOutputs(); i++) {
+		BMediaOutput* output = OutputAt(i);
+		if (output != NULL)
+			output->fBinding = NULL;
+	}
+}

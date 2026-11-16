@@ -1,0 +1,259 @@
+/*
+ * Copyright 2025-2026, The Vitruvian Project. All Rights Reserved.
+ * Copyright 2025-2026, Dario Casalinuovo. All rights reserved.
+ * Distributed under the terms of the LGPL License.
+ */
+
+#ifndef _MEDIA2_MEDIA_GRAPH_H
+#define _MEDIA2_MEDIA_GRAPH_H
+
+
+#include <media2/MediaClientDefs.h>
+
+#include <Messenger.h>
+#include <String.h>
+
+
+class BMediaClient;
+class BMediaConnection;
+class BMediaInput;
+class BMediaOutput;
+class BMessage;
+
+template<class T, bool O> class BObjectList;
+
+
+class BMediaGraph {
+public:
+	static	BMediaGraph*			Instance();
+
+			status_t				Connect(BMediaOutput* output,
+										BMediaInput* input);
+			status_t				Disconnect(BMediaOutput* output,
+										BMediaInput* input);
+
+
+	// Mask bits for StartWatching; the same values arrive as message what.
+	enum {
+		B_MEDIA_CLIENT_ADDED      = 1 << 0,
+		B_MEDIA_CLIENT_REMOVED    = 1 << 1,
+		B_MEDIA_DEFAULTS_CHANGED  = 1 << 2,
+		B_MEDIA_VOLUME_CHANGED    = 1 << 3,
+		B_MEDIA_STREAMS_CHANGED   = 1 << 4,
+		B_MEDIA_LINKS_CHANGED     = 1 << 5,
+		B_MEDIA_ALL_NOTIFICATIONS = 0x7fffffff
+	};
+			status_t				StartWatching(const BMessenger& messenger,
+										int32 notificationMask
+											= B_MEDIA_ALL_NOTIFICATIONS);
+			status_t				StopWatching(const BMessenger& messenger);
+
+			status_t				GetClients(BObjectList<media_client_id, true>* clients);
+			status_t				GetClientInfo(media_client_id id, BMessage* info);
+
+			struct AudioDevice {
+				media_client_id		id;
+				BString				name;
+			};
+
+			// Capture devices (audio sources that are not cameras).
+			status_t				GetAudioInputs(
+										BObjectList<AudioDevice, true>* outDevices);
+
+			status_t				GetDefaultAudioOutput(media_client_id* id);
+			status_t				GetDefaultAudioInput(media_client_id* id);
+			status_t				GetDefaultCamera(media_client_id* id);
+			status_t				SetDefaultAudioOutput(media_client_id id);
+			status_t				SetDefaultAudioInput(media_client_id id);
+			status_t				SetDefaultCamera(media_client_id id);
+
+
+	struct StreamInfo {
+		media_client_id	id;
+		BString			name;
+		BString			nodeName;
+		BString			mediaClass;
+		media_client_id	deviceId;
+		bool			isOutput;
+		float			volume;
+		bool			mute;
+	};
+			status_t				GetStreams(
+										BObjectList<StreamInfo, true>* outStreams);
+			status_t				MoveStream(media_client_id streamId,
+										media_client_id deviceId);
+			status_t				SetStreamVolume(media_client_id streamId,
+										float volume, bool mute);
+			status_t				SetStreamChannelVolumes(
+										media_client_id streamId,
+										const float* volumes, size_t count);
+
+
+			status_t				GetDeviceVolume(media_client_id id,
+										float* outMaster, bool* outMute);
+			status_t				GetDeviceChannelVolumes(media_client_id id,
+										float* outVolumes, size_t maxCount,
+										size_t* outCount);
+			status_t				SetDeviceVolume(media_client_id id,
+										float master);
+			status_t				SetDeviceChannelVolumes(media_client_id id,
+										const float* volumes, size_t count);
+			status_t				SetDeviceMute(media_client_id id, bool mute);
+			status_t				SetDefaultDeviceVolume(float master);
+
+	struct DevicePortInfo {
+		media_client_id	id;
+		BString			name;
+		BString			description;
+		int32			portId;
+		bool			active;
+	};
+	struct DeviceProfileInfo {
+		media_client_id	id;
+		BString			name;
+		BString			description;
+		int32			index;
+		bool			available;
+	};
+			status_t				GetDevicePorts(media_client_id id,
+										BObjectList<DevicePortInfo, true>* outPorts);
+			status_t				SetDevicePort(media_client_id id,
+										int32 portId);
+			status_t				GetDeviceProfiles(media_client_id id,
+										BObjectList<DeviceProfileInfo, true>* outProfiles,
+										int32* outActiveIndex);
+			status_t				SetDeviceProfile(media_client_id id,
+										int32 profileIndex);
+
+
+			status_t				StartMeteringDevice(media_client_id id,
+										const BMessenger& target,
+										bigtime_t interval = 33333);
+			status_t				StopMeteringDevice(media_client_id id);
+
+			// Meters any node, a stream included.
+			status_t				StartMeteringNode(media_client_id id,
+										bool capture, const char* nodeName,
+										const BMessenger& target,
+										bigtime_t interval = 33333);
+			status_t				StopMeteringNode(media_client_id id);
+
+
+	struct ForeignNode {
+		uint32			id;
+		BString			name;
+		BString			description;
+		BString			mediaClass;
+		uint32			portCount;
+		uint32			outputPorts;
+		uint32			inputPorts;
+	};
+	struct ForeignPort {
+		uint32			id;
+		uint32			nodeId;
+		BString			name;
+		BString			direction;
+		BString			format;
+		BString			channel;	// audio.channel ("FL"), may be empty
+	};
+			status_t				GetForeignNodes(
+										BObjectList<ForeignNode, true>* outNodes);
+			status_t				GetForeignPorts(uint32 nodeId,
+										BObjectList<ForeignPort, true>* outPorts);
+
+	// Every link in the server graph, created by this process or any
+	// other client. Port ids are the same globals GetForeignPorts
+	// reports; 0 means the link spans the whole node.
+	struct GraphLink {
+		uint32			id;
+		uint32			outputNodeId;
+		uint32			outputPortId;
+		uint32			inputNodeId;
+		uint32			inputPortId;
+	};
+			status_t				GetLinks(
+										BObjectList<GraphLink, true>* outLinks);
+			// Destroys a link by its registry id, whoever created it.
+			status_t				DestroyLink(uint32 linkId);
+
+	// Server ids behind an in-process connection. Both are 0 until
+	// the client is started and bound to the server.
+			uint32					GetConnectionNodeId(
+										const BMediaConnection* connection);
+			uint32					GetConnectionPortIds(
+										const BMediaConnection* connection,
+										uint32* outIds, uint32 maxCount);
+
+
+	// MIDI-class registry nodes (media.class "Midi/..."). Distinct from
+	// GetForeignNodes so the audio mixer view does not pick them up.
+	struct MidiNode {
+		uint32			id;
+		BString			name;
+		BString			description;
+		BString			mediaClass;
+	};
+			status_t				GetMidiNodes(
+										BObjectList<MidiNode, true>* outNodes);
+			status_t				GetMidiPorts(uint32 nodeId,
+										BObjectList<ForeignPort, true>* outPorts);
+
+
+			status_t				Connect(BMediaOutput* output,
+										const ForeignPort* foreignPort);
+
+			status_t				Connect(const ForeignPort* foreignPort,
+										BMediaInput* input);
+			// inPortId 0 means the input's first port.
+			status_t				Connect(const ForeignPort* foreignPort,
+										BMediaInput* input, uint32 inPortId);
+			// Waits for the input to be bound, then links every channel.
+			status_t				ConnectChannels(uint32 foreignNodeId,
+										BMediaInput* input);
+
+			status_t				Connect(const ForeignPort* outputPort,
+										const ForeignPort* inputPort);
+
+
+			status_t				Disconnect(BMediaOutput* output,
+										const ForeignPort* foreignPort);
+
+			status_t				Disconnect(const ForeignPort* foreignPort,
+										BMediaInput* input);
+			status_t				Disconnect(const ForeignPort* outputPort,
+										const ForeignPort* inputPort);
+
+
+	struct Link {
+		bool			inProcess;
+		uint32			outputNodeId;
+		uint32			outputPortId;
+		uint32			inputNodeId;
+		uint32			inputPortId;
+		BMediaOutput*	output;
+		BMediaInput*	input;
+	};
+			status_t				GetLinks(BObjectList<Link, true>* outLinks);
+
+			// Dev tool: text dump of nodes, streams, foreign ports and links.
+			status_t				DumpGraph(BString& out) const;
+
+private:
+									BMediaGraph();
+									~BMediaGraph();
+									BMediaGraph(const BMediaGraph&) = delete;
+			BMediaGraph&			operator=(const BMediaGraph&) = delete;
+
+	static	status_t				_ResolveDetached(BMediaClient* outClient,
+										BMediaClient* inClient, bool* detached);
+	static	status_t				_ConnectInProcess(BMediaOutput* output,
+										BMediaInput* input);
+	static	status_t				_DisconnectInProcess(BMediaOutput* output,
+										BMediaInput* input);
+};
+
+
+inline BMediaGraph*	MediaGraph() { return BMediaGraph::Instance(); }
+
+
+#endif
