@@ -8,7 +8,9 @@
  */
 
 
+#include <errno.h>
 #include <fcntl.h>
+#include <stdio.h>
 #include <unistd.h>
 
 #include <Directory.h>
@@ -107,9 +109,15 @@ BFile::SetTo(const entry_ref* ref, uint32 openMode)
 		return SetTo(ref->name, openMode);
 
 	openMode |= O_CLOEXEC;
+	int fd = -1;
+	if (ref->is_virtual()) {
+		fd = _kern_open_virtual_ref(ref->vdirectory(), ref->name,
+			openMode, DEFFILEMODE & ~__gUmask);
+	} else {
+		fd = _kern_open_entry_ref(ref->device(), ref->directory(), ref->name,
+			openMode, DEFFILEMODE & ~__gUmask);
+	}
 
-	int fd = _kern_open_entry_ref(ref->device, ref->directory, ref->name,
-		openMode, DEFFILEMODE & ~__gUmask);
 	if (fd >= 0) {
 		set_fd(fd);
 		fMode = openMode;
@@ -160,7 +168,7 @@ BFile::SetTo(const char* path, uint32 openMode)
 
 	openMode |= O_CLOEXEC;
 
-	int fd = _kern_open(AT_FDCWD, path, openMode, DEFFILEMODE & ~__gUmask);
+	int fd = _kern_open(-1, path, openMode, DEFFILEMODE & ~__gUmask);
 	if (fd >= 0) {
 		set_fd(fd);
 		fMode = openMode;
@@ -291,9 +299,14 @@ BFile::SetSize(off_t size)
 		return InitCheck();
 	if (size < 0)
 		return B_BAD_VALUE;
-	struct stat statData;
-	statData.st_size = size;
-	return set_stat(statData, B_STAT_SIZE | B_STAT_SIZE_INSECURE);
+	if (ftruncate(get_fd(), size) == 0)
+		return B_OK;
+	if (errno != EINVAL && errno != EBADF)
+		return -errno;
+
+	char fdPath[64];
+	snprintf(fdPath, sizeof(fdPath), "/proc/self/fd/%d", get_fd());
+	return (truncate(fdPath, size) < 0) ? -errno : B_OK;
 }
 
 
@@ -317,8 +330,9 @@ BFile::operator=(const BFile &file)
 			int fd = _kern_dup(file.get_fd());
 			// set it
 			if (fd >= 0) {
-				fFd = fd;
+				set_fd(fd);
 				fMode = file.fMode;
+				fNodeRef = file.fNodeRef;
 				fCStatus = B_OK;
 			} else
 				fCStatus = fd;

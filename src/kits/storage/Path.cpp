@@ -3,6 +3,7 @@
  * Distributed under the terms of the MIT License.
  *
  * Authors:
+ *		Dario Casalinuovo
  *		Tyler Dauwalder
  *		Axel Dörfler, axeld@pinc-software.de
  *		Ingo Weinhold, bonefish@users.sf.net
@@ -12,6 +13,8 @@
 #include <Path.h>
 
 #include <new>
+#include <sys/stat.h>
+#include <string.h>
 
 #include <Directory.h>
 #include <Entry.h>
@@ -114,8 +117,10 @@ BPath::SetTo(const entry_ref* ref)
 		return fCStatus = B_BAD_VALUE;
 
 	char path[B_PATH_NAME_LENGTH];
-	fCStatus = _kern_entry_ref_to_path(ref->device, ref->directory,
+
+	fCStatus = _kern_entry_ref_to_path(ref->vdevice(), ref->vdirectory(),
 		ref->name, path, sizeof(path));
+
 	if (fCStatus != B_OK)
 		return fCStatus;
 
@@ -204,17 +209,19 @@ BPath::SetTo(const char* path, const char* leaf, bool normalize)
 status_t
 BPath::SetTo(const BDirectory* dir, const char* path, bool normalize)
 {
-	status_t error = (dir && dir->InitCheck() == B_OK ? B_OK : B_BAD_VALUE);
-	// get the path of the BDirectory
-	BEntry entry;
-	if (error == B_OK)
-		error = dir->GetEntry(&entry);
-	BPath dirPath;
-	if (error == B_OK)
-		error = dirPath.SetTo(&entry);
-	// let the other version do the work
-	if (error == B_OK)
-		error = SetTo(dirPath.Path(), path, normalize);
+	if (dir == NULL || dir->InitCheck() != B_OK) {
+		Unset();
+		return fCStatus = B_BAD_VALUE;
+	}
+
+	char buf[B_PATH_NAME_LENGTH];
+	status_t error = _kern_fd_to_path(dir->get_fd(), -1, buf, sizeof(buf));
+	if (error != B_OK) {
+		Unset();
+		return fCStatus = error;
+	}
+
+	error = SetTo(buf, path, normalize);
 	if (error != B_OK)
 		Unset();
 	fCStatus = error;
@@ -373,18 +380,6 @@ BPath::operator=(const char* path)
 //	#pragma mark - BFlattenable functionality
 
 
-// that's the layout of a flattened entry_ref
-struct flattened_entry_ref {
-	dev_t device;
-	ino_t directory;
-	char name[1];
-};
-
-// base size of a flattened entry ref
-static const size_t flattened_entry_ref_size
-	= sizeof(dev_t) + sizeof(ino_t);
-
-
 // Overrides BFlattenable::IsFixedSize()
 bool
 BPath::IsFixedSize() const
@@ -397,99 +392,65 @@ BPath::IsFixedSize() const
 type_code
 BPath::TypeCode() const
 {
-	return B_REF_TYPE;
+	return B_STRING_TYPE;
 }
 
 
-// Gets the size of the flattened entry_ref struct that represents
-// the path in bytes.
+// Returns the size of the flattened path string in bytes (including NUL).
 ssize_t
 BPath::FlattenedSize() const
 {
-	ssize_t size = flattened_entry_ref_size;
-	BEntry entry;
-	entry_ref ref;
-	if (InitCheck() == B_OK
-		&& entry.SetTo(Path()) == B_OK
-		&& entry.GetRef(&ref) == B_OK) {
-		size += strlen(ref.name) + 1;
-	}
-	return size;
+	if (InitCheck() != B_OK || fName == NULL)
+		return 1;  // single NUL byte for empty/unset path
+
+	return (ssize_t)strlen(fName) + 1;
 }
 
 
-// Converts the path of the object to an entry_ref and writes it into buffer.
+// Stores the path as a plain NUL-terminated string.
 status_t
 BPath::Flatten(void* buffer, ssize_t size) const
 {
 	if (buffer == NULL)
 		return B_BAD_VALUE;
-
-	// ToDo: Reimplement for performance reasons: Don't call FlattenedSize().
-	ssize_t flattenedSize = FlattenedSize();
-	if (flattenedSize < 0)
-		return flattenedSize;
-	if (size < flattenedSize)
+	if (size < FlattenedSize())
 		return B_BAD_VALUE;
 
-	// convert the path to an entry_ref
-	BEntry entry;
-	entry_ref ref;
-
-	if (Path() != NULL) {
-		status_t status = entry.SetTo(Path());
-		if (status == B_OK)
-			status = entry.GetRef(&ref);
-		if (status != B_OK)
-			return status;
+	if (InitCheck() != B_OK || fName == NULL) {
+		((char*)buffer)[0] = '\0';
+		return B_OK;
 	}
 
-	// store the entry_ref in the buffer
-	flattened_entry_ref& fref = *(flattened_entry_ref*)buffer;
-	fref.device = ref.device;
-	fref.directory = ref.directory;
-	if (ref.name)
-		strcpy(fref.name, ref.name);
-
+	// Vitruvian change: original Haiku implementation converted the path to an
+	// entry_ref (dev_t + ino_t + leaf name). On Linux there is no unprivileged
+	// way to reopen a file by (st_dev, st_ino), so that format cannot survive
+	// persistence or cross-reboot use. Store the path string directly instead.
+	memcpy(buffer, fName, strlen(fName) + 1);
 	return B_OK;
 }
 
 
-// Checks if type code is equal to B_REF_TYPE.
+// Checks if type code is B_STRING_TYPE.
 bool
 BPath::AllowsTypeCode(type_code code) const
 {
-	return code == B_REF_TYPE;
+	return code == B_STRING_TYPE;
 }
 
 
-// Initializes the object with the flattened entry_ref data from the passed
-// in buffer.
+// Initializes the object from a flattened path string.
 status_t
 BPath::Unflatten(type_code code, const void* buffer, ssize_t size)
 {
 	Unset();
-	status_t error = B_OK;
-	// check params
-	if (!(code == B_REF_TYPE && buffer != NULL
-		  && size >= (ssize_t)flattened_entry_ref_size)) {
-		error = B_BAD_VALUE;
-	}
-	if (error == B_OK) {
-		if (size == (ssize_t)flattened_entry_ref_size) {
-			// already Unset();
-		} else {
-			// reconstruct the entry_ref from the buffer
-			const flattened_entry_ref& fref
-				= *(const flattened_entry_ref*)buffer;
-			BString name(fref.name, size - flattened_entry_ref_size);
-			entry_ref ref(fref.device, fref.directory, name.String());
-			error = SetTo(&ref);
-		}
-	}
-	if (error != B_OK)
-		fCStatus = error;
-	return error;
+	if (code != B_STRING_TYPE || buffer == NULL || size < 1)
+		return fCStatus = B_BAD_VALUE;
+
+	const char* path = (const char*)buffer;
+	if (path[0] == '\0')
+		return B_OK;  // empty path — leave Unset
+
+	return fCStatus = SetTo(path);
 }
 
 

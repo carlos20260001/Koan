@@ -109,9 +109,10 @@ BMimeType::SetTo(const char* mimeType)
 		fCStatus = B_BAD_VALUE;
 	} else {
 		Unset();
-		fType = new(std::nothrow) char[strlen(mimeType) + 1];
+		size_t size = strlen(mimeType) + 1;
+		fType = new(std::nothrow) char[size];
 		if (fType) {
-			strlcpy(fType, mimeType, B_MIME_TYPE_LENGTH);
+			strlcpy(fType, mimeType, size);
 			fCStatus = B_OK;
 		} else {
 			fCStatus = B_NO_MEMORY;
@@ -1201,7 +1202,7 @@ void BMimeType::_ReservedMimeType2() {}
 void BMimeType::_ReservedMimeType3() {}
 
 
-#ifdef __HAIKU_BEOS_COMPATIBLE
+#ifdef _BEOS_R5_COMPATIBLE_
 // assignment operator.
 // Unimplemented
 BMimeType&
@@ -1279,7 +1280,7 @@ BMimeType::SetSupportedTypes(const BMessage* types, bool fullSync)
 	if (err == B_OK)
 		err = message.AddInt32("which", B_REG_MIME_SUPPORTED_TYPES);
 
-	if (err != B_OK && types != NULL)
+	if (err == B_OK && types != NULL)
 		err = message.AddMessage("types", types);
 
 	if (err == B_OK)

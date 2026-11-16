@@ -5,6 +5,7 @@
  * Authors:
  *		Tyler Dauwalder
  *		Ingo Weinhold, bonefish@users.sf.net
+ *		Dario Casalinuovo
  */
 
 
@@ -24,6 +25,7 @@
 #include <SymLink.h>
 
 #include <syscalls.h>
+#include <VRefCache.h>
 
 #include "storage_support.h"
 
@@ -34,38 +36,156 @@ using namespace std;
 //	#pragma mark - struct entry_ref
 
 
+void
+entry_ref::_AcquireDirSlot()
+{
+	if (!is_virtual() || virtual_directory == B_INVALID_INO)
+		return;
+
+	cache_ticket = BPrivate::VRefCache::Acquire((vref_id)virtual_directory);
+	if (cache_ticket == BPrivate::B_INVALID_VREF_TICKET) {
+		virtual_device = B_INVALID_DEV;
+		virtual_directory = B_INVALID_INO;
+	}
+}
+
+
+void
+entry_ref::_ReleaseDirSlot()
+{
+	if (cache_ticket == BPrivate::B_INVALID_VREF_TICKET)
+		return;
+
+	BPrivate::VRefCache::Release((vref_id)virtual_directory, cache_ticket);
+	cache_ticket = BPrivate::B_INVALID_VREF_TICKET;
+}
+
+
 entry_ref::entry_ref()
 	:
-	device((dev_t)-1),
-	directory((ino_t)-1),
-	name(NULL)
+	virtual_device(B_INVALID_DEV),
+	virtual_directory(B_INVALID_INO),
+	name(NULL),
+	real_device(B_INVALID_DEV),
+	real_directory(B_INVALID_INO),
+	cache_ticket(BPrivate::B_INVALID_VREF_TICKET),
+	team(-1)
 {
 }
 
 
 entry_ref::entry_ref(dev_t dev, ino_t dir, const char* name)
 	:
-	device(dev),
-	directory(dir),
-	name(NULL)
+	virtual_device(dev),
+	virtual_directory(dir),
+	name(NULL),
+	real_device(dev),
+	real_directory(dir),
+	cache_ticket(BPrivate::B_INVALID_VREF_TICKET),
+	team(getpid())
 {
 	set_name(name);
+
+	// A physical ref carries real (dev, dir) directly, so the ctor args are
+	// the real identity — keep them. Only a virtual ref (sentinel device)
+	// carries sentinel+vref_id and must resolve real_* via the vref cache;
+	// it stays B_INVALID if resolution fails (so an unresolvable ref never
+	// masquerades as a valid identity in operator==). Capture virtual-ness
+	// before _AcquireDirSlot, which clears virtual_* on a failed acquire.
+	bool wasVirtual = is_virtual();
+	_AcquireDirSlot();
+
+	if (!wasVirtual)
+		return;
+
+	real_device = B_INVALID_DEV;
+	real_directory = B_INVALID_INO;
+
+	if (cache_ticket == BPrivate::B_INVALID_VREF_TICKET)
+		return;
+
+	int fd = BPrivate::VRefCache::OpenPath((vref_id)dir);
+	if (fd < 0)
+		return;
+
+	struct stat st;
+	if (fstat(fd, &st) == 0) {
+		real_device = st.st_dev;
+		real_directory = st.st_ino;
+	}
+	close(fd);
+}
+
+
+entry_ref::entry_ref(int entryFd, const char* name)
+	:
+	virtual_device(B_INVALID_DEV),
+	virtual_directory(B_INVALID_INO),
+	name(NULL),
+	real_device(B_INVALID_DEV),
+	real_directory(B_INVALID_INO),
+	cache_ticket(BPrivate::B_INVALID_VREF_TICKET),
+	team(-1)
+{
+	struct stat st;
+	if (fstat(entryFd, &st) == 0) {
+		real_device = st.st_dev;
+		real_directory = st.st_ino;
+	}
+
+	BPrivate::vref_handle h = BPrivate::VRefCache::AcquireFromFd(entryFd);
+	if (h.id < 0)
+		return;
+
+	virtual_device = get_vref_dev();
+	virtual_directory = h.id;
+	cache_ticket = h.ticket;
+	set_name(name);
+	team = getpid();
+}
+
+
+entry_ref::entry_ref(const node_ref& ref, const char* name)
+	:
+	virtual_device(ref.vdevice()),
+	virtual_directory(ref.vnode()),
+	name(NULL),
+	real_device(ref.real_device),
+	real_directory(ref.real_node),
+	cache_ticket(BPrivate::B_INVALID_VREF_TICKET),
+	team(getpid())
+{
+	set_name(name);
+	_AcquireDirSlot();
 }
 
 
 entry_ref::entry_ref(const entry_ref& ref)
 	:
-	device(ref.device),
-	directory(ref.directory),
-	name(NULL)
+	virtual_device(ref.virtual_device),
+	virtual_directory(ref.virtual_directory),
+	name(NULL),
+	real_device(ref.real_device),
+	real_directory(ref.real_directory),
+	cache_ticket(BPrivate::B_INVALID_VREF_TICKET),
+	team(ref.team)
 {
 	set_name(ref.name);
+	_AcquireDirSlot();
 }
 
 
 entry_ref::~entry_ref()
 {
 	free(name);
+	_ReleaseDirSlot();
+}
+
+
+void
+entry_ref::set_to(dev_t dev, ino_t dir, const char* name)
+{
+	*this = entry_ref(dev, dir, name);
 }
 
 
@@ -86,14 +206,78 @@ entry_ref::set_name(const char* name)
 }
 
 
+dev_t
+entry_ref::vdevice() const
+{
+	return virtual_device;
+}
+
+
+ino_t
+entry_ref::vdirectory() const
+{
+	return virtual_directory;
+}
+
+
+dev_t
+entry_ref::device() const
+{
+	return real_device;
+}
+
+
+ino_t
+entry_ref::directory() const
+{
+	return real_directory;
+}
+
+
+status_t
+entry_ref::init_check() const
+{
+	if (virtual_device == B_INVALID_DEV && virtual_directory == B_INVALID_INO)
+		return B_ENTRY_NOT_FOUND;
+	return B_OK;
+}
+
+
+bool
+entry_ref::is_virtual() const
+{
+	dev_t dev = get_vref_dev();
+	return dev != B_INVALID_DEV && virtual_device == dev;
+}
+
+
+vref_id
+entry_ref::id() const
+{
+	if (is_virtual())
+		return (vref_id)virtual_directory;
+	return B_BAD_VALUE;
+}
+
+
+void
+entry_ref::unset()
+{
+	// operator= handles releasing the old vref; releasing here would
+	// double-release.
+	*this = entry_ref();
+}
+
+
 bool
 entry_ref::operator==(const entry_ref& ref) const
 {
-	return (device == ref.device
-		&& directory == ref.directory
-		&& (name == ref.name
-			|| (name != NULL && ref.name != NULL
-				&& strcmp(name, ref.name) == 0)));
+	bool sameName = name == ref.name
+		|| (name != NULL && ref.name != NULL && strcmp(name, ref.name) == 0);
+	if (!sameName)
+		return false;
+
+	return real_device == ref.real_device && real_directory == ref.real_directory;
 }
 
 
@@ -110,9 +294,25 @@ entry_ref::operator=(const entry_ref& ref)
 	if (this == &ref)
 		return *this;
 
-	device = ref.device;
-	directory = ref.directory;
+	dev_t oldDevice = virtual_device;
+	ino_t oldDirectory = virtual_directory;
+	uint64 oldTicket = cache_ticket;
+
+	virtual_device = ref.virtual_device;
+	virtual_directory = ref.virtual_directory;
 	set_name(ref.name);
+	team = ref.team;
+	real_device = ref.real_device;
+	real_directory = ref.real_directory;
+	cache_ticket = BPrivate::B_INVALID_VREF_TICKET;
+
+	_AcquireDirSlot();
+
+	if (oldDevice == get_vref_dev() && oldDirectory != B_INVALID_INO
+		&& oldTicket != BPrivate::B_INVALID_VREF_TICKET) {
+		BPrivate::VRefCache::Release((vref_id)oldDirectory, oldTicket);
+	}
+
 	return *this;
 }
 
@@ -239,7 +439,8 @@ BEntry::SetTo(const entry_ref* ref, bool traverse)
 		return SetTo(ref->name, traverse);
 
 	// open the directory and let set() do the rest
-	int dirFD = _kern_open_dir_entry_ref(ref->device, ref->directory, NULL);
+	int dirFD = _kern_open_dir_entry_ref(ref->vdevice(), ref->vdirectory(), NULL);
+
 	if (dirFD < 0)
 		return (fCStatus = dirFD);
 	return (fCStatus = _SetTo(dirFD, ref->name, traverse));
@@ -268,6 +469,7 @@ BEntry::Unset()
 	free(fName);
 
 	fDirFd = -1;
+	fDirRef.unset();
 	fName = NULL;
 	fCStatus = B_NO_INIT;
 }
@@ -285,11 +487,9 @@ BEntry::GetRef(entry_ref* ref) const
 	struct stat st;
 	status_t error = _kern_read_stat(fDirFd, NULL, false, &st,
 		sizeof(struct stat));
-	if (error == B_OK) {
-		ref->device = st.st_dev;
-		ref->directory = st.st_ino;
-		error = ref->set_name(fName);
-	}
+	if (error == B_OK)
+		*ref = entry_ref(fDirRef, fName);
+
 	return error;
 }
 
@@ -333,6 +533,8 @@ BEntry::GetParent(BEntry* entry) const
 	// init the entry
 	entry->Unset();
 	entry->fDirFd = parentFD;
+	entry->fDirRef = node_ref(parentFD);
+
 	entry->fCStatus = entry->_SetName(leafName);
 	if (entry->fCStatus != B_OK)
 		entry->Unset();
@@ -352,19 +554,18 @@ BEntry::GetParent(BDirectory* dir) const
 	// It is sufficient to check whether our leaf name is ".".
 	if (strcmp(fName, ".") == 0)
 		return B_ENTRY_NOT_FOUND;
-	// get a node ref for the directory and init it
-	struct stat st;
-	status_t error = _kern_read_stat(fDirFd, NULL, false, &st,
-		sizeof(struct stat));
-	if (error != B_OK)
-		return error;
-	node_ref ref;
-	ref.device = st.st_dev;
-	ref.node = st.st_ino;
+
+	BEntry parent;
+	entry_ref ref;
+	status_t ret = GetParent(&parent);
+	if (ret != B_OK)
+		return ret;
+
+	ret = parent.GetRef(&ref);
+	if (ret != B_OK)
+		return ret;
+
 	return dir->SetTo(&ref);
-	// TODO: This can be optimized: We already have a FD for the directory,
-	// so we could dup() it and set it on the directory. We just need a private
-	// API for being able to do that.
 }
 
 
@@ -376,7 +577,33 @@ BEntry::GetName(char* buffer) const
 	if (buffer == NULL)
 		return B_BAD_VALUE;
 
-	strcpy(buffer, fName);
+	// API requires caller to provide at least B_FILE_NAME_LENGTH+1 bytes;
+	// use strlcpy as a safety net against oversized names.
+	strlcpy(buffer, fName, B_FILE_NAME_LENGTH + 1);
+	return B_OK;
+}
+
+
+status_t
+BEntry::GetNodeRef(node_ref* ref) const
+{
+	if (fCStatus != B_OK)
+		return B_NO_INIT;
+
+	if (ref == NULL)
+		return B_BAD_VALUE;
+
+	// TODO(vref->path): when path-backed handles land, restore the full
+	// stat + re-open liveness check that was here — path refs can go stale
+	// on any rename, unlike vref (fd-backed, inode kept alive) or fh
+	// (survives rename but not unlink).
+	int tempFd = _kern_open(fDirFd, fName,
+		O_RDONLY | O_NONBLOCK | O_NOTRAVERSE, 0);
+	if (tempFd < 0)
+		return tempFd;
+
+	*ref = node_ref(tempFd);
+	close(tempFd);
 	return B_OK;
 }
 
@@ -482,9 +709,19 @@ BEntry::operator=(const BEntry& item)
 	Unset();
 	if (item.fCStatus == B_OK) {
 		fDirFd = _kern_dup(item.fDirFd);
-		if (fDirFd >= 0)
+		if (fDirFd >= 0) {
+#if 0
+			/* VOS_ENTRY_OWN_VREF: each BEntry owns a distinct vref for its
+			 * fDirFd. Blocked on create_vref() transferring fd ownership to
+			 * nexus — fDirFd would become invalid after node_ref(fDirFd).
+			 * Needs node_ref(open_vref(existing_id)) pattern instead, or a
+			 * dedicated ctor that acquires without consuming the fd. */
+			fDirRef = node_ref(fDirFd);
+#else
+			fDirRef = item.fDirRef;
+#endif
 			fCStatus = _SetName(item.fName);
-		else
+		} else
 			fCStatus = fDirFd;
 
 		if (fCStatus != B_OK)
@@ -562,7 +799,7 @@ BEntry::_SetTo(int dirFD, const char* path, bool traverse)
 			// if no dir FD is supplied, we need to open the current directory
 			// first
 			if (dirFD < 0) {
-				dirFD = _kern_open_dir(AT_FDCWD, ".");
+				dirFD = _kern_open_dir(-1, ".");
 				if (dirFD < 0)
 					return dirFD;
 				fdCloser.SetTo(dirFD);
@@ -613,7 +850,7 @@ BEntry::_SetTo(int dirFD, const char* path, bool traverse)
 					char* cwd = getcwd(tmpPath, B_PATH_NAME_LENGTH);
 					if (!cwd)
 						return B_ERROR;
-					dirFD = _kern_open_dir(AT_FDCWD, cwd);
+					dirFD = _kern_open_dir(-1, cwd);
 					if (dirFD < 0)
 						return dirFD;
 					fdCloser.SetTo(dirFD);
@@ -622,7 +859,7 @@ BEntry::_SetTo(int dirFD, const char* path, bool traverse)
 					|| strcmp(leafName, "..") == 0) {
 				// We have to resolve this to get the entry name. Just open
 				// the dir and let the next iteration deal with it.
-				dirFD = _kern_open_dir(AT_FDCWD, path);
+				dirFD = _kern_open_dir(-1, path);
 				if (dirFD < 0)
 					return dirFD;
 				fdCloser.SetTo(dirFD);
@@ -659,6 +896,8 @@ BEntry::_SetTo(int dirFD, const char* path, bool traverse)
 			error = _kern_read_link(dirFD, leafName, tmpPath, &bufferSize);
 			if (error < 0)
 				return error;
+			if (bufferSize >= B_PATH_NAME_LENGTH)
+				return B_NAME_TOO_LONG;
 			tmpPath[bufferSize] = '\0';
 			path = tmpPath;
 			// next round...
@@ -674,6 +913,7 @@ BEntry::_SetTo(int dirFD, const char* path, bool traverse)
 		return error;
 	fdCloser.Detach();
 	fDirFd = dirFD;
+	fDirRef = node_ref(fDirFd);
 	return B_OK;
 }
 
@@ -724,17 +964,39 @@ status_t
 BEntry::_Rename(BEntry& target, bool clobber)
 {
 	// check, if there's an entry in the way
-	if (!clobber && target.Exists())
-		return B_FILE_EXISTS;
+	if (target.Exists()) {
+		if (!clobber)
+			return B_FILE_EXISTS;
+		// Renaming an entry onto itself is not allowed.
+		struct stat srcSt, dstSt;
+		if (_kern_read_stat(fDirFd, fName, false, &srcSt, sizeof(srcSt)) == B_OK
+			&& _kern_read_stat(target.fDirFd, target.fName, false, &dstSt,
+				sizeof(dstSt)) == B_OK) {
+			if (srcSt.st_dev == dstSt.st_dev && srcSt.st_ino == dstSt.st_ino)
+				return B_NOT_ALLOWED;
+			// On Linux, renaming onto a directory always fails (EISDIR).
+			// Haiku removes empty target dirs and returns B_DIRECTORY_NOT_EMPTY
+			// for non-empty ones.
+			if (S_ISDIR(dstSt.st_mode)) {
+				status_t removeErr = _kern_remove_dir(target.fDirFd, target.fName);
+				if (removeErr != B_OK)
+					return B_DIRECTORY_NOT_EMPTY;
+				// Empty dir removed; fall through to rename
+			}
+		}
+	}
 	// rename
 	status_t error = _kern_rename(fDirFd, fName, target.fDirFd, target.fName);
 	if (error == B_OK) {
 		Unset();
 		fCStatus = target.fCStatus;
 		fDirFd = target.fDirFd;
+		// TODO __VOS__ check acquire here
+		fDirRef = target.fDirRef;
 		fName = target.fName;
 		target.fCStatus = B_NO_INIT;
 		target.fDirFd = -1;
+		target.fDirRef.unset();
 		target.fName = NULL;
 	}
 	return error;
@@ -816,19 +1078,41 @@ get_ref_for_path(const char* path, entry_ref* ref)
 bool
 operator<(const entry_ref& a, const entry_ref& b)
 {
-	return (a.device < b.device
-		|| (a.device == b.device
-			&& (a.directory < b.directory
-			|| (a.directory == b.directory
-				&& ((a.name == NULL && b.name != NULL)
-				|| (a.name != NULL && b.name != NULL
-					&& strcmp(a.name, b.name) < 0))))));
+	if (a.device() != b.device())
+		return (int64)a.device() < (int64)b.device();
+	if (a.directory() != b.directory())
+		return (int64)a.directory() < (int64)b.directory();
+	if (a.name == NULL)
+		return b.name != NULL;
+	if (b.name == NULL)
+		return false;
+	return strcmp(a.name, b.name) < 0;
 }
+
+
+#ifdef __VOS__
+status_t
+BEntry::GetStat(struct stat* st) const
+{
+	return _GetStat(st);
+}
+
+
+status_t
+BEntry::GetStatX(struct statx* stx) const
+{
+	if (fCStatus != B_OK)
+		return B_NO_INIT;
+	return _kern_read_statx(fDirFd, fName, false,
+		STATX_BASIC_STATS | STATX_BTIME, stx);
+}
+#endif
 
 
 // #pragma mark - symbol versions
 
 
+#ifndef __VOS__
 #ifdef HAIKU_TARGET_PLATFORM_LIBBE_TEST
 #	if __GNUC__ == 2	// gcc 2
 
@@ -865,3 +1149,4 @@ operator<(const entry_ref& a, const entry_ref& b)
 
 #	endif	// gcc 4
 #endif	// !HAIKU_TARGET_PLATFORM_LIBBE_TEST
+#endif

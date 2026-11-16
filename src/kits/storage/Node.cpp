@@ -5,6 +5,7 @@
  * Authors:
  *		Tyler Dauwalder
  *		Ingo Weinhold, bonefish@users.sf.net
+ *		Dario Casalinuovo
  */
 
 
@@ -25,6 +26,7 @@
 #include <TypeConstants.h>
 
 #include <syscalls.h>
+#include <VRefCache.h>
 
 #include "storage_support.h"
 
@@ -32,35 +34,201 @@
 //	#pragma mark - node_ref
 
 
+void
+node_ref::_AcquireNodeSlot()
+{
+	if (!is_virtual() || virtual_node == B_INVALID_INO)
+		return;
+
+	cache_ticket = BPrivate::VRefCache::Acquire((vref_id)virtual_node);
+	if (cache_ticket == BPrivate::B_INVALID_VREF_TICKET) {
+		virtual_device = B_INVALID_DEV;
+		virtual_node = B_INVALID_INO;
+	}
+}
+
+
+void
+node_ref::_ReleaseNodeSlot()
+{
+	if (cache_ticket == BPrivate::B_INVALID_VREF_TICKET)
+		return;
+
+	BPrivate::VRefCache::Release((vref_id)virtual_node, cache_ticket);
+	cache_ticket = BPrivate::B_INVALID_VREF_TICKET;
+}
+
+
 node_ref::node_ref()
 	:
-	device((dev_t)-1),
-	node((ino_t)-1)
+	virtual_device(B_INVALID_DEV),
+	virtual_node(B_INVALID_INO),
+	real_device(B_INVALID_DEV),
+	real_node(B_INVALID_INO),
+	cache_ticket(BPrivate::B_INVALID_VREF_TICKET),
+	team(-1)
 {
 }
 
 
 node_ref::node_ref(dev_t device, ino_t node)
 	:
-	device(device),
-	node(node)
+	virtual_device(device),
+	virtual_node(node),
+	real_device(device),
+	real_node(node),
+	cache_ticket(BPrivate::B_INVALID_VREF_TICKET),
+	team(-1)
 {
+	// A physical ref carries real (dev, ino) directly, so the ctor args are
+	// the real identity — keep them. Only a virtual ref (sentinel device)
+	// carries sentinel+vref_id and must resolve real_* via the vref cache;
+	// it stays B_INVALID if resolution fails (so an unresolvable ref never
+	// masquerades as a valid identity in operator==). Capture virtual-ness
+	// before _AcquireNodeSlot, which clears virtual_* on a failed acquire.
+	bool wasVirtual = is_virtual();
+	_AcquireNodeSlot();
+
+	if (!wasVirtual)
+		return;
+
+	real_device = B_INVALID_DEV;
+	real_node = B_INVALID_INO;
+
+	if (cache_ticket == BPrivate::B_INVALID_VREF_TICKET)
+		return;
+
+	int fd = BPrivate::VRefCache::OpenPath((vref_id)node);
+	if (fd < 0)
+		return;
+
+	struct stat st;
+	if (fstat(fd, &st) == 0) {
+		real_device = st.st_dev;
+		real_node = st.st_ino;
+	}
+	close(fd);
+}
+
+
+node_ref::node_ref(int fd)
+	:
+	virtual_device(B_INVALID_DEV),
+	virtual_node(B_INVALID_INO),
+	real_device(B_INVALID_DEV),
+	real_node(B_INVALID_INO),
+	cache_ticket(BPrivate::B_INVALID_VREF_TICKET),
+	team(-1)
+{
+	struct stat st;
+	if (fstat(fd, &st) == 0) {
+		real_device = st.st_dev;
+		real_node = st.st_ino;
+	}
+
+	BPrivate::vref_handle h = BPrivate::VRefCache::AcquireFromFd(fd);
+	if (h.id < 0)
+		return;
+
+	virtual_device = get_vref_dev();
+	virtual_node = h.id;
+	cache_ticket = h.ticket;
 }
 
 
 node_ref::node_ref(const node_ref& other)
 	:
-	device((dev_t)-1),
-	node((ino_t)-1)
+	virtual_device(other.virtual_device),
+	virtual_node(other.virtual_node),
+	real_device(other.real_device),
+	real_node(other.real_node),
+	cache_ticket(BPrivate::B_INVALID_VREF_TICKET),
+	team(other.team)
 {
-	*this = other;
+	_AcquireNodeSlot();
+}
+
+
+node_ref::~node_ref()
+{
+	_ReleaseNodeSlot();
+}
+
+
+void
+node_ref::set_to(dev_t device, ino_t node)
+{
+	*this = node_ref(device, node);
+}
+
+
+dev_t
+node_ref::vdevice() const
+{
+	return virtual_device;
+}
+
+
+ino_t
+node_ref::vnode() const
+{
+	return virtual_node;
+}
+
+
+dev_t
+node_ref::device() const
+{
+	return real_device;
+}
+
+
+ino_t
+node_ref::node() const
+{
+	return real_node;
+}
+
+
+status_t
+node_ref::init_check() const
+{
+	if (virtual_device == B_INVALID_DEV && virtual_node == B_INVALID_INO)
+		return B_ENTRY_NOT_FOUND;
+	return B_OK;
+}
+
+
+bool
+node_ref::is_virtual() const
+{
+	dev_t dev = get_vref_dev();
+	return dev != B_INVALID_DEV && virtual_device == dev;
+}
+
+
+vref_id
+node_ref::id() const
+{
+	if (!is_virtual())
+		return B_BAD_VALUE;
+	return (vref_id)virtual_node;
+}
+
+
+void
+node_ref::unset()
+{
+	// operator= handles releasing the old vref; releasing here would
+	// double-release.
+	*this = node_ref();
 }
 
 
 bool
 node_ref::operator==(const node_ref& other) const
 {
-	return (device == other.device && node == other.node);
+	return real_device == other.real_device && real_node == other.real_node;
 }
 
 
@@ -74,18 +242,36 @@ node_ref::operator!=(const node_ref& other) const
 bool
 node_ref::operator<(const node_ref& other) const
 {
-	if (this->device != other.device)
-		return this->device < other.device;
-
-	return this->node < other.node;
+	if (real_device != other.real_device)
+		return real_device < other.real_device;
+	return real_node < other.real_node;
 }
 
 
 node_ref&
 node_ref::operator=(const node_ref& other)
 {
-	device = other.device;
-	node = other.node;
+	if (this == &other)
+		return *this;
+
+	dev_t oldDevice = virtual_device;
+	ino_t oldNode = virtual_node;
+	uint64 oldTicket = cache_ticket;
+
+	virtual_device = other.virtual_device;
+	virtual_node = other.virtual_node;
+	team = other.team;
+	real_device = other.real_device;
+	real_node = other.real_node;
+	cache_ticket = BPrivate::B_INVALID_VREF_TICKET;
+
+	_AcquireNodeSlot();
+
+	if (oldDevice == get_vref_dev() && oldNode != B_INVALID_INO
+		&& oldTicket != BPrivate::B_INVALID_VREF_TICKET) {
+		BPrivate::VRefCache::Release((vref_id)oldNode, oldTicket);
+	}
+
 	return *this;
 }
 
@@ -212,6 +398,10 @@ void
 BNode::Unset()
 {
 	close_fd();
+
+	if (fNodeRef.is_virtual())
+		fNodeRef.unset();
+
 	fCStatus = B_NO_INIT;
 }
 
@@ -239,7 +429,7 @@ BNode::Unlock()
 status_t
 BNode::Sync()
 {
-	return (fCStatus != B_OK) ? B_FILE_ERROR : _kern_fsync(fFd, false);
+	return (fCStatus != B_OK) ? B_FILE_ERROR : _kern_fsync(fFd);
 }
 
 
@@ -255,7 +445,7 @@ BNode::WriteAttr(const char* attr, type_code type, off_t offset,
 
 	ssize_t result = fs_write_attr(fFd, attr, type, offset, buffer, length);
 
-	return result < 0 ? errno : result;
+	return result;
 }
 
 
@@ -271,7 +461,7 @@ BNode::ReadAttr(const char* attr, type_code type, off_t offset,
 
 	ssize_t result = fs_read_attr(fFd, attr, type, offset, buffer, length);
 
-	return result == -1 ? errno : result;
+	return result;
 }
 
 
@@ -301,7 +491,7 @@ BNode::GetAttrInfo(const char* name, struct attr_info* info) const
 	if (name == NULL || info == NULL)
 		return B_BAD_VALUE;
 
-	return fs_stat_attr(fFd, name, info) < 0 ? errno : B_OK ;
+	return fs_stat_attr(fFd, name, info);
 }
 
 
@@ -337,10 +527,15 @@ BNode::GetNextAttrName(char* buffer)
 status_t
 BNode::RewindAttrs()
 {
+	if (fAttrFd >= 0) {
+		_kern_close(fAttrFd);
+		fAttrFd = -1;
+	}
+
 	if (InitAttrDir() != B_OK)
 		return B_FILE_ERROR;
 
-	return _kern_rewind_dir(fAttrFd);
+	return B_OK;
 }
 
 
@@ -397,6 +592,25 @@ BNode::ReadAttrString(const char* name, BString* result) const
 }
 
 
+status_t
+BNode::GetNodeRef(node_ref* ref) const
+{
+	if (fCStatus != B_OK)
+		return B_NO_INIT;
+
+	if (ref == NULL)
+		return B_BAD_VALUE;
+
+	struct stat st;
+	status_t error = _kern_read_stat(fFd, NULL, false, &st,
+		sizeof(struct stat));
+	if (error == B_OK)
+		*ref = fNodeRef;
+
+	return error;
+}
+
+
 BNode&
 BNode::operator=(const BNode& node)
 {
@@ -409,6 +623,7 @@ BNode::operator=(const BNode& node)
 	// We have to manually dup the node, because R5::BNode::Dup()
 	// is not declared to be const (which IMO is retarded).
 	fFd = _kern_dup(node.fFd);
+	fNodeRef = node.fNodeRef;
 	fCStatus = (fFd < 0) ? B_NO_INIT : B_OK ;
 
 	return *this;
@@ -422,7 +637,6 @@ BNode::operator==(const BNode& node) const
 		return true;
 
 	if (fCStatus == B_OK && node.InitCheck() == B_OK) {
-		// compare the node_refs
 		node_ref ref1, ref2;
 		if (GetNodeRef(&ref1) != B_OK)
 			return false;
@@ -445,7 +659,7 @@ BNode::operator!=(const BNode& node) const
 
 
 int
-BNode::Dup()
+BNode::Dup() const
 {
 	int fd = _kern_dup(fFd);
 
@@ -482,10 +696,14 @@ void BNode::_RudeNode6() { }
 status_t
 BNode::set_fd(int fd)
 {
-	if (fFd != -1)
+	if (fFd != -1) {
 		close_fd();
+		fNodeRef.unset();
+	}
 
 	fFd = fd;
+	fNodeRef = node_ref(fd);
+	fCStatus = (fd >= 0) ? B_OK : B_NO_INIT;
 
 	return B_OK;
 }
@@ -507,6 +725,7 @@ BNode::close_fd()
 	if (fFd >= 0) {
 		_kern_close(fFd);
 		fFd = -1;
+		fNodeRef.unset();
 	}
 }
 
@@ -541,12 +760,12 @@ BNode::set_status(status_t newStatus)
 	The \a fCStatus member will be set to the return value of this method.
 
 	\param fd Either a directory FD or a value < 0. In the latter case \a path
-	       must be specified.
+		   must be specified.
 	\param path Either \a NULL in which case \a fd must be given, absolute, or
-	       relative to the directory specified by \a fd (if given) or to the
-	       current working directory.
+		   relative to the directory specified by \a fd (if given) or to the
+		   current working directory.
 	\param traverse If the node identified by \a fd and \a path is a symlink
-	       and \a traverse is \c true, the symlink will be resolved recursively.
+		   and \a traverse is \c true, the symlink will be resolved recursively.
 
 	\returns \c B_OK if everything went fine, or an error code otherwise.
 */
@@ -563,7 +782,10 @@ BNode::_SetTo(int fd, const char* path, bool traverse)
 			// opening read-write failed, re-try read-only
 			fFd = _kern_open(fd, path, O_RDONLY | O_CLOEXEC | traverseFlag, 0);
 		}
-		if (fFd < 0)
+
+		if (fFd >= 0)
+			fNodeRef = node_ref(fFd);
+		else
 			error = fFd;
 	}
 
@@ -582,7 +804,7 @@ BNode::_SetTo(int fd, const char* path, bool traverse)
 
 	\param ref An entry_ref identifying the node to be opened.
 	\param traverse If the node identified by \a ref is a symlink and
-	       \a traverse is \c true, the symlink will be resolved recursively.
+		   \a traverse is \c true, the symlink will be resolved recursively.
 
 	\returns \c B_OK if everything went fine, or an error code otherwise.
 */
@@ -594,15 +816,27 @@ BNode::_SetTo(const entry_ref* ref, bool traverse)
 	status_t result = (ref ? B_OK : B_BAD_VALUE);
 	if (result == B_OK) {
 		int traverseFlag = (traverse ? 0 : O_NOTRAVERSE);
-		fFd = _kern_open_entry_ref(ref->device, ref->directory, ref->name,
-			O_RDWR | O_CLOEXEC | traverseFlag, 0);
-		if (fFd < B_OK && fFd != B_ENTRY_NOT_FOUND) {
-			// opening read-write failed, re-try read-only
-			fFd = _kern_open_entry_ref(ref->device, ref->directory, ref->name,
-				O_RDONLY | O_CLOEXEC | traverseFlag, 0);
+
+		if (ref->is_virtual()) {
+			fFd = _kern_open_virtual_ref(ref->vdirectory(), ref->name,
+					O_RDWR | O_CLOEXEC | traverseFlag, 0);
+			if (fFd < B_OK && fFd != B_ENTRY_NOT_FOUND) {
+				fFd = _kern_open_virtual_ref(ref->vdirectory(), ref->name,
+					O_RDONLY | O_CLOEXEC | traverseFlag, 0);
+			}
+		} else {
+			fFd = _kern_open_entry_ref(ref->device(), ref->directory(), ref->name,
+				O_RDWR | O_CLOEXEC | traverseFlag, 0);
+			if (fFd < B_OK && fFd != B_ENTRY_NOT_FOUND) {
+				// opening read-write failed, re-try read-only
+				fFd = _kern_open_entry_ref(ref->device(), ref->directory(), ref->name,
+					O_RDONLY | O_CLOEXEC | traverseFlag, 0);
+			}
 		}
-		if (fFd < 0)
+		if (result != B_OK || fFd < 0)
 			result = fFd;
+		else
+			fNodeRef = node_ref(fFd);
 	}
 
 	return fCStatus = result;
@@ -676,9 +910,29 @@ BNode::_GetStat(struct stat_beos* stat) const
 }
 
 
+#ifdef __VOS__
+status_t
+BNode::GetStat(struct stat* stat) const
+{
+	return _GetStat(stat);
+}
+
+
+status_t
+BNode::GetStatX(struct statx* stx) const
+{
+	return fCStatus != B_OK
+		? fCStatus
+		: _kern_read_statx(fFd, NULL, false, STATX_BASIC_STATS | STATX_BTIME,
+			stx);
+}
+#endif
+
+
 //	#pragma mark - symbol versions
 
 
+#ifndef __VOS__
 #ifdef HAIKU_TARGET_PLATFORM_LIBBE_TEST
 #	if __GNUC__ == 2	// gcc 2
 
@@ -714,3 +968,4 @@ BNode::_GetStat(struct stat_beos* stat) const
 
 #	endif	// gcc 4
 #endif	// !HAIKU_TARGET_PLATFORM_LIBBE_TEST
+#endif

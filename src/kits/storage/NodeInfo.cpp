@@ -153,6 +153,9 @@ BNodeInfo::SetType(const char* type)
 status_t
 BNodeInfo::GetIcon(BBitmap* icon, icon_size which) const
 {
+	if (InitCheck() != B_OK)
+		return B_NO_INIT;
+
 	const char* iconAttribute = kNIIconAttribute;
 	const char* miniIconAttribute = kNIMiniIconAttribute;
 	const char* largeIconAttribute = kNILargeIconAttribute;
@@ -608,7 +611,7 @@ void BNodeInfo::_ReservedNodeInfo2() {}
 void BNodeInfo::_ReservedNodeInfo3() {}
 
 
-#ifdef __HAIKU_BEOS_COMPATIBLE
+#ifdef _BEOS_R5_COMPATIBLE_
 /*!	Assignment operator is declared private to prevent it from being created
 	automatically by the compiler.
 */

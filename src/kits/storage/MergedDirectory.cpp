@@ -1,14 +1,17 @@
 /*
  * Copyright 2013, Haiku, Inc. All Rights Reserved.
+ * Copyright 2024, The Vitruvian Projects. All Rights Reserved.
  * Distributed under the terms of the MIT License.
  *
  * Authors:
+ * 		Dario Casalinuovo
  *		Ingo Weinhold <ingo_weinhold@gmx.de>
  */
 
 
 #include <MergedDirectory.h>
 
+#include <stdio.h>
 #include <string.h>
 
 #include <new>
@@ -111,17 +114,63 @@ BMergedDirectory::GetNextEntry(BEntry* entry, bool traverse)
 status_t
 BMergedDirectory::GetNextRef(entry_ref* ref)
 {
-	BPrivate::Storage::LongDirEntry longEntry;
-	struct dirent* entry = longEntry.dirent();
-	int32 result = GetNextDirents(entry, sizeof(longEntry), 1);
-	if (result < 0)
-		return result;
-	if (result == 0)
-		return B_ENTRY_NOT_FOUND;
+	while (fDirectoryIndex < fDirectories.CountItems()) {
+		BDirectory* subDir = fDirectories.ItemAt(fDirectoryIndex);
+		entry_ref subRef;
+		status_t err = subDir->GetNextRef(&subRef);
+		if (err == B_ENTRY_NOT_FOUND) {
+			fDirectoryIndex++;
+			continue;
+		}
+		if (err != B_OK)
+			return err;
 
-	ref->device = entry->d_pdev;
-	ref->directory = entry->d_pino;
-	return ref->set_name(entry->d_name);
+		switch (fPolicy) {
+			case B_ALLOW_DUPLICATES:
+				*ref = subRef;
+				return B_OK;
+
+			case B_ALWAYS_FIRST:
+			case B_COMPARE:
+			{
+				if (fVisitedEntries != NULL
+						&& fVisitedEntries->find(subRef.name)
+							!= fVisitedEntries->end()) {
+					continue;
+				}
+
+				if (fVisitedEntries != NULL) {
+					try {
+						fVisitedEntries->insert(subRef.name);
+					} catch (std::bad_alloc&) {
+						return B_NO_MEMORY;
+					}
+				}
+
+				if (fPolicy == B_COMPARE) {
+					// Find the best version of this entry across directories.
+					// Fall through to _FindBestEntry via the dirent path for now.
+					BPrivate::Storage::LongDirEntry longEntry;
+					struct dirent* de = longEntry.dirent();
+					strlcpy(de->d_name, subRef.name, B_FILE_NAME_LENGTH);
+					BDirectory dir;
+					dir.SetTo(subDir, ".");
+					_FindBestEntry(dir, de);
+					// Re-derive ref from whichever directory won.
+					node_ref nref;
+					if (dir.GetNodeRef(&nref) == B_OK) {
+						*ref = entry_ref(nref, NULL);
+						return ref->set_name(de->d_name);
+					}
+				}
+
+				*ref = subRef;
+				return B_OK;
+			}
+		}
+	}
+
+	return B_ENTRY_NOT_FOUND;
 }
 
 
@@ -129,10 +178,20 @@ int32
 BMergedDirectory::GetNextDirents(struct dirent* direntBuffer, size_t bufferSize,
 	int32 maxEntries)
 {
+	BDirectory dir;
+	return _GetNextDirents(dir, direntBuffer, bufferSize, maxEntries);
+}
+
+
+int32
+BMergedDirectory::_GetNextDirents(BDirectory& dir, struct dirent* direntBuffer, size_t bufferSize,
+	int32 maxEntries)
+{
 	if (maxEntries <= 0)
 		return B_BAD_VALUE;
 
 	while (fDirectoryIndex < fDirectories.CountItems()) {
+		dir.SetTo(fDirectories.ItemAt(fDirectoryIndex), ".");
 		int32 count = fDirectories.ItemAt(fDirectoryIndex)->GetNextDirents(
 			direntBuffer, bufferSize, 1);
 		if (count < 0)
@@ -168,7 +227,7 @@ BMergedDirectory::GetNextDirents(struct dirent* direntBuffer, size_t bufferSize,
 				}
 
 				if (fPolicy == B_COMPARE)
-					_FindBestEntry(direntBuffer);
+					_FindBestEntry(dir, direntBuffer);
 				return 1;
 		}
 	}
@@ -213,10 +272,15 @@ BMergedDirectory::ShallPreferFirstEntry(const entry_ref& entry1, int32 index1,
 
 
 void
-BMergedDirectory::_FindBestEntry(dirent* direntBuffer)
+BMergedDirectory::_FindBestEntry(BDirectory& dir, dirent* direntBuffer)
 {
-	entry_ref bestEntry(direntBuffer->d_pdev, direntBuffer->d_pino,
-		direntBuffer->d_name);
+	node_ref node;
+	BEntry entry;
+	dir.GetEntry(&entry);
+	entry.GetNodeRef(&node);
+
+	entry_ref bestEntry = entry_ref(node.vdevice(), node.vnode(), direntBuffer->d_name);
+
 	if (bestEntry.name == NULL)
 		return;
 	int32 bestIndex = fDirectoryIndex;
@@ -228,12 +292,9 @@ BMergedDirectory::_FindBestEntry(dirent* direntBuffer)
 		entry_ref ref;
 		if (entry.GetStat(&st) == B_OK && entry.GetRef(&ref) == B_OK
 			&& !ShallPreferFirstEntry(bestEntry, bestIndex, ref, i)) {
-			direntBuffer->d_pdev = ref.device;
-			direntBuffer->d_pino = ref.directory;
-			direntBuffer->d_dev = st.st_dev;
+			// TODO __VOS__ are we actually populating all dirent* buffers correctly?
 			direntBuffer->d_ino = st.st_ino;
-			bestEntry.device = ref.device;
-			bestEntry.directory = ref.directory;
+			bestEntry = entry_ref(ref.vdevice(), ref.vdirectory(), bestEntry.name);
 			bestIndex = i;
 		}
 	}
