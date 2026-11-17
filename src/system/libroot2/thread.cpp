@@ -832,8 +832,12 @@ set_thread_priority(thread_id id, int32 priority)
 }
 
 
-status_t
-wait_for_remote_thread(thread_id id, status_t* returnCode)
+// deadline is on the system_time() clock; B_INFINITE_TIMEOUT waits for
+// good, and pollOnly checks once (wait_for_thread_etc()'s zero relative
+// timeout).
+static status_t
+wait_for_remote_thread_until(thread_id id, status_t* returnCode,
+	bigtime_t deadline, bool pollOnly)
 {
 	CALLED();
 
@@ -851,12 +855,24 @@ wait_for_remote_thread(thread_id id, status_t* returnCode)
 	struct pollfd p = { .fd = pfd, .events = POLLIN };
 	int pollfd;
 	do {
-		pollfd = poll(&p, 1, -1);
+		int timeoutMs = -1;
+		if (pollOnly) {
+			timeoutMs = 0;
+		} else if (deadline != B_INFINITE_TIMEOUT) {
+			bigtime_t left = deadline - system_time();
+			timeoutMs = left <= 0 ? 0
+				: (int)min_c((left + 999) / 1000, (bigtime_t)INT32_MAX);
+		}
+		pollfd = poll(&p, 1, timeoutMs);
 	} while (pollfd < 0 && errno == EINTR);
 
 	if (pollfd < 0) {
 		close(pfd);
 		return B_BAD_THREAD_ID;
+	}
+	if (pollfd == 0) {
+		close(pfd);
+		return pollOnly ? B_WOULD_BLOCK : B_TIMED_OUT;
 	}
 
 	status_t exitStatus = B_OK;
@@ -880,6 +896,14 @@ wait_for_remote_thread(thread_id id, status_t* returnCode)
 		*returnCode = exitStatus;
 
 	return B_OK;
+}
+
+
+status_t
+wait_for_remote_thread(thread_id id, status_t* returnCode)
+{
+	return wait_for_remote_thread_until(id, returnCode, B_INFINITE_TIMEOUT,
+		false);
 }
 
 
@@ -915,6 +939,79 @@ wait_for_thread(thread_id id, status_t* returnCode)
 	}
 
 	return wait_for_remote_thread(id, returnCode);
+}
+
+
+// air/OS uses this (NeuralSession). The timed wait needs the Nexus module
+// from the Koan fork (carlos20260001/Nexus, branch koan, 71e5929); an
+// older module ignores the timeout and waits until the thread exits.
+status_t
+wait_for_thread_etc(thread_id id, uint32 flags, bigtime_t timeout,
+	status_t* returnCode)
+{
+	CALLED();
+
+	if (id < 0)
+		return B_BAD_THREAD_ID;
+
+	if (id == find_thread(NULL)) {
+		debugger("wait_for_thread_etc: do you really want to wait for "
+			"yourself?");
+		return B_BAD_THREAD_ID;
+	}
+
+	const bool timed = (flags & B_ABSOLUTE_TIMEOUT) != 0
+		|| ((flags & B_RELATIVE_TIMEOUT) != 0
+			&& timeout != B_INFINITE_TIMEOUT);
+	const bool pollOnly = timed && (flags & B_ABSOLUTE_TIMEOUT) == 0
+		&& timeout <= 0;
+	if (timed && !pollOnly && (flags & B_ABSOLUTE_TIMEOUT) == 0
+		&& timeout < 0)
+		return B_BAD_VALUE;
+
+	// A relative timeout becomes one deadline, so a wait restarted after a
+	// signal does not start over.
+	bigtime_t deadline = B_INFINITE_TIMEOUT;
+	if (timed && !pollOnly) {
+		deadline = (flags & B_ABSOLUTE_TIMEOUT) != 0
+			? timeout : system_time() + timeout;
+	}
+
+	int nexus = BKernelPrivate::Team::GetNexusDescriptor();
+
+	struct nexus_thread_waitfor_req exchange;
+	int nio;
+	do {
+		memset(&exchange, 0, sizeof(exchange));
+		exchange.receiver = id;
+		if (pollOnly) {
+			exchange.flags = B_RELATIVE_TIMEOUT;
+			exchange.timeout = 0;
+		} else if (timed) {
+			exchange.flags = B_ABSOLUTE_TIMEOUT;
+			exchange.timeout = deadline;
+		}
+		nio = nexus_io(nexus, NEXUS_THREAD_WAITFOR, &exchange);
+	} while (nio == 0 && exchange.ret == B_INTERRUPTED
+		&& (flags & B_CAN_INTERRUPT) == 0);
+
+	if (nio == 0) {
+		switch (exchange.ret) {
+			case B_OK:
+				if (returnCode != NULL)
+					*returnCode = exchange.return_code;
+				return B_OK;
+			case B_TIMED_OUT:
+			case B_WOULD_BLOCK:
+			case B_INTERRUPTED:
+				return exchange.ret;
+			default:
+				break;
+		}
+	}
+
+	// Not a thread of this team: wait for the process instead.
+	return wait_for_remote_thread_until(id, returnCode, deadline, pollOnly);
 }
 
 
