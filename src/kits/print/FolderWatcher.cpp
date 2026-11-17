@@ -90,19 +90,27 @@ void FolderWatcher::SetListener(FolderListener* listener) {
 }
 
 bool FolderWatcher::BuildEntryRef(BMessage* msg, const char* dirName, entry_ref* entry) {
+	// libroot2's entry_ref and node_ref keep their fields private.
 	const char* name;
-	if (msg->FindInt32("device", &entry->device) == B_OK &&
-		msg->FindInt64(dirName, &entry->directory) == B_OK &&
+	int32 device;
+	int64 directory;
+	if (msg->FindInt32("device", &device) == B_OK &&
+		msg->FindInt64(dirName, &directory) == B_OK &&
 		msg->FindString("name", &name) == B_OK) {
-		entry->set_name(name);
+		entry->set_to(device, directory, name);
 		return true;
 	}
 	return false;
 }
 
 bool FolderWatcher::BuildNodeRef(BMessage* msg, node_ref* node) {
-	return (msg->FindInt32("device", &node->device) == B_OK &&
-		msg->FindInt64("node", &node->node) == B_OK);
+	int32 device;
+	int64 nodeID;
+	if (msg->FindInt32("device", &device) != B_OK
+		|| msg->FindInt64("node", &nodeID) != B_OK)
+		return false;
+	*node = node_ref(device, nodeID);
+	return true;
 }
 
 void FolderWatcher::HandleCreatedEntry(BMessage* msg, const char* dirName) {
@@ -133,7 +141,7 @@ void FolderWatcher::HandleChangedAttr(BMessage* msg) {
 void FolderWatcher::MessageReceived(BMessage* msg) {
 	int32 opcode;
 	node_ref folder;
-	ino_t dir;
+	int64 dir;
 	
 	if (msg->what == B_NODE_MONITOR) {
 		if (fListener == NULL || msg->FindInt32("opcode", &opcode) != B_OK) return;
@@ -147,10 +155,10 @@ void FolderWatcher::MessageReceived(BMessage* msg) {
 				break;
 			case B_ENTRY_MOVED:
 				fFolder.GetNodeRef(&folder);
-				if (msg->FindInt64("to directory", &dir) == B_OK && folder.node == dir) {
+				if (msg->FindInt64("to directory", &dir) == B_OK && folder.node() == (ino_t)dir) {
 					// entry moved into this folder
 					HandleCreatedEntry(msg, "to directory");
-				} else if (msg->FindInt64("from directory", &dir) == B_OK && folder.node == dir) {
+				} else if (msg->FindInt64("from directory", &dir) == B_OK && folder.node() == (ino_t)dir) {
 					// entry removed from this folder
 					HandleRemovedEntry(msg);
 				}
