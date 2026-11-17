@@ -2,24 +2,22 @@
  * Copyright 2001-2002, Haiku. All rights reserved.
  * Distributed under the terms of the MIT License.
  */
+
 #ifndef _GAMESOUNDDEVICE_H
 #define _GAMESOUNDDEVICE_H
-
 
 #include <GameSoundDefs.h>
 
 
-class BMediaNode;
 class GameSoundBuffer;
-struct Connection;
-
 
 class BGameSoundDevice {
 public:
 	static	BGameSoundDevice*		GetDefaultDevice();
 	static	void					ReleaseDevice();
 
-public:
+			class Mixer;
+
 									BGameSoundDevice();
 	virtual							~BGameSoundDevice();
 
@@ -60,14 +58,14 @@ protected:
 
 private:
 			int32					AllocateSound();
-			
+
 			status_t				fInitError;
-		
 			bool					fIsConnected;
-			
 			int32					fSoundCount;
 			GameSoundBuffer **		fSounds;
-};
+			Mixer*					fMixer;
 
+	friend class Mixer;
+};
 
 #endif

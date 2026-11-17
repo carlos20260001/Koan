@@ -1795,15 +1795,14 @@ HaikuControlLook::DrawSliderTriangle(BView* view, BRect& rect,
 
 	rect.InsetBy(1, 1);
 	shape.Clear();
-	if (orientation == B_HORIZONTAL) {
-		shape.MoveTo(BPoint(rect.left, rect.bottom + 1));
-		shape.LineTo(BPoint(rect.right + 1, rect.bottom + 1));
-		shape.LineTo(BPoint(centerh + 0.5, rect.top));
-	} else {
-		shape.MoveTo(BPoint(rect.right + 1, rect.top));
-		shape.LineTo(BPoint(rect.right + 1, rect.bottom + 1));
-		shape.LineTo(BPoint(rect.left, centerv + 0.5));
-	}
+	BRect fillRect(rect.left, rect.top, rect.right + 1, rect.bottom + 1);
+
+	BPoint triangle[3];
+	GetArrowShape(fillRect, orientation == B_HORIZONTAL ? B_UP_ARROW
+		: B_LEFT_ARROW, triangle);
+	shape.MoveTo(triangle[0]);
+	shape.LineTo(triangle[1]);
+	shape.LineTo(triangle[2]);
 	shape.Close();
 
 	BGradientLinear gradient;
@@ -1853,6 +1852,10 @@ HaikuControlLook::DrawSliderHashMarks(BView* view, BRect& rect,
 		startPos = rect.top + 1;
 	}
 
+	// scale the mark lengths from the default font size
+	const float markLength = ceilf(4 * std::max(1.0f,
+		be_plain_font->Size() / 12.0f));
+
 	if (location & B_HASH_MARKS_TOP) {
 		view->BeginLineArray(hashMarkCount * 2);
 
@@ -1860,9 +1863,9 @@ HaikuControlLook::DrawSliderHashMarks(BView* view, BRect& rect,
 			float pos = startPos;
 			for (int32 i = 0; i < hashMarkCount; i++) {
 				view->AddLine(BPoint(pos, rect.top),
-							  BPoint(pos, rect.top + 4), darkColor);
+							  BPoint(pos, rect.top + markLength), darkColor);
 				view->AddLine(BPoint(pos + 1, rect.top),
-							  BPoint(pos + 1, rect.top + 4), lightColor);
+							  BPoint(pos + 1, rect.top + markLength), lightColor);
 
 				pos += factor;
 			}
@@ -1870,9 +1873,9 @@ HaikuControlLook::DrawSliderHashMarks(BView* view, BRect& rect,
 			float pos = startPos;
 			for (int32 i = 0; i < hashMarkCount; i++) {
 				view->AddLine(BPoint(rect.left, pos),
-							  BPoint(rect.left + 4, pos), darkColor);
+							  BPoint(rect.left + markLength, pos), darkColor);
 				view->AddLine(BPoint(rect.left, pos + 1),
-							  BPoint(rect.left + 4, pos + 1), lightColor);
+							  BPoint(rect.left + markLength, pos + 1), lightColor);
 
 				pos += factor;
 			}
@@ -1887,9 +1890,9 @@ HaikuControlLook::DrawSliderHashMarks(BView* view, BRect& rect,
 		if (orientation == B_HORIZONTAL) {
 			float pos = startPos;
 			for (int32 i = 0; i < hashMarkCount; i++) {
-				view->AddLine(BPoint(pos, rect.bottom - 4),
+				view->AddLine(BPoint(pos, rect.bottom - markLength),
 							  BPoint(pos, rect.bottom), darkColor);
-				view->AddLine(BPoint(pos + 1, rect.bottom - 4),
+				view->AddLine(BPoint(pos + 1, rect.bottom - markLength),
 							  BPoint(pos + 1, rect.bottom), lightColor);
 
 				pos += factor;
@@ -1897,9 +1900,9 @@ HaikuControlLook::DrawSliderHashMarks(BView* view, BRect& rect,
 		} else {
 			float pos = startPos;
 			for (int32 i = 0; i < hashMarkCount; i++) {
-				view->AddLine(BPoint(rect.right - 4, pos),
+				view->AddLine(BPoint(rect.right - markLength, pos),
 							  BPoint(rect.right, pos), darkColor);
-				view->AddLine(BPoint(rect.right - 4, pos + 1),
+				view->AddLine(BPoint(rect.right - markLength, pos + 1),
 							  BPoint(rect.right, pos + 1), lightColor);
 
 				pos += factor;
@@ -1995,7 +1998,8 @@ HaikuControlLook::DrawActiveTab(BView* view, BRect& rect,
 		fillGradient.AddColor(_Tint(base, 1.03), 255);
 	}
 
-	static const float kRoundCornerRadius = 4.0f;
+	// BeOS-like straighter tabs (was 4.0f in Haiku)
+	static const float kRoundCornerRadius = 2.0f;
 
 	// left top corner dimensions
 	BRect leftTopCorner(rect);
@@ -3437,12 +3441,10 @@ HaikuControlLook::_DrawPopUpMarker(BView* view, const BRect& rect,
 {
 	BPoint center(roundf((rect.left + rect.right) / 2.0),
 		roundf((rect.top + rect.bottom) / 2.0));
-	const float metric = roundf(rect.Width() * 3.125f) / 10.0f,
-		offset = ceilf((metric * 0.2f) * 10.0f) / 10.0f;
+	const float metric = roundf(rect.Width() * 3.125f) / 10.0f;
+
 	BPoint triangle[3];
-	triangle[0] = center + BPoint(-metric, -offset);
-	triangle[1] = center + BPoint(metric, -offset);
-	triangle[2] = center + BPoint(0.0, metric * 0.8f);
+	GetArrowShape(center, BSize(metric * 2, metric), B_DOWN_ARROW, triangle);
 
 	const uint32 viewFlags = view->Flags();
 	view->SetFlags(viewFlags | B_SUBPIXEL_PRECISE);

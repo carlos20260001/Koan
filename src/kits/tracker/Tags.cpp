@@ -153,11 +153,11 @@ SetTag(const entry_ref& ref, const char* tag, bool on)
 		return status;
 
 	// an index makes the tag findable with a query
-	BVolume volume(ref.device);
+	BVolume volume(ref.device());
 	if (volume.KnowsQuery()) {
 		struct index_info info;
-		if (fs_stat_index(ref.device, kAttrTags, &info) != 0)
-			fs_create_index(ref.device, kAttrTags, B_STRING_TYPE, 0);
+		if (fs_stat_index(ref.device(), kAttrTags, &info) != 0)
+			fs_create_index(ref.device(), kAttrTags, B_STRING_TYPE, 0);
 	}
 
 	BString value;

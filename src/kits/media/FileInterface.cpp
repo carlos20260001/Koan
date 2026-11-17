@@ -76,8 +76,8 @@ BFileInterface::HandleMessage(int32 message,
 			entry_ref resultRef;
 			rv = GetRef(&resultRef, reply.mimetype);
 			if (rv == B_OK) {
-				reply.device = resultRef.device;
-				reply.directory = resultRef.directory;
+				reply.device = resultRef.device();
+				reply.directory = resultRef.directory();
 				strcpy(reply.name, resultRef.name);
 			}
 			request->SendReply(rv, &reply, sizeof(reply));

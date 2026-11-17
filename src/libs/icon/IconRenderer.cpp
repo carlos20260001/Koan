@@ -1,4 +1,5 @@
 /*
+ * Copyright 2026, Dario Casalinuovo. All rights reserved.
  * Copyright 2006-2007, 2023, Haiku. All rights reserved.
  * Distributed under the terms of the MIT License.
  *
@@ -25,7 +26,7 @@
 #include "CompoundStyleTransformer.h"
 #include "GradientTransformable.h"
 #include "Icon.h"
-#include "Shape.h"
+#include "shape/Shape.h"
 #include "Style.h"
 #include "StyleTransformer.h"
 #include "VectorPath.h"
@@ -382,12 +383,19 @@ IconRenderer::StyleHandler::_GenerateImage(agg::rgba8* span, int x, int y,
 
 class HintingTransformer {
  public:
+	HintingTransformer(double grid = 1.0)
+		: fGrid(grid)
+	{
+	}
 
 	void transform(double* x, double* y) const
 	{
-		*x = floor(*x + 0.5);
-		*y = floor(*y + 0.5);
+		*x = floor(*x / fGrid + 0.5) * fGrid;
+		*y = floor(*y / fGrid + 0.5) * fGrid;
 	}
+
+ private:
+	double fGrid;
 };
 
 
@@ -424,7 +432,8 @@ IconRenderer::IconRenderer(BBitmap* bitmap)
 
 	  fRasterizer(),
 
-	  fGlobalTransform()
+	  fGlobalTransform(),
+	  fSupersample(1)
 {
 	// attach rendering buffer to bitmap
 	fRenderingBuffer.attach((uint8*)bitmap->Bits(),
@@ -452,6 +461,60 @@ IconRenderer::SetIcon(const Icon* icon)
 }
 
 
+// _BoxDownscale
+// Area-average factor x factor; sharper filters oversharpen small icons.
+static void
+_BoxDownscale(const BBitmap* src, BBitmap* dst, int32 factor)
+{
+	const uint8* s = (const uint8*)src->Bits();
+	uint8* d = (uint8*)dst->Bits();
+	const int32 sw = src->Bounds().IntegerWidth() + 1;
+	const int32 sh = src->Bounds().IntegerHeight() + 1;
+	const int32 dw = sw / factor;
+	const int32 dh = sh / factor;
+	const int32 sBpr = src->BytesPerRow();
+	const int32 dBpr = dst->BytesPerRow();
+	const int32 area = factor * factor;
+
+	for (int32 y = 0; y < dh; y++) {
+		uint8* dp = d + y * dBpr;
+		const uint8* sp = s + y * factor * sBpr;
+		for (int32 x = 0; x < dw; x++) {
+			uint32 sum[4] = { 0, 0, 0, 0 };
+			for (int32 fy = 0; fy < factor; fy++) {
+				const uint8* row = sp + fy * sBpr + x * factor * 4;
+				for (int32 fx = 0; fx < factor; fx++) {
+					const uint8* px = row + fx * 4;
+					sum[0] += px[0];
+					sum[1] += px[1];
+					sum[2] += px[2];
+					sum[3] += px[3];
+				}
+			}
+			dp[x * 4 + 0] = (uint8)(sum[0] / area);
+			dp[x * 4 + 1] = (uint8)(sum[1] / area);
+			dp[x * 4 + 2] = (uint8)(sum[2] / area);
+			dp[x * 4 + 3] = (uint8)(sum[3] / area);
+		}
+	}
+}
+
+
+// _AttachBitmap
+// AGG objects hold the buffer pointer from construction; re-bind them
+// whenever the target bitmap changes.
+void
+IconRenderer::_AttachBitmap(BBitmap* bitmap)
+{
+	fBitmap = bitmap;
+	fRenderingBuffer.attach((uint8*)bitmap->Bits(),
+		bitmap->Bounds().IntegerWidth() + 1,
+		bitmap->Bounds().IntegerHeight() + 1, bitmap->BytesPerRow());
+	fBaseRendererPre.clip_box(0, 0, bitmap->Bounds().IntegerWidth(),
+		bitmap->Bounds().IntegerHeight());
+}
+
+
 void
 #ifdef ICON_O_MATIC
 IconRenderer::Render(bool showReferences)
@@ -459,6 +522,37 @@ IconRenderer::Render(bool showReferences)
 IconRenderer::Render()
 #endif
 {
+	if (fBitmap == NULL || fBitmap->Bits() == NULL)
+		return;
+
+	const int32 width = fBitmap->Bounds().IntegerWidth() + 1;
+	const int32 height = fBitmap->Bounds().IntegerHeight() + 1;
+	// 2x supersample + box downscale only helps small icons.
+	if (fBackground == NULL && width <= 32 && height <= 32) {
+		const int32 factor = 2;
+		BBitmap big(BRect(0.0f, 0.0f, (float)(width * factor - 1),
+				(float)(height * factor - 1)),
+			B_BITMAP_NO_SERVER_LINK, B_RGBA32);
+		if (big.InitCheck() == B_OK && big.Bits() != NULL) {
+			BBitmap* target = fBitmap;
+			Transformable savedTransform = fGlobalTransform;
+			_AttachBitmap(&big);
+			// Scale on top of the caller's transform, keeping any offset.
+			fGlobalTransform.multiply(agg::trans_affine_scaling(factor));
+			fSupersample = factor;
+#ifdef ICON_O_MATIC
+			_Render(big.Bounds(), showReferences);
+#else
+			_Render(big.Bounds());
+#endif
+			_BoxDownscale(&big, target, factor);
+			_AttachBitmap(target);
+			fGlobalTransform = savedTransform;
+			fSupersample = 1;
+			return;
+		}
+	}
+
 #ifdef ICON_O_MATIC
 	_Render(fBitmap->Bounds(), showReferences);
 #else
@@ -474,6 +568,8 @@ IconRenderer::Render(const BRect& area, bool showReferences)
 IconRenderer::Render(const BRect& area)
 #endif
 {
+	if (fBitmap == NULL || fBitmap->Bits() == NULL)
+		return;
 #ifdef ICON_O_MATIC
 	_Render(fBitmap->Bounds() & area, showReferences);
 #else
@@ -572,7 +668,8 @@ IconRenderer::_Render(const BRect& r)
 	for (int32 i = 0; i < shapeCount; i++) {
 		Shape* shape = fIcon->Shapes()->ItemAtFast(i);
 
-		if (!shape->Visible(fGlobalTransform.scale())) {
+		// level of detail follows the target size, not the supersampled one
+		if (!shape->Visible(fGlobalTransform.scale() / fSupersample)) {
 			continue;
 		}
 
@@ -619,7 +716,7 @@ IconRenderer::_Render(const BRect& r)
 		ScaledPath scaledPath(shape->VertexSource(), transform);
 		if (shape->Hinting()) {
 			// additional hinting
-			HintingTransformer hinter;
+			HintingTransformer hinter(fSupersample);
 			HintedPath hintedPath(scaledPath, hinter);
 			fRasterizer.add_path(hintedPath);
 		} else {

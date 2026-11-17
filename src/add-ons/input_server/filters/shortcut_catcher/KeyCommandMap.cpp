@@ -228,19 +228,18 @@ KeyCommandMap::MessageReceived(BMessage* message)
 
 		case B_PATH_MONITOR:
 		{
+			#ifdef __VOS_OLD_NODE_MONITOR_
 			const char* path = "";
 			// only fall through for appropriate file
 			if (!(message->FindString("path", &path) == B_OK
 					&& strcmp(path, fFileName) == 0)) {
-				dev_t device;
-				ino_t node;
-				if (message->FindInt32("device", &device) != B_OK
-					|| message->FindInt64("node", &node) != B_OK
-					|| device != fNodeRef.device
-					|| node != fNodeRef.node) {
+				node_ref nodeRef;
+				if (message->FindNodeRef("virtual:node", &nodeRef) != B_OK
+					|| nodeRef != fNodeRef) {
 					break;
 				}
 			}
+			#endif
 		}
 		// fall-through
 		case FILE_UPDATED:
@@ -301,8 +300,7 @@ KeyCommandMap::MessageReceived(BMessage* message)
 					}
 				}
 			} else {
-				fNodeRef.device = -1;
-				fNodeRef.node = -1;
+				fNodeRef.unset();
 			}
 
 			if (fSyncSpecs.Lock()) {

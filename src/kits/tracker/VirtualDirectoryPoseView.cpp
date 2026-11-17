@@ -1,9 +1,11 @@
 /*
  * Copyright 2013 Haiku, Inc. All rights reserved.
+ * Copyright 2026, Dario Casalinuovo <b.vitruvio@gmail.com>.
  * Distributed under the terms of the MIT License.
  *
  * Authors:
  *		Ingo Weinhold, ingo_weinhold@gmx.de
+ *		Dario Casalinuovo
  */
 
 
@@ -119,7 +121,7 @@ VirtualDirectoryPoseView::SetViewMode(uint32 newMode)
 EntryListBase*
 VirtualDirectoryPoseView::InitDirentIterator(const entry_ref* ref)
 {
-	if (fRootDefinitionFileRef.node < 0 || *ref != *TargetModel()->EntryRef())
+	if (fRootDefinitionFileRef.vnode() == B_INVALID_INO || *ref != *TargetModel()->EntryRef())
 		return NULL;
 
 	Model sourceModel(ref, false, true);
@@ -195,13 +197,10 @@ VirtualDirectoryPoseView::_EntryCreated(const BMessage* message)
 	NotOwningEntryRef entryRef;
 	node_ref nodeRef;
 
-	if (message->FindInt32("device", &nodeRef.device) != B_OK
-		|| message->FindInt64("node", &nodeRef.node) != B_OK
-		|| message->FindInt64("directory", &entryRef.directory) != B_OK
-		|| message->FindString("name", (const char**)&entryRef.name) != B_OK) {
+	if (message->FindNodeRef("virtual:node", &nodeRef) != B_OK
+		|| message->FindRef("virtual:directory", &entryRef) != B_OK) {
 		return true;
 	}
-	entryRef.device = nodeRef.device;
 
 	// It might be one of our directories.
 	BString path;
@@ -213,16 +212,19 @@ VirtualDirectoryPoseView::_EntryCreated(const BMessage* message)
 		if (directory.SetTo(&nodeRef) != B_OK)
 			return true;
 
-		BPrivate::Storage::LongDirEntry longEntry;
-		struct dirent* entry = longEntry.dirent();
-		while (directory.GetNextDirents(entry, sizeof(longEntry), 1) == 1) {
-			if (strcmp(entry->d_name, ".") != 0
-				&& strcmp(entry->d_name, "..") != 0) {
+		struct dirent entry; // vos mod
+		while (directory.GetNextDirents(&entry, sizeof(entry), 1) == 1) {
+			if (strcmp(entry.d_name, ".") != 0
+				&& strcmp(entry.d_name, "..") != 0) {
+				BEntry dirEntry;
+				directory.GetEntry(&dirEntry);
+				entry_ref ref;
+				dirEntry.GetRef(&ref);
 				_DispatchEntryCreatedOrRemovedMessage(B_ENTRY_CREATED,
-					node_ref(entry->d_dev, entry->d_ino),
-					NotOwningEntryRef(entry->d_pdev, entry->d_pino,
-						entry->d_name),
-					NULL, false);
+					node_ref(ref.vdevice(), ref.vdirectory()),
+					NotOwningEntryRef(ref.vdevice(), ref.vdirectory(),
+						entry.d_name),
+					NULL, false); // end mod
 			}
 		}
 		return true;
@@ -286,14 +288,13 @@ VirtualDirectoryPoseView::_EntryRemoved(const BMessage* message)
 	NotOwningEntryRef entryRef;
 	node_ref nodeRef;
 
-	if (message->FindInt32("device", &nodeRef.device) != B_OK
-		|| message->FindInt64("node", &nodeRef.node) != B_OK
-		|| message->FindInt64("directory", &entryRef.directory)
-			!= B_OK
-		|| message->FindString("name", (const char**)&entryRef.name) != B_OK) {
+	if (message->FindNodeRef("virtual:node", &nodeRef) != B_OK
+		|| message->FindRef("virtual:directory", &entryRef) != B_OK) {
 		return true;
 	}
-	entryRef.device = nodeRef.device;
+	// entryRef is already a complete virtual entry_ref; rebuilding it from
+	// nodeRef (the entry's own node, not its parent's) would corrupt the
+	// parent directory identity.
 
 	// It might be our definition file.
 	if (nodeRef == *TargetModel()->NodeRef())
@@ -391,18 +392,14 @@ VirtualDirectoryPoseView::_EntryMoved(const BMessage* message)
 	NotOwningEntryRef toEntryRef;
 	node_ref nodeRef;
 
-	if (message->FindInt32("node device", &nodeRef.device) != B_OK
-		|| message->FindInt64("node", &nodeRef.node) != B_OK
-		|| message->FindInt32("device", &fromEntryRef.device) != B_OK
-		|| message->FindInt64("from directory", &fromEntryRef.directory) != B_OK
-		|| message->FindInt64("to directory", &toEntryRef.directory) != B_OK
-		|| message->FindString("from name", (const char**)&fromEntryRef.name)
-			!= B_OK
-		|| message->FindString("name", (const char**)&toEntryRef.name)
-			!= B_OK) {
+	if (message->FindNodeRef("virtual:node", &nodeRef) != B_OK
+		|| message->FindRef("virtual:from directory", &fromEntryRef) != B_OK
+		|| message->FindRef("virtual:to directory", &toEntryRef) != B_OK) {
 		return true;
 	}
-	toEntryRef.device = fromEntryRef.device;
+	// toEntryRef already carries its own directory; the virtual model allows
+	// the destination to live under a different vref than the source, so
+	// overwriting it with fromEntryRef's would point at the wrong directory.
 
 	// TODO: That's the lazy approach. Ideally we'd analyze the situation and
 	// forward a B_ENTRY_MOVED, if possible. There are quite a few cases to
@@ -420,10 +417,8 @@ bool
 VirtualDirectoryPoseView::_NodeStatChanged(const BMessage* message)
 {
 	node_ref nodeRef;
-	if (message->FindInt32("device", &nodeRef.device) != B_OK
-		|| message->FindInt64("node", &nodeRef.node) != B_OK) {
+	if (message->FindNodeRef("virtual:node", &nodeRef) != B_OK)
 		return true;
-	}
 
 	if (nodeRef == fRootDefinitionFileRef) {
 		if ((message->GetInt32("fields", 0) & B_STAT_MODIFICATION_TIME) != 0) {
@@ -468,10 +463,9 @@ VirtualDirectoryPoseView::_DispatchEntryCreatedOrRemovedMessage(int32 opcode,
 {
 	BMessage message(B_NODE_MONITOR);
 	message.AddInt32("opcode", opcode);
-	message.AddInt32("device", nodeRef.device);
-	message.AddInt64("node", nodeRef.node);
-	message.AddInt64("directory", entryRef.directory);
-	message.AddString("name", entryRef.name);
+	message.AddNodeRef("node", &nodeRef);
+	message.AddRef("directory", &entryRef);
+
 	if (path != NULL && path[0] != '\0')
 		message.AddString("path", path);
 	bool result = dispatchToSuperClass

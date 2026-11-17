@@ -1,4 +1,7 @@
 /*
+ * Copyright 2026, Dario Casalinuovo. All rights reserved.
+ */
+/*
 Open Tracker License
 
 Terms and Conditions
@@ -38,18 +41,43 @@ All rights reserved.
 #define _POSE_LIST_H
 
 
+#include <functional>
+#include <unordered_map>
+
 #include <ObjectList.h>
 #include <ObjectListPrivate.h>
+#include <Node.h>
 
 #include "Pose.h"
 
 
-struct node_ref;
 struct entry_ref;
 
 namespace BPrivate {
 
 class Model;
+
+
+// Key the pose index by the snapshotted (real_device, real_node) pair.
+// node_ref's own device/node fields can refer to a virtual vref whose
+// real_* fields are resolved lazily — hashing the live node_ref would
+// produce an unstable key and break unordered_map's invariant. Storing
+// a plain pair freezes the identity at insert time.
+typedef std::pair<dev_t, ino_t> PoseNodeKey;
+
+struct PoseNodeKeyHash {
+	size_t operator()(const PoseNodeKey& k) const {
+		size_t h = std::hash<dev_t>()(k.first);
+		h ^= std::hash<ino_t>()(k.second) + 0x9e3779b9u + (h << 6) + (h >> 2);
+		return h;
+	}
+};
+
+inline PoseNodeKey
+MakePoseNodeKey(const node_ref& r)
+{
+	return PoseNodeKey(r.device(), r.node());
+}
 
 
 class PoseList : private BObjectList<BPose> {
@@ -68,6 +96,7 @@ public:
 		_inherited(list),
 		fOwning(list.fOwning)
 	{
+		_RebuildIndex();
 	}
 
 	~PoseList()
@@ -88,12 +117,20 @@ public:
 	BPose* LastItem() const { return _inherited::LastItem(); }
 	BPose* ItemAt(int32 i) const { return _inherited::ItemAt(i); }
 
-	bool AddItem(BPose* p) { return _inherited::AddItem(p); }
-	bool AddItem(BPose* p, int32 i) { return _inherited::AddItem(p, i); }
-	bool AddList(PoseList* list) { return _inherited::AddList(list); }
+	bool AddItem(BPose* p)
+		{ bool r = _inherited::AddItem(p); if (r) _IndexAdd(p); return r; }
+	bool AddItem(BPose* p, int32 i)
+		{ bool r = _inherited::AddItem(p, i); if (r) _IndexAdd(p); return r; }
+	bool AddList(PoseList* list)
+		{ bool r = _inherited::AddList(list); if (r) _RebuildIndex(); return r; }
 
 	bool RemoveItem(BPose* p, bool deleteIfOwning = true);
-	BPose* RemoveItemAt(int32 i) { return _inherited::RemoveItemAt(i); }
+	BPose* RemoveItemAt(int32 i)
+	{
+		BPose* p = _inherited::ItemAt(i);
+		if (p) _IndexRemove(p);
+		return _inherited::RemoveItemAt(i);
+	}
 
 	void MakeEmpty(bool deleteIfOwning = true);
 
@@ -122,13 +159,19 @@ public:
 	BPose* FindPoseByFileName(const char* name, int32* _index = NULL) const;
 
 private:
+	void _IndexAdd(BPose* p);
+	void _IndexRemove(BPose* p);
+	void _RebuildIndex();
+
 	bool fOwning;
+	std::unordered_map<PoseNodeKey, BPose*, PoseNodeKeyHash> fNodeIndex;
 };
 
 
 inline bool
 PoseList::RemoveItem(BPose* p, bool deleteIfOwning)
 {
+	_IndexRemove(p);
 	bool removed = _inherited::RemoveItem(p);
 	if (removed && fOwning && deleteIfOwning)
 		delete p;
@@ -139,6 +182,7 @@ PoseList::RemoveItem(BPose* p, bool deleteIfOwning)
 inline void
 PoseList::MakeEmpty(bool deleteIfOwning)
 {
+	fNodeIndex.clear();
 	if (fOwning && deleteIfOwning) {
 		int32 count = CountItems();
 		for (int32 index = 0; index < count; index++)

@@ -1,10 +1,14 @@
+/*
+ * Copyright 2026, Dario Casalinuovo. All rights reserved.
+ * Distributed under the terms of the MIT License.
+ */
 
 #ifndef _SYNTH_H
 #define _SYNTH_H
 
 #include <BeBuild.h>
 #include <Entry.h>
-#include <MidiDefs.h>
+#include <midi/MidiDefs.h>
 #include <OS.h>
 
 typedef enum interpolation_mode
@@ -12,18 +16,18 @@ typedef enum interpolation_mode
 	B_DROP_SAMPLE = 0,
 	B_2_POINT_INTERPOLATION,
 	B_LINEAR_INTERPOLATION
-} 
+}
 interpolation_mode;
 
 typedef enum reverb_mode
 {
-	B_REVERB_NONE = 1,		
-	B_REVERB_CLOSET,	
-	B_REVERB_GARAGE,	
-	B_REVERB_BALLROOM,	
-	B_REVERB_CAVERN,	
-	B_REVERB_DUNGEON	
-} 
+	B_REVERB_NONE = 1,
+	B_REVERB_CLOSET,
+	B_REVERB_GARAGE,
+	B_REVERB_BALLROOM,
+	B_REVERB_CAVERN,
+	B_REVERB_DUNGEON
+}
 reverb_mode;
 
 typedef void (*synth_controller_hook) (
@@ -31,8 +35,7 @@ typedef void (*synth_controller_hook) (
 
 class BMidiSynth;
 class BMidiSynthFile;
-
-namespace BPrivate { class BSoftSynth; }
+class BSoundFontSynth;
 
 class BSynth {
 public:
@@ -41,9 +44,9 @@ public:
 	BSynth(synth_mode synth);
 	virtual ~BSynth();
 
-	status_t LoadSynthData(entry_ref* instrumentsFile); 
+	status_t LoadSynthData(entry_ref* instrumentsFile);
 	status_t LoadSynthData(synth_mode synth);
-	synth_mode SynthMode(void);
+	synth_mode SynthMode() const;
 
 	void Unload(void);
 	bool IsLoaded(void) const;
@@ -61,7 +64,7 @@ public:
 	bool IsReverbEnabled() const;
 
 	status_t SetVoiceLimits(
-		int16 maxSynthVoices, int16 maxSampleVoices, 
+		int16 maxSynthVoices, int16 maxSampleVoices,
 		int16 limiterThreshhold);
 
 	int16 MaxSynthVoices(void) const;
@@ -89,14 +92,17 @@ private:
 	friend class BMidiSynth;
 	friend class BMidiSynthFile;
 
+	// The process singleton owning one BSoundFontSynth graph node.
+			BSoundFontSynth*	SoundFont() const;
+
 	virtual void _ReservedSynth1();
 	virtual void _ReservedSynth2();
 	virtual void _ReservedSynth3();
 	virtual void _ReservedSynth4();
 
 	void _Init();
-	
-	BPrivate::BSoftSynth* fSynth;
+
+	BSoundFontSynth* fSynth;
 	synth_mode fSynthMode;
 	int32 fClientCount;
 

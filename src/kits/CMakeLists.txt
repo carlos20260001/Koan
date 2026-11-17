@@ -1,11 +1,11 @@
 find_package(ICU REQUIRED COMPONENTS i18n uc dt in io)
 
-# ported subset: the support, app and storage kits are on CMake (W1-K1);
-# W2 adds interface, locale, translation, shared, tracker, ... Each kit
-# below is added only once its CMakeLists.txt exists, and "be" links the
-# companion libraries (icon, agg, localestub, shared) only once they have
-# a target, see _vos_be_link_companions at the end. OpenSSL is linked only
-# with the kits that use it (network, shared).
+# ported subset: the support, app and storage kits are on CMake (W1-K1),
+# interface and locale since W2; W2 also adds translation, shared,
+# tracker, ... Each kit below is added only once its CMakeLists.txt
+# exists, and "be" links the companion libraries (icon, agg, localestub,
+# shared) only once they have a target, see _vos_be_link_companions at the
+# end. OpenSSL is linked only with the kits that use it (network, shared).
 AddOn(
 	be
 	SHARED
@@ -14,8 +14,14 @@ AddOn(
 
 	RDEF
 	CountryFlags.rdef
+	Icons.rdef
 	LanguageFlags.rdef
+	libbe_version.rdef
 )
+
+# air/OS: Icons.rdef holds the system icons BIconUtils::GetSystemIcon()
+# reads from libbe.so (alert icons); libbe_version.rdef its version and
+# signature. VitruvianOS's libbe carries only the flags.
 
 UsePrivateHeaders(be app interface kernel print shared locale libroot shared system)
 
@@ -71,11 +77,14 @@ AddOn(
 UsePrivateHeaders(be_bootstrap interface app support)
 
 # ported subset: upstream adds every kit unconditionally.
+# air/OS-only kits (debug, debugger, mail, media, media_controls, neural,
+# print, quicklook) are listed with VitruvianOS's; each is added only once
+# it has a CMakeLists.txt. media comes before neural, which links it.
 foreach(_kit
-		accounts app bluetooth device game hwaccel interface locale
-		location media2 midi midi2 network opengl package screensaver
-		shared storage support telephony textencoding translation tracker
-		web)
+		accounts app bluetooth debug debugger device game hwaccel interface
+		locale location mail media media_controls media2 midi midi2 network
+		neural opengl package print quicklook screensaver shared storage
+		support telephony textencoding translation tracker web)
 	if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/${_kit}/CMakeLists.txt")
 		add_subdirectory(${_kit})
 	endif()

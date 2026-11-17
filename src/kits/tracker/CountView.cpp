@@ -279,7 +279,7 @@ BCountView::_DetailsText()
 	Model* target = fPoseView->TargetModel();
 	if (target != NULL && !target->IsRoot() && !target->IsQuery()
 		&& !target->IsVirtualDirectory() && !fPoseView->IsDesktopView()) {
-		BVolume volume(target->NodeRef()->device);
+		BVolume volume(target->NodeRef()->device());
 		if (volume.InitCheck() == B_OK && !volume.IsReadOnly()
 			&& volume.Capacity() > 0) {
 			string_for_size(volume.FreeBytes(), sizeText, sizeof(sizeText));

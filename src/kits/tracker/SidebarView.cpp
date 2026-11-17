@@ -63,7 +63,7 @@ SidebarView::SidebarView()
 	fDropTarget(-1),
 	fHeight(0)
 {
-	fCurrent.device = -1;
+	fCurrent.unset();
 }
 
 
@@ -167,7 +167,7 @@ SidebarView::_Rebuild()
 			}
 			_AddFolder(kFavorite, ref, linkRef.name);
 			if (fRows.LastItem()->type == kFavorite)
-				fRows.LastItem()->device = linkRef.device;
+				fRows.LastItem()->device = linkRef.device();
 		}
 	}
 
@@ -398,7 +398,7 @@ void
 SidebarView::SetCurrent(const entry_ref* ref)
 {
 	if (ref == NULL) {
-		fCurrent.device = -1;
+		fCurrent.unset();
 	} else
 		fCurrent = *ref;
 	Invalidate();
@@ -557,7 +557,7 @@ SidebarView::_Drop(BMessage* message, int32 index)
 	entry_ref ref;
 	for (int32 i = 0; message->FindRef("refs", i, &ref) == B_OK; i++) {
 		list->AddItem(new entry_ref(ref));
-		if (ref.device != destStat.st_dev)
+		if (ref.device() != destStat.st_dev)
 			sameVolume = false;
 	}
 	uint32 mode = sameVolume && (modifiers() & B_OPTION_KEY) == 0

@@ -360,7 +360,7 @@ GeneralInfoView::InitStrings(const Model* model)
 	} else if (model->IsVolume()) {
 		const node_ref* modelNodeRef = fModel->NodeRef();
 		fs_info modelInfo;
-		if (fs_stat_dev(modelNodeRef->device, &modelInfo) == B_OK)
+		if (fs_stat_dev(modelNodeRef->device(), &modelInfo) == B_OK)
 		{
 			fFileSystemStr = modelInfo.fsh_name;
 			fFileSystemStr << B_TRANSLATE(" (block size: ")
@@ -416,9 +416,12 @@ GeneralInfoView::ModelChanged(Model* model, BMessage* message)
 		{
 			node_ref dirNode;
 			node_ref itemNode;
-			dirNode.device = itemNode.device = message->FindInt32("device");
-			message->FindInt64("to directory", &dirNode.node);
-			message->FindInt64("node", &itemNode.node);
+			message->FindNodeRef("virtual:node", &itemNode);
+			entry_ref toRef;
+			if (message->FindRef("virtual:to directory", &toRef) == B_OK) {
+				BEntry dirEntry(&toRef);
+				dirEntry.GetNodeRef(&dirNode);
+			}
 
 			const char* name;
 			if (message->FindString("name", &name) != B_OK)
@@ -426,14 +429,11 @@ GeneralInfoView::ModelChanged(Model* model, BMessage* message)
 
 			// ensure notification is for us
 			if (*model->NodeRef() == itemNode
-				// For volumes, the device ID is obviously not handled in a
-				// consistent way; the node monitor sends us the ID of the
-				// parent device, while the model is set to the device of the
-				// volume directly - this hack works for volumes that are
-				// mounted in the root directory
+				// For volumes, the node monitor sends the parent device ID
+				// while the model holds the volume's own device — compare
+				// only the inode (the root inode is self-referential for /).
 				|| (model->IsVolume()
-					&& itemNode.device == 1
-					&& itemNode.node == model->NodeRef()->node)) {
+					&& itemNode.node() == model->NodeRef()->node())) {
 				model->UpdateEntryRef(&dirNode, name);
 				BString title;
 				title.SetToFormat(B_TRANSLATE_COMMENT("%s info",
@@ -759,7 +759,7 @@ GeneralInfoView::CheckAndSetSize()
 		bool volumeHasNoCapacity = false;
 
 		if (fModel->IsVolume()) {
-			BVolume volume(fModel->NodeRef()->device);
+			BVolume volume(fModel->NodeRef()->device());
 			freeBytes = volume.FreeBytes();
 			capacity = volume.Capacity();
 			volumeHasNoCapacity = capacity == 0;

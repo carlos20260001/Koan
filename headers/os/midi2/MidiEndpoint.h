@@ -1,25 +1,30 @@
+/*
+ * Copyright 2026, Dario Casalinuovo. All rights reserved.
+ * Distributed under the terms of the MIT License.
+ */
 
 #ifndef _MIDI_ENDPOINT_H
 #define _MIDI_ENDPOINT_H
 
 #include <BeBuild.h>
 #include <Message.h>
-#include <Midi2Defs.h>
+#include <midi2/Midi2Defs.h>
 #include <OS.h>
 #include <String.h>
 
 class BMidiProducer;
 class BMidiConsumer;
+class BMidiUnit;
 
 namespace BPrivate { class BMidiRosterLooper; }
 
-class BMidiEndpoint 
+class BMidiEndpoint
 {
 public:
 
 	const char *Name() const;
 	void SetName(const char *name);
-	
+
 	int32 ID() const;
 
 	bool IsProducer() const;
@@ -37,7 +42,7 @@ public:
 
 	status_t Register();
 	status_t Unregister();
-						
+
 private:
 
 	friend class BMidiConsumer;
@@ -46,7 +51,7 @@ private:
 	friend class BMidiProducer;
 	friend class BMidiRoster;
 	friend class BPrivate::BMidiRosterLooper;
-	
+
 	BMidiEndpoint(const char *name);
 	virtual	~BMidiEndpoint();
 
@@ -58,7 +63,7 @@ private:
 	virtual void _Reserved6();
 	virtual void _Reserved7();
 	virtual void _Reserved8();
-	
+
 	status_t SendRegisterRequest(bool);
 	status_t SendChangeRequest(BMessage *);
 
@@ -66,14 +71,20 @@ private:
 	bool LockLooper() const;
 	void UnlockLooper() const;
 
+	BMidiUnit* Unit() const { return fUnit; }
+	void SetUnit(BMidiUnit* unit) { fUnit = unit; }
+
 	int32 fId;
-	BString fName;	
+	BString fName;
 	int32 fRefCount;
 	BMessage *fProperties;
 	bool fIsLocal;
 	bool fIsConsumer;
 	bool fIsRegistered;
 	bool fIsAlive;
+
+	// media2 realisation: one graph node (BMidiUnit) per endpoint.
+	BMidiUnit* fUnit;
 
 	uint32 _reserved[4];
 };

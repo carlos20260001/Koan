@@ -43,6 +43,20 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     xfsprogs btrfs-progs grub2-common \
     && rm -rf /var/lib/apt/lists/*
 
+# Host builds outside the Debian sysroot: libssl-dev for libbe (linked with
+# OpenSSL once libshared exists), libpam0g-dev for
+# vos-polkit-grant-helper, libbacktrace-dev for Debug builds of libroot.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libpam0g-dev libbacktrace-dev libssl-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+# media2 (PipeWire, GStreamer, fluidsynth) and the OpenGL kit (Mesa EGL/GL)
+# compile against these when the build runs outside the Debian sysroot.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libpipewire-0.3-dev libspa-0.2-dev libgstreamer1.0-dev \
+    libgstreamer-plugins-base1.0-dev libfluidsynth-dev libegl-dev libgl-dev \
+    && rm -rf /var/lib/apt/lists/*
+
 ENV DEBIAN_MIRROR=http://deb.debian.org/debian/
 ENV VOS_BASE_SUITE=trixie
 ENV VOS_KERNEL_FLAVOUR=rt-amd64

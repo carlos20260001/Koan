@@ -56,9 +56,6 @@ public:
 
 			status_t			TranslateDirectoryEntry(
 									const node_ref& definitionFileRef,
-									dirent* buffer);
-			status_t			TranslateDirectoryEntry(
-									const node_ref& definitionFileRef,
 									entry_ref& entryRef, node_ref& _nodeRef);
 
 			bool				DefinitionFileChanged(

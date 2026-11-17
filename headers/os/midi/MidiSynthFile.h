@@ -1,9 +1,13 @@
+/*
+ * Copyright 2026, Dario Casalinuovo. All rights reserved.
+ * Distributed under the terms of the MIT License.
+ */
 
 #ifndef _MIDI_SYNTH_FILE_H
 #define _MIDI_SYNTH_FILE_H
 
 #include <BeBuild.h>
-#include <MidiSynth.h>
+#include <midi/MidiSynth.h>
 #include <Entry.h>
 
 typedef void (*synth_file_hook)(int32 arg);
@@ -28,7 +32,7 @@ public:
 
 	int32 Duration(void) const;
 	int32 Position(int32 ticks) const;
-	int32 Seek();
+	int32 Seek(int32 msecs);
 
 	status_t GetPatches(int16* pArray768, int16* pReturnedCount) const;
 
@@ -50,14 +54,14 @@ public:
 
 private:
 
-	friend class BSynth;							   
+	friend class BSynth;
 
 	virtual void _ReservedMidiSynthFile1();
 	virtual void _ReservedMidiSynthFile2();
 	virtual void _ReservedMidiSynthFile3();
 
 	BMidiStore* fStore;
-	
+
 	int32 _reserved[3];
 };
 

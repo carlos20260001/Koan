@@ -93,8 +93,7 @@ PendingNodeMonitorCache::Add(const BMessage* message)
 	message->PrintToStream();
 #endif
 	node_ref node;
-	if (message->FindInt32("device", &node.device) != B_OK
-		|| message->FindInt64("node", (int64*)&node.node) != B_OK)
+	if (message->FindNodeRef("virtual:node", &node) != B_OK)
 		return;
 
 	fList.AddItem(new PendingNodeMonitorEntry(&node, message));

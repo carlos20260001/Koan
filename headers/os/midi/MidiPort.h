@@ -1,8 +1,12 @@
+/*
+ * Copyright 2026, Dario Casalinuovo. All rights reserved.
+ * Distributed under the terms of the MIT License.
+ */
 
 #ifndef _MIDI_PORT_H
 #define _MIDI_PORT_H
 
-#include <Midi.h>
+#include <midi/Midi.h>
 
 class BMidiConsumer;
 class BMidiProducer;
@@ -15,7 +19,7 @@ public:
 	BMidiPort(const char* name = NULL);
 	~BMidiPort();
 
-	status_t InitCheck() const; 
+	status_t InitCheck() const;
 	status_t Open(const char* name);
 	void Close();
 
@@ -31,8 +35,8 @@ public:
 		uchar channel, uchar note, uchar pressure, uint32 time = B_NOW);
 
 	virtual void ControlChange(
-		uchar channel, uchar controlNumber, uchar controlValue, 
-		uint32 time = B_NOW); 
+		uchar channel, uchar controlNumber, uchar controlValue,
+		uint32 time = B_NOW);
 
 	virtual void ProgramChange(
 		uchar channel, uchar programNumber, uint32 time = B_NOW);
@@ -78,7 +82,7 @@ private:
 	BMidiLocalConsumer* fLocalSink;
 	BMidiProducer* fRemoteSource;
 	BMidiConsumer* fRemoteSink;
-		
+
 	char* fPortName;
 	status_t fStatus;
 	BList* fDevices;

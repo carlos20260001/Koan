@@ -36,6 +36,8 @@ All rights reserved.
 //	fast display
 //
 
+#include <unistd.h>
+
 #include <Debug.h>
 #include <Directory.h>
 #include <Entry.h>
@@ -121,8 +123,7 @@ NodePreloader::MessageReceived(BMessage* message)
 				case B_ENTRY_REMOVED:
 				{
 					AutoLock<Benaphore> locker(fLock);
-					message->FindInt32("device", &itemNode.device);
-					message->FindInt64("node", &itemNode.node);
+					message->FindNodeRef("virtual:node", &itemNode);
 					Model* model = FindModel(itemNode);
 					if (model == NULL)
 						break;
@@ -137,8 +138,7 @@ NodePreloader::MessageReceived(BMessage* message)
 				case B_STAT_CHANGED:
 				{
 					AutoLock<Benaphore> locker(fLock);
-					message->FindInt32("device", &itemNode.device);
-					message->FindInt64("node", &itemNode.node);
+					message->FindNodeRef("virtual:node", &itemNode);
 
 					const char* attrName;
 					message->FindString("attr", &attrName);
@@ -204,6 +204,13 @@ NodePreloader::PreloadOne(const char* dirPath)
 void
 NodePreloader::Preload()
 {
+	// Live media: warmup value is zero (user won't return to hit the cache),
+	// cost is real (squashfs+overlay walk).
+	if (access("/etc/vos/live", F_OK) == 0) {
+		fLock.Unlock();
+		return;
+	}
+
 	for (int32 count = 100; count >= 0; count--) {
 		// wait for a little bit before going ahead to reduce disk access
 		// contention

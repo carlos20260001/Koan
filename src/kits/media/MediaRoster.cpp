@@ -3035,8 +3035,8 @@ BMediaRoster::SetRefFor(const media_node& file_interface, const entry_ref& file,
 	fileinterface_set_ref_reply reply;
 	status_t rv;
 
-	request.device = file.device;
-	request.directory = file.directory;
+	request.device = file.device();
+	request.directory = file.directory();
 	strcpy(request.name, file.name);
 	request.create = createAndTruncate;
 	if (_length != NULL)
@@ -3102,8 +3102,8 @@ BMediaRoster::SniffRefFor(const media_node& file_interface,
 	fileinterface_sniff_ref_reply reply;
 	status_t rv;
 
-	request.device = file.device;
-	request.directory = file.directory;
+	request.device = file.device();
+	request.directory = file.directory();
 	strcpy(request.name, file.name);
 
 	rv = QueryPort(file_interface.port, FILEINTERFACE_SNIFF_REF, &request,

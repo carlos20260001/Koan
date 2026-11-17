@@ -1,8 +1,14 @@
+/*
+ * Copyright 2026, Dario Casalinuovo. All rights reserved.
+ * Distributed under the terms of the MIT License.
+ */
 
 #ifndef _MIDI_CONSUMER_H
 #define _MIDI_CONSUMER_H
 
-#include <MidiEndpoint.h>
+#include <midi2/MidiEndpoint.h>
+
+class BMidiInput;
 
 namespace BPrivate { class BMidiRosterLooper; }
 
@@ -11,17 +17,18 @@ class BMidiConsumer : public BMidiEndpoint
 public:
 
 	bigtime_t Latency() const;
-	
+
 private:
 
 	friend class BMidiLocalConsumer;
 	friend class BMidiLocalProducer;
+	friend class BMidiProducer;
 	friend class BMidiRoster;
 	friend class BPrivate::BMidiRosterLooper;
-	
-	BMidiConsumer(const char *name = NULL);	
+
+	BMidiConsumer(const char *name = NULL);
 	virtual ~BMidiConsumer();
-	
+
 	virtual void _Reserved1();
 	virtual void _Reserved2();
 	virtual void _Reserved3();
@@ -30,10 +37,14 @@ private:
 	virtual void _Reserved6();
 	virtual void _Reserved7();
 	virtual void _Reserved8();
-	
+
 	port_id fPort;
 	bigtime_t fLatency;
-	
+	BMidiInput* Input() const { return fInput; }
+	void SetInput(BMidiInput* input) { fInput = input; }
+
+	BMidiInput* fInput;
+
 	uint32 _reserved[2];
 };
 
@@ -42,16 +53,16 @@ class BMidiLocalConsumer : public BMidiConsumer
 public:
 
 	BMidiLocalConsumer(const char *name = NULL);
-	
+
 	void SetLatency(bigtime_t latency);
 	int32 GetProducerID();
-	
-	void SetTimeout(bigtime_t when, void *data);	
+
+	void SetTimeout(bigtime_t when, void *data);
 	virtual void Timeout(void *data);
-	
+
 	virtual void Data(
-		uchar *data, size_t length, bool atomic, bigtime_t time);	
-	
+		uchar *data, size_t length, bool atomic, bigtime_t time);
+
 	virtual	void NoteOff(
 		uchar channel, uchar note, uchar velocity, bigtime_t time);
 
@@ -62,7 +73,7 @@ public:
 		uchar channel, uchar note, uchar pressure, bigtime_t time);
 
 	virtual	void ControlChange(
-		uchar channel, uchar controlNumber, uchar controlValue, 
+		uchar channel, uchar controlNumber, uchar controlValue,
 		bigtime_t time);
 
 	virtual	void ProgramChange(
@@ -84,17 +95,23 @@ public:
 
 	virtual	void TempoChange(int32 beatsPerMinute, bigtime_t time);
 
-	virtual void AllNotesOff(bool justChannel, bigtime_t time);
+	virtual	void AllNotesOff(bool justChannel, bigtime_t time);
 
-protected:	
+	// Runs on the consumer's own delivery thread, never on the RT thread.
+	int32 EventThread();
+
+protected:
+
+	friend class BMidi;
 
 	~BMidiLocalConsumer();
- 
+
 private:
 
 	friend class BMidiRoster;
-	friend int32 _midi_event_thread(void *);
-	
+	friend class BPrivate::BMidiRosterLooper;
+	friend class BMidiInputBridge;
+
 	virtual void _Reserved1();
 	virtual void _Reserved2();
 	virtual void _Reserved3();
@@ -104,8 +121,6 @@ private:
 	virtual void _Reserved7();
 	virtual void _Reserved8();
 
-	int32 EventThread();
-
 	bigtime_t fTimeout;
 	void* fTimeoutData;
 	int32 fCurrentProducer;
@@ -113,5 +128,9 @@ private:
 
 	uint32 _reserved[1];
 };
+
+// Internal BMidiInput that forwards media2 RT hooks onto the consumer's
+// own delivery thread. Never runs user hooks on the data thread.
+class BMidiInputBridge;
 
 #endif // _MIDI_CONSUMER_H

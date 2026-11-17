@@ -28,7 +28,7 @@ struct NodeKey {
 	dev_t	device;
 	ino_t	node;
 
-	NodeKey(const node_ref& ref) : device(ref.device), node(ref.node) {}
+	NodeKey(const node_ref& ref) : device(ref.device()), node(ref.node()) {}
 
 	bool operator<(const NodeKey& other) const
 	{
@@ -67,8 +67,8 @@ static void
 SendSize(const Request& request, off_t size)
 {
 	BMessage message(kFolderSizeReady);
-	message.AddInt32("device", request.node.device);
-	message.AddInt64("node", request.node.node);
+	message.AddInt32("device", request.node.device());
+	message.AddInt64("node", request.node.node());
 	message.AddInt64("size", size);
 	request.target.SendMessage(&message, (BHandler*)NULL, 0);
 }
@@ -164,7 +164,7 @@ CalculatorThread(void*)
 		if (!request.target.IsValid())
 			continue;
 
-		off_t size = WalkFolder(request.ref, request.node.device);
+		off_t size = WalkFolder(request.ref, request.node.device());
 
 		{
 			BAutolock locker(sLock);

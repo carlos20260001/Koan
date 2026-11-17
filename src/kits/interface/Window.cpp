@@ -197,6 +197,11 @@ _set_menu_sem_(BWindow* window, sem_id sem)
 }
 
 
+// Deskbar switcher chord (Ctrl+`): Haiku legacy keycode, not raw evdev
+// KEY_GRAVE (41).
+static const int32 kBacktickKey = 0x11;
+
+
 //	#pragma mark -
 
 
@@ -1508,6 +1513,77 @@ BWindow::UpdateSizeLimits()
 
 
 status_t
+BWindow::AcquirePointerGrab(uint32 flags, const BRect& confineTo)
+{
+	if (!Lock())
+		return B_ERROR;
+
+	fLink->StartMessage(AS_ACQUIRE_POINTER_GRAB);
+	fLink->Attach<uint32>(flags);
+	fLink->Attach<BRect>(confineTo);
+
+	int32 code = B_ERROR;
+	status_t status = fLink->FlushWithReply(code);
+	Unlock();
+	if (status != B_OK)
+		return status;
+	return code;
+}
+
+
+status_t
+BWindow::ReleasePointerGrab()
+{
+	if (!Lock())
+		return B_ERROR;
+
+	fLink->StartMessage(AS_RELEASE_POINTER_GRAB);
+
+	int32 code = B_ERROR;
+	status_t status = fLink->FlushWithReply(code);
+	Unlock();
+	if (status != B_OK)
+		return status;
+	return code;
+}
+
+
+status_t
+BWindow::AcquireKeyboardGrab(uint32 flags)
+{
+	if (!Lock())
+		return B_ERROR;
+
+	fLink->StartMessage(AS_ACQUIRE_KEYBOARD_GRAB);
+	fLink->Attach<uint32>(flags);
+
+	int32 code = B_ERROR;
+	status_t status = fLink->FlushWithReply(code);
+	Unlock();
+	if (status != B_OK)
+		return status;
+	return code;
+}
+
+
+status_t
+BWindow::ReleaseKeyboardGrab()
+{
+	if (!Lock())
+		return B_ERROR;
+
+	fLink->StartMessage(AS_RELEASE_KEYBOARD_GRAB);
+
+	int32 code = B_ERROR;
+	status_t status = fLink->FlushWithReply(code);
+	Unlock();
+	if (status != B_OK)
+		return status;
+	return code;
+}
+
+
+status_t
 BWindow::SetDecoratorSettings(const BMessage& settings)
 {
 	// flatten the given settings into a buffer and send
@@ -2459,10 +2535,11 @@ BWindow::MoveTo(float x, float y)
 		fLink->StartMessage(AS_WINDOW_MOVE);
 		fLink->Attach<float>(x);
 		fLink->Attach<float>(y);
+		// Fire and forget. B_WINDOW_MOVED corrects the frame if the
+		// server did not apply the move.
+		fLink->Flush();
 
-		status_t status;
-		if (fLink->FlushWithReply(status) == B_OK && status == B_OK)
-			fFrame.OffsetTo(x, y);
+		fFrame.OffsetTo(x, y);
 	}
 
 	Unlock();
@@ -2503,13 +2580,13 @@ BWindow::ResizeTo(float width, float height)
 		fLink->StartMessage(AS_WINDOW_RESIZE);
 		fLink->Attach<float>(width);
 		fLink->Attach<float>(height);
+		// Fire and forget. B_WINDOW_RESIZED corrects the frame if the
+		// server used a different size.
+		fLink->Flush();
 
-		status_t status;
-		if (fLink->FlushWithReply(status) == B_OK && status == B_OK) {
-			fFrame.right = fFrame.left + width;
-			fFrame.bottom = fFrame.top + height;
-			_AdoptResize();
-		}
+		fFrame.right = fFrame.left + width;
+		fFrame.bottom = fFrame.top + height;
+		_AdoptResize();
 	}
 
 	Unlock();
@@ -2984,7 +3061,7 @@ BWindow::_SetName(const char* title)
 
 	char threadName[B_OS_NAME_LENGTH];
 	strcpy(threadName, "w>");
-#ifdef __HAIKU__
+#if defined(__HAIKU__) || defined(__VOS__)
 	strlcat(threadName, title, B_OS_NAME_LENGTH);
 #else
 	int32 length = strlen(title);
@@ -3703,6 +3780,42 @@ BWindow::_Switcher(int32 rawKey, uint32 modifiers, bool repeat)
 
 	TODO: must also convert the incoming key to the font encoding of the target
 */
+// US layout character fallback for non-Latin layouts (matches GTK/Qt/Windows behavior)
+// Keypad omitted.
+static const struct {
+	uint8	keyCode;
+	char	character;
+} kUSShortcutCharacters[] = {
+	{ 0x11, '`' }, { 0x12, '1' }, { 0x13, '2' }, { 0x14, '3' },
+	{ 0x15, '4' }, { 0x16, '5' }, { 0x17, '6' }, { 0x18, '7' },
+	{ 0x19, '8' }, { 0x1a, '9' }, { 0x1b, '0' }, { 0x1c, '-' },
+	{ 0x1d, '=' },
+	{ 0x27, 'q' }, { 0x28, 'w' }, { 0x29, 'e' }, { 0x2a, 'r' },
+	{ 0x2b, 't' }, { 0x2c, 'y' }, { 0x2d, 'u' }, { 0x2e, 'i' },
+	{ 0x2f, 'o' }, { 0x30, 'p' }, { 0x31, '[' }, { 0x32, ']' },
+	{ 0x33, '\\' },
+	{ 0x3c, 'a' }, { 0x3d, 's' }, { 0x3e, 'd' }, { 0x3f, 'f' },
+	{ 0x40, 'g' }, { 0x41, 'h' }, { 0x42, 'j' }, { 0x43, 'k' },
+	{ 0x44, 'l' }, { 0x45, ';' }, { 0x46, '\'' },
+	{ 0x4c, 'z' }, { 0x4d, 'x' }, { 0x4e, 'c' }, { 0x4f, 'v' },
+	{ 0x50, 'b' }, { 0x51, 'n' }, { 0x52, 'm' }, { 0x53, ',' },
+	{ 0x54, '.' }, { 0x55, '/' },
+	{ 0x69, '<' },
+};
+
+
+static char
+us_shortcut_character(uint32 keyCode)
+{
+	for (size_t i = 0; i < B_COUNT_OF(kUSShortcutCharacters); i++) {
+		if (kUSShortcutCharacters[i].keyCode == keyCode)
+			return kUSShortcutCharacters[i].character;
+	}
+
+	return 0;
+}
+
+
 bool
 BWindow::_HandleKeyDown(BMessage* event)
 {
@@ -3725,6 +3838,15 @@ BWindow::_HandleKeyDown(BMessage* event)
 	if (event->FindInt32("key", (int32*)&rawKey) != B_OK)
 		rawKey = 0;
 
+	// ctrl mode: xkb's Control transform may leave "bytes" holding a control character
+	// where the shortcut wants the plain letter; raw_char is swap-invariant
+	int32 rawChar;
+	if ((modifiers & B_COMMAND_KEY) != 0 && (uint8)bytes[0] < 0x20
+		&& event->FindInt32("raw_char", &rawChar) == B_OK
+		&& rawChar >= 0x20 && rawChar < 0x7f) {
+		key = Shortcut::PrepareKey((char)rawChar);
+	}
+
 	// handle BMenuBar key
 	if (key == B_ESCAPE && (modifiers & B_COMMAND_KEY) != 0 && fKeyMenuBar != NULL) {
 		fKeyMenuBar->StartMenuBar(0, true, false, NULL);
@@ -3740,7 +3862,8 @@ BWindow::_HandleKeyDown(BMessage* event)
 	}
 
 	// Deskbar's Switcher
-	if ((key == B_TAB || rawKey == 0x11) && (modifiers & B_CONTROL_KEY) != 0) {
+	if ((key == B_TAB || rawKey == kBacktickKey)
+		&& (modifiers & B_CONTROL_KEY) != 0) {
 		_Switcher(rawKey, modifiers, event->HasInt32("be:key_repeat"));
 		return true;
 	}
@@ -3823,8 +3946,19 @@ BWindow::_HandleKeyDown(BMessage* event)
 		if ((modifiers & B_COMMAND_KEY) != 0)
 			MenusBeginning();
 
-		Shortcut* shortcut = _FindShortcut(key, modifiers
-			| (((modifiers & B_COMMAND_KEY) == 0) ? B_NO_COMMAND_KEY : 0));
+		uint32 lookupModifiers = modifiers
+			| (((modifiers & B_COMMAND_KEY) == 0) ? B_NO_COMMAND_KEY : 0);
+		Shortcut* shortcut = _FindShortcut(key, lookupModifiers);
+
+		if (shortcut == NULL) {
+			char positional = us_shortcut_character(rawKey);
+			if (positional != 0) {
+				uint32 positionalKey = Shortcut::PrepareKey(positional);
+				if (positionalKey != (uint32)(uint8)key)
+					shortcut = _FindShortcut(positionalKey, lookupModifiers);
+			}
+		}
+
 		if (shortcut != NULL) {
 			// TODO: would be nice to move this functionality to
 			//	a Shortcut::Invoke() method - but since BMenu::InvokeItem()
@@ -3890,7 +4024,7 @@ BWindow::_HandleUnmappedKeyDown(BMessage* event)
 		return false;
 
 	// Deskbar's Switcher
-	if (rawKey == 0x11 && (modifiers & B_CONTROL_KEY) != 0) {
+	if (rawKey == kBacktickKey && (modifiers & B_CONTROL_KEY) != 0) {
 		_Switcher(rawKey, modifiers, event->HasInt32("be:key_repeat"));
 		return true;
 	}

@@ -180,8 +180,11 @@ BInfoWindow::Quit()
 	fStopCalc = true;
 
 	// wait until CalcSize thread has terminated before closing window
-	status_t result;
-	wait_for_thread(fCalcThreadID, &result);
+	if (fCalcThreadID >= 0) {
+		status_t result;
+		wait_for_thread(fCalcThreadID, &result);
+		fCalcThreadID = -1;
+	}
 
 	_inherited::Quit();
 }
@@ -290,8 +293,11 @@ BInfoWindow::MessageReceived(BMessage* message)
 			fStopCalc = true;
 			// Wait until any current CalcSize thread has terminated before
 			// starting a new one
-			status_t result;
-			wait_for_thread(fCalcThreadID, &result);
+			if (fCalcThreadID >= 0) {
+				status_t result;
+				wait_for_thread(fCalcThreadID, &result);
+				fCalcThreadID = -1;
+			}
 
 			// Start recalculating..
 			fStopCalc = false;
@@ -399,14 +405,15 @@ BInfoWindow::MessageReceived(BMessage* message)
 			if (fModel->IsVolume()) {
 				BVolume boot;
 				BVolumeRoster().GetBootVolume(&boot);
-				BVolume volume(fModel->NodeRef()->device);
+				BVolume volume(fModel->NodeRef()->device());
 				if (volume != boot) {
 					TTracker* tracker = dynamic_cast<TTracker*>(be_app);
 					if (tracker != NULL)
 						tracker->SaveAllPoseLocations();
 
 					BMessage unmountMessage(kUnmountVolume);
-					unmountMessage.AddInt32("device_id", volume.Device());
+					// volume.Device() is dev_t; post as Int64 for mount_server.
+					unmountMessage.AddInt64("device_id", (int64)volume.Device());
 					be_app->PostMessage(&unmountMessage);
 				}
 			}
@@ -421,8 +428,7 @@ BInfoWindow::MessageReceived(BMessage* message)
 				case B_ENTRY_REMOVED:
 				{
 					node_ref itemNode;
-					message->FindInt32("device", &itemNode.device);
-					message->FindInt64("node", &itemNode.node);
+					message->FindNodeRef("virtual:node", &itemNode);
 					// our window itself may be deleted
 					if (*TargetModel()->NodeRef() == itemNode)
 						Close();
@@ -447,10 +453,10 @@ BInfoWindow::MessageReceived(BMessage* message)
 				{
 					// We were watching a volume that is no longer
 					// mounted, we might as well quit
-					node_ref itemNode;
-					// Only the device information is available
-					message->FindInt32("device", &itemNode.device);
-					if (TargetModel()->NodeRef()->device == itemNode.device)
+					// Only the device information is available in unmount messages
+					dev_t unmountedDev;
+					message->FindUInt64("device", (uint64*)&unmountedDev);
+					if (TargetModel()->NodeRef()->device() == unmountedDev)
 						Close();
 					break;
 				}
@@ -505,8 +511,6 @@ BInfoWindow::CalcSize(void* castToWindow)
 {
 	BInfoWindow* window = static_cast<BInfoWindow*>(castToWindow);
 	BDirectory dir(window->TargetModel()->EntryRef());
-	BDirectory trashDir;
-	FSGetTrashDir(&trashDir, window->TargetModel()->EntryRef()->device);
 	if (dir.InitCheck() != B_OK) {
 		if (window->StopCalc())
 			return B_ERROR;
@@ -518,6 +522,11 @@ BInfoWindow::CalcSize(void* castToWindow)
 		window->SetSizeString(B_TRANSLATE("Error calculating folder size."));
 		return B_ERROR;
 	}
+
+	BDirectory trashDir;
+	dev_t device = window->TargetModel()->EntryRef()->device();
+	if (device != 0 && device != (dev_t)B_INVALID_DEV)
+		FSGetTrashDir(&trashDir, device);
 
 	BEntry dirEntry, trashEntry;
 	dir.GetEntry(&dirEntry);
@@ -546,6 +555,7 @@ BInfoWindow::CalcSize(void* castToWindow)
 		BVolumeRoster volRoster;
 		volRoster.Rewind();
 		BVolume volume;
+		BObjectList<node_ref, true> seen(4);
 		while (volRoster.GetNextVolume(&volume) == B_OK) {
 			if (!volume.IsPersistent())
 				continue;
@@ -555,7 +565,8 @@ BInfoWindow::CalcSize(void* castToWindow)
 			currentDirCount = 0;
 
 			BDirectory trashDir;
-			if (FSGetTrashDir(&trashDir, volume.Device()) == B_OK) {
+			if (FSGetTrashDir(&trashDir, volume.Device()) == B_OK
+				&& FSRecordTrashDir(&seen, &trashDir)) {
 				CopyLoopControl loopControl;
 				FSRecursiveCalcSize(window, &loopControl, &trashDir,
 					&currentSize, &currentFileCount, &currentDirCount);

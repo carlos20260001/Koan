@@ -1,4 +1,7 @@
 /*
+ * Copyright 2026, Dario Casalinuovo. All rights reserved.
+ */
+/*
 Open Tracker License
 
 Terms and Conditions
@@ -44,6 +47,7 @@ All rights reserved.
 #include <unistd.h>
 
 #include <Alert.h>
+#include <Invoker.h>
 #include <Autolock.h>
 #include <Catalog.h>
 #include <Debug.h>
@@ -56,8 +60,11 @@ All rights reserved.
 #include <PathMonitor.h>
 #include <Roster.h>
 #include <StopWatch.h>
+#include <String.h>
 #include <Volume.h>
 #include <VolumeRoster.h>
+
+#include <VRefCache.h>
 
 #include <tracker_private.h>
 
@@ -69,6 +76,7 @@ All rights reserved.
 #include "Commands.h"
 #include "ContainerWindow.h"
 #include "DeskWindow.h"
+#include "DisksWindow.h"
 #include "FindPanel.h"
 #include "FunctionObject.h"
 #include "FSClipboard.h"
@@ -110,6 +118,7 @@ const int8 kOpenWindowMinimized = 1;
 const int8 kOpenWindowHasState = 2;
 
 const uint32 PSV_MAKE_PRINTER_ACTIVE_QUIETLY = 'pmaq';
+const uint32 kForceUnmountChoice = 'fumc';
 	// from pr_server.h
 
 const int32 kNodeMonitorBumpValue = 512;
@@ -136,17 +145,33 @@ public:
 		bool openWithOK;
 		entry_ref appRef;
 
-		if (message->FindPointer("function", (void**)&function) != B_OK
-			|| message->FindMessage("refs", &refs) != B_OK
-			|| message->FindBool("openWithOK", &openWithOK) != B_OK) {
-			printf("incomplete launch message\n");
-			return;
+		bool dispatch = message->FindPointer("function",
+				(void**)&function) == B_OK
+			&& message->FindBool("openWithOK", &openWithOK) == B_OK;
+
+		if (dispatch) {
+			// Absent for a document-less launch, which the callee accepts.
+			const BMessage* refsArg
+				= message->FindMessage("refs", &refs) == B_OK ? &refs : NULL;
+
+			if (message->FindRef("appRef", &appRef) == B_OK)
+				function(&appRef, refsArg, openWithOK);
+			else
+				function(NULL, refsArg, openWithOK);
 		}
 
-		if (message->FindRef("appRef", &appRef) == B_OK)
-			function(&appRef, &refs, openWithOK);
-		else
-			function(NULL, &refs, openWithOK);
+		// Release the vref tickets that AsynchLaunchBinder acquired to
+		// keep the slots alive across the in-process async hop. Must happen
+		// even when the task was malformed, or the slots leak.
+		int64 id, ticket;
+		for (int32 i = 0;
+			 message->FindInt64("__launch_vref_ids", i, &id) == B_OK
+				&& message->FindInt64("__launch_vref_tickets", i,
+					&ticket) == B_OK;
+			 i++) {
+			BPrivate::VRefCache::Release((vref_id)id,
+				(BPrivate::vref_ticket)ticket);
+		}
 	}
 };
 
@@ -214,7 +239,7 @@ GetVolumeFlags(Model* model)
 		}
 		return B_FS_HAS_ATTR;
 	}
-	if (!fs_stat_dev(model->NodeRef()->device,&info))
+	if (!fs_stat_dev(model->NodeRef()->device(), &info))
 		return info.flags;
 
 	return B_FS_HAS_ATTR;
@@ -542,7 +567,31 @@ TTracker::MessageReceived(BMessage* message)
 			// context menu, this is where the message gets received.
 			// Save pose locations and forward this to the automounter
 			SaveAllPoseLocations();
-			// Fall through...
+			_UnmountVolume(message);
+			break;
+
+		case kUnmountVolumeReply:
+			_HandleUnmountVolumeReply(message);
+			break;
+
+		case kForceUnmountChoice:
+		{
+			int32 which;
+			if (message->FindInt32("which", &which) != B_OK || which != 0)
+				break;
+
+			BMessage forceMessage(kUnmountVolume);
+			int64 rawId;
+			if (message->FindInt64("id", &rawId) == B_OK)
+				forceMessage.AddInt64("id", rawId);
+			int64 rawDevice;
+			if (message->FindInt64("device_id", &rawDevice) == B_OK)
+				forceMessage.AddInt64("device_id", rawDevice);
+			forceMessage.AddBool("force", true);
+			MountServer().SendMessage(&forceMessage, BMessenger(be_app));
+			break;
+		}
+
 		case kMountVolume:
 		case kMountAllNow:
 			MountServer().SendMessage(message);
@@ -1131,6 +1180,12 @@ TTracker::OpenContainerWindow(Model* model, BMessage* originalRefsList,
 	// If no window was activated (none in the current workspace),
 	// we open a new one.
 
+#ifdef __VOS__
+	BEntry rootCheckEntry;
+	if (model != NULL)
+		rootCheckEntry.SetTo(model->EntryRef());
+#endif
+
 	if (openSelector == kRunOpenWithWindow) {
 		BMessage* refList = NULL;
 		if (originalRefsList == NULL) {
@@ -1152,6 +1207,15 @@ TTracker::OpenContainerWindow(Model* model, BMessage* originalRefsList,
 	} else if (model->IsVirtualDirectory()) {
 		// window will adopt the model
 		window = new VirtualDirectoryWindow(&fWindowList, openFlags);
+#ifdef __VOS__
+	} else if (TrackerSettings().ShowDisksIcon()
+			&& FSIsRootDir(&rootCheckEntry)) {
+		// On Vitruvian "/" is the real boot fs. Promote the model to kRootNode
+		// so TargetModel()->IsRoot()=true, which causes AddVolumePoses to iterate
+		// all volumes (showing every persistent volume in the Disks window).
+		model->OverrideAsDisksRoot();
+		window = new BDisksWindow(&fWindowList, openFlags);
+#endif
 	} else {
 		// window will adopt the model
 		window = new BContainerWindow(&fWindowList, openFlags);
@@ -1802,13 +1866,15 @@ TTracker::NeedMoreNodeMonitors()
 	fNodeMonitorCount += kNodeMonitorBumpValue;
 	PRINT(("bumping nodeMonitorCount to %" B_PRId32 "\n", fNodeMonitorCount));
 
+	#ifndef __VOS__
 	struct rlimit rl;
 	rl.rlim_cur = fNodeMonitorCount;
 	rl.rlim_max = RLIM_SAVED_MAX;
 	if (setrlimit(RLIMIT_NOVMON, &rl) < 0) {
 		fNodeMonitorCount -= kNodeMonitorBumpValue;
-		return errno;
+		return -errno;
 	}
+	#endif
 
 	return B_OK;
 }
@@ -1850,6 +1916,70 @@ BMessenger
 TTracker::MountServer() const
 {
 	return BMessenger(kMountServerSignature);
+}
+
+
+void
+TTracker::_UnmountVolume(BMessage* message)
+{
+	// mount_server is headless (no app_server connection), so it replies
+	// instead of asking; the alert runs here in the desktop session.
+	MountServer().SendMessage(message, BMessenger(be_app));
+}
+
+
+void
+TTracker::_HandleUnmountVolumeReply(const BMessage* message)
+{
+	int32 error = B_OK;
+	message->FindInt32("error", &error);
+	if (error == B_OK)
+		return;
+
+	const char* name = message->FindString("name");
+	if (name == NULL)
+		name = B_TRANSLATE("volume");
+
+	if (error != B_BUSY) {
+		BString text;
+		text.SetToFormat(B_TRANSLATE("Could not unmount \"%s\": %s"),
+			name, strerror(error));
+		BAlert* alert = new BAlert("", text.String(),
+			B_TRANSLATE("OK"), 0, 0, B_WIDTH_AS_USUAL, B_WARNING_ALERT);
+		alert->SetFlags(alert->Flags() | B_CLOSE_ON_ESCAPE);
+		alert->Go(NULL);
+		return;
+	}
+
+	BString text;
+	text.SetToFormat(B_TRANSLATE("\"%s\" is busy and was not "
+		"unmounted."), name);
+	text << "\n\n";
+	text << B_TRANSLATE("Processes holding it:") << "\n";
+	const char* process;
+	int32 index = 0;
+	while (message->FindString("busyProcesses", index, &process) == B_OK) {
+		text << "  " << process << "\n";
+		index++;
+	}
+	text << "\n";
+	text << B_TRANSLATE("Force unmount anyway? Open files on the volume "
+		"may lose data.");
+
+	BAlert* alert = new BAlert("", text.String(),
+		B_TRANSLATE("Force unmount"), B_TRANSLATE("Cancel"), NULL,
+		B_WIDTH_AS_USUAL, B_WARNING_ALERT);
+	alert->SetFlags(alert->Flags() | B_CLOSE_ON_ESCAPE);
+
+	// Asynchronous: a modal Go() here would stall the Tracker app looper.
+	BMessage* choice = new BMessage(kForceUnmountChoice);
+	int64 rawId;
+	if (message->FindInt64("id", &rawId) == B_OK)
+		choice->AddInt64("id", rawId);
+	int64 rawDevice;
+	if (message->FindInt64("device_id", &rawDevice) == B_OK)
+		choice->AddInt64("device_id", rawDevice);
+	alert->Go(new BInvoker(choice, be_app));
 }
 
 
