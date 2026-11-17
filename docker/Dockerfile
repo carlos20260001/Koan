@@ -57,6 +57,15 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libgstreamer-plugins-base1.0-dev libfluidsynth-dev libegl-dev libgl-dev \
     && rm -rf /var/lib/apt/lists/*
 
+# Device, network, Bluetooth, web and package kits (M9 W2-D): libusb, libnm,
+# BlueZ, libre/libvpx (telephony), curl, apt-pkg, libsolv, argon2 (kdbx),
+# cairo.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libusb-1.0-0-dev libnm-dev libbluetooth-dev libre-dev libvpx-dev \
+    libcurl4-gnutls-dev libapt-pkg-dev libsolv-dev libsolvext-dev \
+    libargon2-dev libcairo2-dev \
+    && rm -rf /var/lib/apt/lists/*
+
 ENV DEBIAN_MIRROR=http://deb.debian.org/debian/
 ENV VOS_BASE_SUITE=trixie
 ENV VOS_KERNEL_FLAVOUR=rt-amd64
