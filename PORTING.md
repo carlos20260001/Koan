@@ -389,7 +389,17 @@ Waves (each on its own `port/*` branch, merged here when green):
             CTest 2/2. `src/CMakeLists.txt` adds userland dirs only where a CMakeLists
             exists; new `VOS_BUILD_TESTS` option. For W3: app_server must not reply to
             AS_WINDOW_MOVE/RESIZE and must handle AS_ACQUIRE/RELEASE_POINTER/KEYBOARD_GRAB
-      - [ ] W2-B shared/tracker/translation/textencoding/screensaver
+      - [x] W2-B merged `159105bf61`: shared, tracker, translation merged;
+            textencoding VitruvianOS's (glibc iconv); screensaver sources identical.
+            Tracker: VitruvianOS base (vref model, XDG trash, DisksWindow, statx) with
+            all air/OS features (tabs, sidebar, details pane, breadcrumb/search, Quick
+            Look and thumbnails, tags, grouping, folder sizes, batch rename, network
+            shares, per-monitor background, scaling fixes, air/OS artwork; 31 jmgasper
+            commits). Merge bases capped at VitruvianOS's last Tracker sync (~hrev59405)
+            because "closest blob" silently dropped air/OS changes. `KeyCommandMap.cpp`
+            taken from VitruvianOS for libtracker (`0b84da96fc`; KeyInfos waits for W4);
+            build image gained libssl-dev. Not checked at runtime: air/OS network-share
+            mounting still talks to Haiku's mount server
       - [x] W2-C merged `9aa147d50c`: VitruvianOS has no classic Media Kit (media2 on
             PipeWire/GStreamer/fluidsynth is a different API), so both live side by
             side: air/OS's classic `libmedia` (unchanged API, Nexus ports/areas to
@@ -409,6 +419,16 @@ Waves (each on its own `port/*` branch, merged here when green):
             and prefixing the ~9 unprefixed media2 includes. libroot2 lacks
             `wait_for_thread_etc` (libneural). Build image gained media2/GL dev packages
       - [ ] W2-D network/bluetooth/mail/device/package/print/quicklook/debug + VitruvianOS-only kits and libs
+      - Integrated check after A+B+C (`c87706e750`, container): configure green;
+            `libroot`, `libbe`, `libmedia`, `libmedia2`, `libmidi`, `libmidi2`,
+            `libtranslation`, `libtextencoding`, `libhwaccel`, `libalm` link with 0
+            undefined symbols. Waiting: libgame (merged `Joystick.h`, W2-D) and through
+            it libtracker, libscreensaver, libopengl; libneural has 1 undefined symbol,
+            `wait_for_thread_etc`. libroot2 lacks it because Nexus's
+            `NEXUS_THREAD_WAITFOR` ignores the `flags`/`timeout` fields its request
+            struct already has; proper fix is in the Nexus module
+            (`wait_event_interruptible_timeout` in `nexus_thread_do_waitfor`), which is
+            the external `Numerio/Nexus` submodule — decision pending
 - [ ] W3: `src/servers/app` on a new Linux display backend (design below),
       registrar, input_server, the other servers
 - [ ] W4: `src/apps`, `src/preferences`, `src/add-ons`, `src/bin`, `src/libs`,
@@ -486,3 +506,4 @@ counterparts and Mesa:
 | 2026-11-16 | `3d55d7c27b` | M9 W1-K1: headers, support/app/storage kits, buildtools merged; libbe (partial) links, buildtools from this tree |
 | 2026-11-16 | `2d885506c7` | M9 W2-A: interface/locale kits merged, be complete except libshared |
 | 2026-11-16 | `9aa147d50c` | M9 W2-C: classic Media Kit + media2 side by side; game, MIDI, GL, hwaccel, neural kits |
+| 2026-11-17 | `159105bf61` | M9 W2-B: shared, Tracker, translation, textencoding, screensaver merged |
