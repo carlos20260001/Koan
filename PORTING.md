@@ -48,7 +48,8 @@ pipeline inside Koan's Podman container.
 - [x] `License.md`: GPL-2.0 appendix for VitruvianOS/Koan/Nexus code
 - [x] `PORTING.md` (this file)
 - [x] `ReadMe.md`: mention the appendix in the licence paragraph
-- [x] Nexus submodule at `src/system/kernel/nexus` (`Numerio/Nexus` @ `0730b1cbed`)
+- [x] Nexus submodule at `src/system/kernel/nexus` (`Numerio/Nexus` @ `0730b1cbed`);
+      since 2026-11-17 the Koan fork `carlos20260001/Nexus`, branch `koan` (see M3)
 
 ### M1 - Debian builder (from VitruvianOS `upstream/master`)
 Files: `CMakeLists.txt` (root), `configure`, `bake`, `build/*.cmake`,
@@ -107,7 +108,15 @@ Files: `docker/Dockerfile`, `docker/build.sh`, `docker/run-qemu.sh`,
 - [x] `src/system/kernel/CMakeLists.txt` from VitruvianOS (dkms packaging) — in `a13fa8401a`
 - [x] `nexus-dkms` deb builds inside the container — `ninja nexus` in
       `vitruvian_build` → `nexus-dkms_0.3.0+git0.0730b1c_all.deb`
-- [ ] Module builds against the container's `linux-headers` (`make -C src/system/kernel/nexus/nexus`)
+- [x] Module builds against the container's `linux-headers` (`make -C src/system/kernel/nexus/nexus`)
+      — Debian 6.12.117 `rt-amd64` and `amd64`: `nexus.ko`, `area.ko`,
+      `nexus_node_monitor.ko`, 0 warnings, before and after the fork's patch
+- [x] **Fork** (user decision, 2026-11-17): `carlos20260001/Nexus`; `main` mirrors
+      `Numerio/Nexus`, `koan` = main + Koan patches, merged from upstream before the
+      pointer moves. Patch `71e5929`: `NEXUS_THREAD_WAITFOR` honours `flags`/`timeout`
+      (`calculate_timeout()`, boottime clock; a zeroed request waits as before).
+      Submodule switched in `7c67bf5ea3`
+- [ ] Runtime test of the timed wait with the module loaded (QEMU)
 
 ### M4 - libroot and libroot2 (from VitruvianOS `upstream/master`)
 Files: `src/system/libroot2/` (73 files, new), `src/system/libroot/CMakeLists.txt`,
@@ -360,7 +369,7 @@ Waves (each on its own `port/*` branch, merged here when green):
       (`debug_printf`), `syscalls.h`, `PrivateScreen.h` (`BaseAddress`/`BytesPerRow`),
       `cpu_type.h`, `LooperList.cpp` (no `__rw_lock_*` in libroot2),
       `ServerMemoryAllocator.cpp` (no `_kern_unreserve_address_range`); air/OS's
-      `wait_for_thread_etc()` declared but not in libroot2. Not done: kit unit tests
+      `wait_for_thread_etc()` declared but not in libroot2 (done in `7e4fd44e54`). Not done: kit unit tests
       (cppunit not in tree; standalone ones need W2). 65 differing headers left for
       W2+ (media, midi, bluetooth, net, game, device, print, tracker, agg, cppunit)
 - [x] W1-C: cleanup — merged `c774b58282` (`port/cleanup`). **No userland deleted**
@@ -444,17 +453,16 @@ Waves (each on its own `port/*` branch, merged here when green):
             `BPrivate::SHA256` restored into libroot (`985d5b8116`)
       - **W2 integrated result** (container, full `ninja -k 0`): no failed target;
             24 shared libraries, all 0 undefined symbols except libneural (1:
-            `wait_for_thread_etc`, Nexus decision below). Jamfiles: 712
+            `wait_for_thread_etc`, fixed in `7e4fd44e54` on the Nexus fork: now all
+            24 link with 0 undefined symbols). Jamfiles: 712
       - Integrated check after A+B+C (`c87706e750`, container): configure green;
             `libroot`, `libbe`, `libmedia`, `libmedia2`, `libmidi`, `libmidi2`,
             `libtranslation`, `libtextencoding`, `libhwaccel`, `libalm` link with 0
             undefined symbols. Waiting: libgame (merged `Joystick.h`, W2-D) and through
             it libtracker, libscreensaver, libopengl; libneural has 1 undefined symbol,
-            `wait_for_thread_etc`. libroot2 lacks it because Nexus's
-            `NEXUS_THREAD_WAITFOR` ignores the `flags`/`timeout` fields its request
-            struct already has; proper fix is in the Nexus module
-            (`wait_event_interruptible_timeout` in `nexus_thread_do_waitfor`), which is
-            the external `Numerio/Nexus` submodule — decision pending
+            `wait_for_thread_etc`: fixed — Nexus fork patch `71e5929` (timed
+            `NEXUS_THREAD_WAITFOR`) + libroot2 `7e4fd44e54` (relative → one deadline,
+            `B_CAN_INTERRUPT`, timed pidfd fallback for other teams)
 - [ ] W3: `src/servers/app` on a new Linux display backend (design below),
       registrar, input_server, the other servers
 - [ ] W4: `src/apps`, `src/preferences`, `src/add-ons`, `src/bin`, `src/libs`,
@@ -534,3 +542,4 @@ counterparts and Mesa:
 | 2026-11-16 | `9aa147d50c` | M9 W2-C: classic Media Kit + media2 side by side; game, MIDI, GL, hwaccel, neural kits |
 | 2026-11-17 | `159105bf61` | M9 W2-B: shared, Tracker, translation, textencoding, screensaver merged |
 | 2026-11-17 | `333350f20b` | M9 W2-D merged; W2 complete: all kits on CMake, 24 libraries link |
+| 2026-11-17 | `7c67bf5ea3` | Nexus forked (`carlos20260001/Nexus` `koan`), timed thread wait; `wait_for_thread_etc` in libroot2; libneural links |
