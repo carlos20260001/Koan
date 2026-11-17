@@ -1266,6 +1266,109 @@ BJoystick::StopRumble()
 }
 
 
+// air/OS's rumble and device-ID API (38afc262ec), on the evdev backend
+// above. Linux pads expose two FF_RUMBLE motors and no trigger motors, so
+// trigger magnitudes are accepted and ignored.
+
+struct _vos_input_id {
+	uint16	bustype;
+	uint16	vendor;
+	uint16	product;
+	uint16	version;
+};
+#define VOS_EVIOCGID	_IOR('E', 0x02, struct _vos_input_id)
+
+
+status_t
+BJoystick::GetDeviceIDs(uint16* outVendorID, uint16* outProductID)
+{
+	JoystickState* state = fJoystickData != NULL
+		? (JoystickState*)fJoystickData->ItemAt(0) : NULL;
+	if (state == NULL || state->device == NULL)
+		return B_NO_INIT;
+
+	struct _vos_input_id id;
+	memset(&id, 0, sizeof(id));
+	if (ioctl(state->device->fd, VOS_EVIOCGID, &id) < 0)
+		return B_ERROR;
+
+	if (outVendorID != NULL)
+		*outVendorID = id.vendor;
+	if (outProductID != NULL)
+		*outProductID = id.product;
+	return B_OK;
+}
+
+
+bool
+BJoystick::HasRumble()
+{
+	return SupportsRumble();
+}
+
+
+bool
+BJoystick::HasTriggerRumble()
+{
+	return false;
+}
+
+
+status_t
+BJoystick::SetRumble(uint16 strongMagnitude, uint16 weakMagnitude,
+	bigtime_t duration, uint16 leftTriggerMagnitude,
+	uint16 rightTriggerMagnitude)
+{
+	(void)leftTriggerMagnitude;
+	(void)rightTriggerMagnitude;
+
+	if (duration == 0 || (strongMagnitude == 0 && weakMagnitude == 0))
+		return StopRumble();
+	if (duration < 0)
+		return B_BAD_VALUE;
+
+	if (duration != B_INFINITE_TIMEOUT)
+		return StartRumble(strongMagnitude, weakMagnitude, duration);
+
+	// Until the next call or Close(): an evdev effect with replay.length 0
+	// plays until it is stopped.
+	JoystickState* state = fJoystickData != NULL
+		? (JoystickState*)fJoystickData->ItemAt(0) : NULL;
+	if (state == NULL || state->device == NULL)
+		return B_NO_INIT;
+
+	JoystickDeviceData* data = state->device;
+	if (!data->supportsRumble)
+		return B_NOT_SUPPORTED;
+
+	struct _ff_effect effect;
+	memset(&effect, 0, sizeof(effect));
+	effect.type = FF_RUMBLE;
+	effect.id = data->rumbleEffectID;
+	effect.replay.length = 0;
+	effect.u.rumble.strong_magnitude = strongMagnitude;
+	effect.u.rumble.weak_magnitude = weakMagnitude;
+	if (ioctl(data->fd, EVIOCSFF, &effect) < 0)
+		return B_ERROR;
+	data->rumbleEffectID = effect.id;
+
+	struct input_event play;
+	memset(&play, 0, sizeof(play));
+	play.type = EV_FF;
+	play.code = data->rumbleEffectID;
+	play.value = 1;
+	if (write(data->fd, &play, sizeof(play)) != (ssize_t)sizeof(play))
+		return B_ERROR;
+
+	struct input_event sync;
+	memset(&sync, 0, sizeof(sync));
+	sync.type = EV_SYN;
+	sync.code = SYN_REPORT;
+	write(data->fd, &sync, sizeof(sync));
+	return B_OK;
+}
+
+
 void
 BJoystick::Calibrate(struct _extended_joystick*)
 {
