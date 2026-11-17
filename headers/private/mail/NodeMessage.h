@@ -23,7 +23,8 @@
 #include <Node.h>
 #include <Message.h>
 
-#if defined(HAIKU_TARGET_PLATFORM_DANO) || defined(HAIKU_TARGET_PLATFORM_HAIKU) || defined(HAIKU_TARGET_PLATFORM_LIBBE_TEST)
+#if defined(HAIKU_TARGET_PLATFORM_DANO) || defined(HAIKU_TARGET_PLATFORM_HAIKU) || defined(HAIKU_TARGET_PLATFORM_LIBBE_TEST) \
+	|| defined(__VOS__)
 #define _IMPEXP_MAIL
 #endif
 

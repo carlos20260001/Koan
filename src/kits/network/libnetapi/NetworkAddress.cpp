@@ -1,4 +1,5 @@
 /*
+ * Copyright 2026, Dario Casalinuovo. All rights reserved.
  * Copyright 2010-2015, Axel Dörfler, axeld@pinc-software.de.
  * Distributed under the terms of the MIT License.
  */
@@ -130,7 +131,8 @@ BNetworkAddress::BNetworkAddress(const BNetworkAddress& other)
 	:
 	fAddress(other.fAddress),
 	fStatus(other.fStatus),
-	fHostName(other.fHostName)
+	fHostName(other.fHostName),
+	fAddressLength(other.fAddressLength)
 {
 }
 
@@ -151,7 +153,7 @@ void
 BNetworkAddress::Unset()
 {
 	fAddress.ss_family = AF_UNSPEC;
-	fAddress.ss_len = 2;
+	fAddressLength = 2;
 	fHostName = "";
 	fStatus = B_OK;
 }
@@ -276,7 +278,7 @@ BNetworkAddress::SetTo(const sockaddr& address)
 		return;
 	}
 
-	size_t length = min_c(sizeof(sockaddr_storage), address.sa_len);
+	size_t length = sizeof(sockaddr_storage);
 	switch (address.sa_family) {
 		case AF_INET:
 			length = sizeof(sockaddr_in);
@@ -305,8 +307,8 @@ BNetworkAddress::SetTo(const sockaddr& address, size_t length)
 		return;
 	}
 
-	memcpy(&fAddress, &address, length);
-	fAddress.ss_len = length;
+	memcpy(&fAddress, &address, min_c(length, sizeof(sockaddr_storage)));
+	fAddressLength = length;
 	fStatus = B_OK;
 }
 
@@ -345,7 +347,7 @@ BNetworkAddress::SetTo(in_addr_t inetAddress, uint16 port)
 	memset(&fAddress, 0, sizeof(sockaddr_storage));
 
 	fAddress.ss_family = AF_INET;
-	fAddress.ss_len = sizeof(sockaddr_in);
+	fAddressLength = sizeof(sockaddr_in);
 	SetAddress(inetAddress);
 	SetPort(port);
 
@@ -359,7 +361,7 @@ BNetworkAddress::SetTo(const in6_addr& inet6Address, uint16 port)
 	memset(&fAddress, 0, sizeof(sockaddr_storage));
 
 	fAddress.ss_family = AF_INET6;
-	fAddress.ss_len = sizeof(sockaddr_in6);
+	fAddressLength = sizeof(sockaddr_in6);
 	SetAddress(inet6Address);
 	SetPort(port);
 
@@ -429,7 +431,7 @@ BNetworkAddress::SetToMask(int family, uint32 prefixLength)
 			sockaddr_in& mask = (sockaddr_in&)fAddress;
 			memset(&fAddress, 0, sizeof(sockaddr_storage));
 			mask.sin_family = AF_INET;
-			mask.sin_len = sizeof(sockaddr_in);
+			fAddressLength = sizeof(sockaddr_in);
 
 			uint32 hostMask = 0;
 			for (uint8 i = 32; i > 32 - prefixLength; i--)
@@ -447,7 +449,7 @@ BNetworkAddress::SetToMask(int family, uint32 prefixLength)
 			sockaddr_in6& mask = (sockaddr_in6&)fAddress;
 			memset(&fAddress, 0, sizeof(sockaddr_storage));
 			mask.sin6_family = AF_INET6;
-			mask.sin6_len = sizeof(sockaddr_in6);
+			fAddressLength = sizeof(sockaddr_in6);
 
 			for (uint8 i = 0; i < sizeof(in6_addr); i++, prefixLength -= 8) {
 				if (prefixLength < 8) {
@@ -637,7 +639,7 @@ BNetworkAddress::Port() const
 size_t
 BNetworkAddress::Length() const
 {
-	return fAddress.ss_len;
+	return fAddressLength;
 }
 
 
@@ -658,7 +660,7 @@ BNetworkAddress::SockAddr()
 bool
 BNetworkAddress::IsEmpty() const
 {
-	if (fAddress.ss_len == 0)
+	if (fAddressLength == 0)
 		return true;
 
 	switch (fAddress.ss_family) {
@@ -868,10 +870,11 @@ BNetworkAddress::PrefixLength() const
 		{
 			sockaddr_in6& mask = (sockaddr_in6&)fAddress;
 
-			// TODO : see if we can use the optimized addr_bitcount for this
+			// Prefix masks are contiguous high-order bits, so count from the MSB down like the IPv4
+			// addr_bitcount() path; counting from the LSB gave the wrong prefix for most masks.
 			ssize_t result = 0;
 			for (uint8 i = 0; i < sizeof(in6_addr); i++) {
-				for (uint8 j = 0; j < 8; j++) {
+				for (int8 j = 7; j >= 0; j--) {
 					if (!(mask.sin6_addr.s6_addr[i] & (1 << j)))
 						return result;
 					result++;
@@ -952,11 +955,11 @@ BNetworkAddress::ResolveForDestination(const BNetworkAddress& destination)
 
 	int socket = ::socket(fAddress.ss_family, SOCK_DGRAM, 0);
 	if (socket < 0)
-		return errno;
+		return -errno;
 
 	if (ioctl(socket, SIOCGETRT, route, sizeof(buffer)) != 0) {
 		close(socket);
-		return errno;
+		return -errno;
 	}
 
 	uint16 port = Port();
@@ -1092,10 +1095,10 @@ BNetworkAddress::Equals(const BNetworkAddress& other, bool includePort) const
 		}
 
 		default:
-			if (fAddress.ss_len != other.fAddress.ss_len)
+			if (fAddressLength != other.fAddressLength)
 				return false;
 
-			return memcmp(&fAddress, &other.fAddress, fAddress.ss_len) == 0;
+			return memcmp(&fAddress, &other.fAddress, fAddressLength) == 0;
 	}
 }
 
@@ -1160,7 +1163,8 @@ BNetworkAddress::Unflatten(type_code code, const void* buffer, ssize_t size)
 BNetworkAddress&
 BNetworkAddress::operator=(const BNetworkAddress& other)
 {
-	memcpy(&fAddress, &other.fAddress, other.fAddress.ss_len);
+	memcpy(&fAddress, &other.fAddress, other.fAddressLength);
+	fAddressLength = other.fAddressLength;
 	fHostName = other.fHostName;
 	fStatus = other.fStatus;
 

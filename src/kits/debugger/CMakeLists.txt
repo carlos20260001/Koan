@@ -1,0 +1,300 @@
+# air/OS's debugger kit (libdebugger.so), the engine of Debugger and
+# debug_server's reports.
+#
+# ported subset: not built yet. Its target interface drives Haiku's
+# kernel debugger API through libdebug (install_team_debugger(), debug nub
+# ports), which has no Linux counterpart.
+# TODO(linux backend): a TargetHostInterface/DebuggerInterface on ptrace(2)
+# and /proc/<pid>/{maps,mem,task}, DWARF and ELF reading as they are, then
+# turn VOS_WITH_DEBUGGER_KIT on. The source list mirrors the retired
+# Jamfile.
+option(VOS_WITH_DEBUGGER_KIT "Build the (not yet ported) debugger kit" OFF)
+if(NOT VOS_WITH_DEBUGGER_KIT)
+	return()
+endif()
+
+set(DEBUGGER_SOURCES
+	DebuggerGlobals.cpp
+	arch/Architecture.cpp
+	arch/CpuState.cpp
+	arch/InstructionInfo.cpp
+	arch/Register.cpp
+	arch/RegisterMap.cpp
+	arch/x86/ArchitectureX86.cpp
+	arch/x86/CpuStateX86.cpp
+	arch/x86_64/ArchitectureX8664.cpp
+	arch/x86_64/CpuStateX8664.cpp
+	controllers/DebugReportGenerator.cpp
+	controllers/TeamDebugger.cpp
+	controllers/ThreadHandler.cpp
+	debug_managers/BreakpointManager.cpp
+	debug_managers/TeamMemoryBlockManager.cpp
+	debug_managers/WatchpointManager.cpp
+	debug_info/BasicFunctionDebugInfo.cpp
+	debug_info/DebuggerImageDebugInfo.cpp
+	debug_info/DebuggerTeamDebugInfo.cpp
+	debug_info/DwarfFunctionDebugInfo.cpp
+	debug_info/DwarfImageDebugInfo.cpp
+	debug_info/DwarfImageDebugInfoLoadingState.cpp
+	debug_info/DwarfStackFrameDebugInfo.cpp
+	debug_info/DwarfTeamDebugInfo.cpp
+	debug_info/DwarfTypeFactory.cpp
+	debug_info/DwarfTypes.cpp
+	debug_info/Function.cpp
+	debug_info/FunctionDebugInfo.cpp
+	debug_info/FunctionInstance.cpp
+	debug_info/GlobalTypeLookup.cpp
+	debug_info/ImageDebugInfo.cpp
+	debug_info/ImageDebugInfoLoadingState.cpp
+	debug_info/ImageDebugInfoProvider.cpp
+	debug_info/ImageDebugLoadingStateHandler.cpp
+	debug_info/ImageDebugLoadingStateHandlerRoster.cpp
+	debug_info/NoOpStackFrameDebugInfo.cpp
+	debug_info/SpecificImageDebugInfo.cpp
+	debug_info/SpecificImageDebugInfoLoadingState.cpp
+	debug_info/SpecificTeamDebugInfo.cpp
+	debug_info/StackFrameDebugInfo.cpp
+	debug_info/TeamDebugInfo.cpp
+	debug_info/loading_state_handlers/DwarfLoadingStateHandler.cpp
+	debugger_interface/DebugEvent.cpp
+	debugger_interface/DebuggerInterface.cpp
+	debugger_interface/core/CoreFileDebuggerInterface.cpp
+	debugger_interface/local/LocalDebuggerInterface.cpp
+	debugger_interface/remote/RemoteDebugRequest.cpp
+	elf/CoreFile.cpp
+	elf/ElfFile.cpp
+	elf/ElfSymbolLookup.cpp
+	files/FileManager.cpp
+	files/LocatableDirectory.cpp
+	files/LocatableEntry.cpp
+	files/LocatableFile.cpp
+	files/SourceFile.cpp
+	ids/FunctionID.cpp
+	ids/FunctionParameterID.cpp
+	ids/LocalVariableID.cpp
+	ids/ObjectID.cpp
+	ids/ReturnValueID.cpp
+	jobs/ExpressionEvaluationJob.cpp
+	jobs/GetCPUStateJob.cpp
+	jobs/GetStackTraceJob.cpp
+	jobs/GetThreadStateJob.cpp
+	jobs/LoadImageDebugInfoJob.cpp
+	jobs/LoadSourceCodeJob.cpp
+	jobs/ResolveValueNodeJob.cpp
+	jobs/RetrieveMemoryBlockJob.cpp
+	jobs/WriteCoreFileJob.cpp
+	jobs/WriteMemoryJob.cpp
+	jobs/WriteValueNodeJob.cpp
+	model/AreaInfo.cpp
+	model/Breakpoint.cpp
+	model/DisassembledCode.cpp
+	model/ExpressionInfo.cpp
+	model/ExpressionValues.cpp
+	model/FileSourceCode.cpp
+	model/Image.cpp
+	model/ImageInfo.cpp
+	model/LineDataSource.cpp
+	model/ReturnValueInfo.cpp
+	model/SemaphoreInfo.cpp
+	model/SignalInfo.cpp
+	model/SourceCode.cpp
+	model/StackFrame.cpp
+	model/StackFrameValues.cpp
+	model/StackFrameValueInfos.cpp
+	model/StackTrace.cpp
+	model/Statement.cpp
+	model/SymbolInfo.cpp
+	model/SyntheticPrimitiveType.cpp
+	model/SyscallInfo.cpp
+	model/SystemInfo.cpp
+	model/TargetHost.cpp
+	model/Team.cpp
+	model/TeamFunctionSourceInformation.cpp
+	model/TeamInfo.cpp
+	model/TeamMemory.cpp
+	model/TeamMemoryBlock.cpp
+	model/TeamTypeInformation.cpp
+	model/Thread.cpp
+	model/ThreadInfo.cpp
+	model/Type.cpp
+	model/TypeComponentPath.cpp
+	model/TypeLookupConstraints.cpp
+	model/UserBreakpoint.cpp
+	model/Variable.cpp
+	model/Watchpoint.cpp
+	settings/BreakpointSetting.cpp
+	settings/NoOpSettingsManager.cpp
+	settings/SettingsManager.cpp
+	settings/TeamFileManagerSettings.cpp
+	settings/TeamSettings.cpp
+	settings/TeamSignalSettings.cpp
+	settings/TeamUiSettings.cpp
+	settings/TeamUiSettingsFactory.cpp
+	settings/generic/Setting.cpp
+	settings/generic/Settings.cpp
+	settings/generic/SettingsDescription.cpp
+	source_language/SourceLanguage.cpp
+	source_language/SyntaxHighlighter.cpp
+	source_language/UnsupportedLanguage.cpp
+	source_language/c_family/CLanguage.cpp
+	source_language/c_family/CLanguageExpressionEvaluator.cpp
+	source_language/c_family/CLanguageFamily.cpp
+	source_language/c_family/CLanguageFamilySyntaxHighlighter.cpp
+	source_language/c_family/CLanguageFamilySyntaxHighlightInfo.cpp
+	source_language/c_family/CLanguageTokenizer.cpp
+	source_language/c_family/CppLanguage.cpp
+	source_language/x86/X86AssemblyLanguage.cpp
+	target_host_interface/TargetHostInterface.cpp
+	target_host_interface/TargetHostInterfaceInfo.cpp
+	target_host_interface/TargetHostInterfaceRoster.cpp
+	target_host_interface/local/LocalTargetHostInterface.cpp
+	target_host_interface/local/LocalTargetHostInterfaceInfo.cpp
+	target_host_interface/network/NetworkTargetHostInterface.cpp
+	target_host_interface/network/NetworkTargetHostInterfaceInfo.cpp
+	types/ArrayIndexPath.cpp
+	types/TargetAddressRangeList.cpp
+	types/ValueLocation.cpp
+	user_interface/UserInterface.cpp
+	user_interface/util/UiUtils.cpp
+	util/ArchivingUtils.cpp
+	util/BitBuffer.cpp
+	util/IntegerFormatter.cpp
+	util/RangeList.cpp
+	util/Worker.cpp
+	value/TypeHandler.cpp
+	value/TypeHandlerRoster.cpp
+	value/Value.cpp
+	value/ValueFormatter.cpp
+	value/ValueLoader.cpp
+	value/ValueNode.cpp
+	value/ValueNodeContainer.cpp
+	debug_managers/ValueNodeManager.cpp
+	value/ValueWriter.cpp
+	value/type_handlers/BListTypeHandler.cpp
+	value/type_handlers/BMessageTypeHandler.cpp
+	value/type_handlers/CStringTypeHandler.cpp
+	value/value_formatters/BoolValueFormatter.cpp
+	value/value_formatters/EnumerationValueFormatter.cpp
+	value/value_formatters/FloatValueFormatter.cpp
+	value/value_formatters/IntegerValueFormatter.cpp
+	value/value_formatters/StringValueFormatter.cpp
+	value/value_nodes/AddressValueNode.cpp
+	value/value_nodes/ArrayValueNode.cpp
+	value/value_nodes/BListValueNode.cpp
+	value/value_nodes/BMessageValueNode.cpp
+	value/value_nodes/CompoundValueNode.cpp
+	value/value_nodes/CStringValueNode.cpp
+	value/value_nodes/EnumerationValueNode.cpp
+	value/value_nodes/ExpressionValueNode.cpp
+	value/value_nodes/PointerToMemberValueNode.cpp
+	value/value_nodes/PrimitiveValueNode.cpp
+	value/value_nodes/VariableValueNodeChild.cpp
+	value/values/AddressValue.cpp
+	value/values/BoolValue.cpp
+	value/values/EnumerationValue.cpp
+	value/values/FloatValue.cpp
+	value/values/IntegerValue.cpp
+	value/values/StringValue.cpp
+
+	# demangler
+	demangler/Demangler.cpp
+	# dwarf
+	dwarf/AbbreviationTable.cpp
+	dwarf/AttributeClasses.cpp
+	dwarf/AttributeValue.cpp
+	dwarf/BaseUnit.cpp
+	dwarf/CfaContext.cpp
+	dwarf/CfaRuleSet.cpp
+	dwarf/CompilationUnit.cpp
+	dwarf/DebugInfoEntries.cpp
+	dwarf/DebugInfoEntry.cpp
+	dwarf/DwarfExpressionEvaluator.cpp
+	dwarf/DwarfFile.cpp
+	dwarf/DwarfFileLoadingState.cpp
+	dwarf/DwarfManager.cpp
+	dwarf/DwarfTargetInterface.cpp
+	dwarf/DwarfUtils.cpp
+	dwarf/LineNumberProgram.cpp
+	dwarf/SourceLanguageInfo.cpp
+	dwarf/TypeUnit.cpp
+	dwarf/TagNames.cpp
+	# disassemblers
+	arch/x86/disasm/DisassemblerX86.cpp
+	arch/x86_64/disasm/DisassemblerX8664.cpp
+)
+# TODO(linux backend): demangle.cpp, gcc2.cpp and gcc3+.cpp came from the
+# kernel debugger's demangler (src/add-ons/kernel/debugger/demangle), which
+# went with the Haiku kernel; use the C++ runtime's abi::__cxa_demangle.
+
+AddOn(
+	debugger
+	SHARED
+
+	SOURCES ${DEBUGGER_SOURCES}
+
+	LIBS be root bpackage debug shared zydis
+)
+
+target_compile_definitions(debugger PRIVATE ZYDIS_DISABLE_ENCODER)
+target_include_directories(debugger PRIVATE
+	${CMAKE_CURRENT_SOURCE_DIR}/arch
+	${CMAKE_CURRENT_SOURCE_DIR}/arch/x86
+	${CMAKE_CURRENT_SOURCE_DIR}/arch/x86_64
+	${CMAKE_CURRENT_SOURCE_DIR}/controllers
+	${CMAKE_CURRENT_SOURCE_DIR}/debug_info
+	${CMAKE_CURRENT_SOURCE_DIR}/debug_info/loading_state_handlers
+	${CMAKE_CURRENT_SOURCE_DIR}/debug_managers
+	${CMAKE_CURRENT_SOURCE_DIR}/debugger_interface
+	${CMAKE_CURRENT_SOURCE_DIR}/debugger_interface/core
+	${CMAKE_CURRENT_SOURCE_DIR}/debugger_interface/local
+	${CMAKE_CURRENT_SOURCE_DIR}/debugger_interface/remote
+	${CMAKE_CURRENT_SOURCE_DIR}/demangler
+	${CMAKE_CURRENT_SOURCE_DIR}/dwarf
+	${CMAKE_CURRENT_SOURCE_DIR}/elf
+	${CMAKE_CURRENT_SOURCE_DIR}/files
+	${CMAKE_CURRENT_SOURCE_DIR}/ids
+	${CMAKE_CURRENT_SOURCE_DIR}/jobs
+	${CMAKE_CURRENT_SOURCE_DIR}/model
+	${CMAKE_CURRENT_SOURCE_DIR}/settings
+	${CMAKE_CURRENT_SOURCE_DIR}/settings/generic
+	${CMAKE_CURRENT_SOURCE_DIR}/source_language
+	${CMAKE_CURRENT_SOURCE_DIR}/source_language/c_family
+	${CMAKE_CURRENT_SOURCE_DIR}/source_language/x86
+	${CMAKE_CURRENT_SOURCE_DIR}/target_host_interface
+	${CMAKE_CURRENT_SOURCE_DIR}/target_host_interface/local
+	${CMAKE_CURRENT_SOURCE_DIR}/target_host_interface/network
+	${CMAKE_CURRENT_SOURCE_DIR}/types
+	${CMAKE_CURRENT_SOURCE_DIR}/user_interface
+	${CMAKE_CURRENT_SOURCE_DIR}/user_interface/util
+	${CMAKE_CURRENT_SOURCE_DIR}/util
+	${CMAKE_CURRENT_SOURCE_DIR}/value
+	${CMAKE_CURRENT_SOURCE_DIR}/value/type_handlers
+	${CMAKE_CURRENT_SOURCE_DIR}/value/value_formatters
+	${CMAKE_CURRENT_SOURCE_DIR}/value/value_nodes
+	${CMAKE_CURRENT_SOURCE_DIR}/value/values
+	${CMAKE_SOURCE_DIR}/headers/private/debugger/arch
+	${CMAKE_SOURCE_DIR}/headers/private/debugger/controllers
+	${CMAKE_SOURCE_DIR}/headers/private/debugger/debug_info
+	${CMAKE_SOURCE_DIR}/headers/private/debugger/debug_managers
+	${CMAKE_SOURCE_DIR}/headers/private/debugger/elf
+	${CMAKE_SOURCE_DIR}/headers/private/debugger/files
+	${CMAKE_SOURCE_DIR}/headers/private/debugger/ids
+	${CMAKE_SOURCE_DIR}/headers/private/debugger/model
+	${CMAKE_SOURCE_DIR}/headers/private/debugger/settings
+	${CMAKE_SOURCE_DIR}/headers/private/debugger/settings/generic
+	${CMAKE_SOURCE_DIR}/headers/private/debugger/source_language
+	${CMAKE_SOURCE_DIR}/headers/private/debugger/source_language/c_family
+	${CMAKE_SOURCE_DIR}/headers/private/debugger/target_host_interface
+	${CMAKE_SOURCE_DIR}/headers/private/debugger/types
+	${CMAKE_SOURCE_DIR}/headers/private/debugger/user_interface
+	${CMAKE_SOURCE_DIR}/headers/private/debugger/user_interface/util
+	${CMAKE_SOURCE_DIR}/headers/private/debugger/util
+	${CMAKE_SOURCE_DIR}/headers/private/debugger/value
+	${CMAKE_SOURCE_DIR}/headers/private/debugger/value/value_formatters
+	${CMAKE_SOURCE_DIR}/headers/private/debugger/value/value_nodes
+	${CMAKE_SOURCE_DIR}/headers/private/debugger/value/values
+	${CMAKE_SOURCE_DIR}/headers/private/debug
+	${CMAKE_SOURCE_DIR}/headers/compatibility/bsd
+	${CMAKE_SOURCE_DIR}/src/bin/debug
+)
+UsePrivateHeaders(debugger app interface shared libroot system)

@@ -1,32 +1,37 @@
 /*
- * Copyright 2007-2008, Haiku Inc. All rights reserved.
+ * BUSBInterface: USB kit interface side, libusb-1.0 backend.
+ *
+ * Copyright 2026, Dario Casalinuovo. All rights reserved.
  * Distributed under the terms of the MIT License.
  *
- * Authors:
- *		Michael Lotz <mmlr@mlotz.ch>
- *		Salvatore Benedetto <salvatore.benedetto@gmail.com>
+ * Descriptors come from the configuration model. SetAlternate() sends
+ * SET_INTERFACE and then refreshes the cache.
  */
 
 #include <USBKit.h>
-#include <usb_raw.h>
+
+#include <string.h>
 
 #include <new>
-#include <string.h>
-#include <unistd.h>
+
+#include "USBPriv.h"
 
 
 BUSBInterface::BUSBInterface(BUSBConfiguration *config, uint32 index,
 	uint32 alternate, int rawFD)
-	:	fConfiguration(config),
-		fIndex(index),
-		fAlternate(alternate),
-		fRawFD(rawFD),
-		fEndpoints(NULL),
-		fAlternateCount(0),
-		fAlternates(NULL),
-		fInterfaceString(NULL)
+	:
+	fConfiguration(config),
+	fIndex(index),
+	fAlternate(alternate),
+	fRawFD(rawFD),
+	fEndpoints(NULL),
+	fAlternateCount(0),
+	fAlternates(NULL),
+	fInterfaceString(NULL),
+	fLibusb(NULL)
 {
-	_UpdateDescriptorAndEndpoints();
+	memset(&fDescriptor, 0, sizeof(fDescriptor));
+	memset(fReserved, 0, sizeof(fReserved));
 }
 
 
@@ -35,7 +40,7 @@ BUSBInterface::~BUSBInterface()
 	delete[] fInterfaceString;
 
 	if (fEndpoints != NULL) {
-		for (int32 i = 0; i < fDescriptor.num_endpoints; i++)
+		for (uint32 i = 0; i < fDescriptor.num_endpoints; i++)
 			delete fEndpoints[i];
 		delete[] fEndpoints;
 	}
@@ -58,8 +63,6 @@ BUSBInterface::Index() const
 uint32
 BUSBInterface::AlternateIndex() const
 {
-	if (fAlternate == B_USB_RAW_ACTIVE_ALTERNATE)
-		return ActiveAlternateIndex();
 	return fAlternate;
 }
 
@@ -127,21 +130,62 @@ status_t
 BUSBInterface::OtherDescriptorAt(uint32 index, usb_descriptor *descriptor,
 	size_t length) const
 {
-	if (length <= 0 || descriptor == NULL)
+	if (length == 0 || descriptor == NULL)
 		return B_BAD_VALUE;
 
-	usb_raw_command command;
-	command.generic_etc.descriptor = descriptor;
-	command.generic_etc.config_index = fConfiguration->Index();
-	command.generic_etc.interface_index = fIndex;
-	command.generic_etc.alternate_index = fAlternate;
-	command.generic_etc.generic_index = index;
-	command.generic_etc.length = length;
-	if (ioctl(fRawFD, B_USB_RAW_COMMAND_GET_GENERIC_DESCRIPTOR_ETC, &command,
-		sizeof(command)) || command.generic.status != B_USB_RAW_STATUS_SUCCESS)
+	_usb_config_model *model = (_usb_config_model *)fConfiguration->fModel;
+	if (model == NULL || fIndex >= model->interfaceCount)
 		return B_ERROR;
 
-	return B_OK;
+	_usb_interface_entry *entry = &model->interfaces[fIndex];
+	if (fAlternate >= entry->alternateCount)
+		return B_ERROR;
+
+	_usb_alt_entry *alt = &entry->alternates[fAlternate];
+
+	// Class specific and vendor specific bytes in descriptor order: first
+	// the ones glued to the interface descriptor, then each endpoint's.
+	uint32 wanted = index;
+
+	const uint8 *blocks[1 + 256];
+	uint32 blockLengths[1 + 256];
+	uint32 blockCount = 0;
+
+	blocks[blockCount] = alt->extra;
+	blockLengths[blockCount] = alt->extraLength;
+	blockCount++;
+
+	for (uint32 i = 0; i < alt->endpointCount && blockCount < 1 + 256;
+			i++) {
+		blocks[blockCount] = alt->endpoints[i].extra;
+		blockLengths[blockCount] = alt->endpoints[i].extraLength;
+		blockCount++;
+	}
+
+	for (uint32 i = 0; i < blockCount; i++) {
+		uint32 offset = 0;
+		while (offset < blockLengths[i]) {
+			uint8 descriptorLength = blocks[i][offset];
+			if (descriptorLength < 2 || offset + descriptorLength
+					> blockLengths[i])
+				return B_ERROR;
+
+			if (wanted == 0) {
+				if (descriptorLength > length)
+					return B_BAD_VALUE;
+
+				memcpy(descriptor, blocks[i] + offset, descriptorLength);
+				return B_OK;
+			}
+
+			wanted--;
+			offset += descriptorLength;
+		}
+	}
+
+	// Exhausted: the legacy kit reports B_ERROR, which ends caller loops
+	// written as "while OtherDescriptorAt(...) == B_OK".
+	return B_ERROR;
 }
 
 
@@ -155,7 +199,7 @@ BUSBInterface::CountEndpoints() const
 const BUSBEndpoint *
 BUSBInterface::EndpointAt(uint32 index) const
 {
-	if (index >= fDescriptor.num_endpoints || fEndpoints == NULL)
+	if (fEndpoints == NULL || index >= fDescriptor.num_endpoints)
 		return NULL;
 
 	return fEndpoints[index];
@@ -165,14 +209,23 @@ BUSBInterface::EndpointAt(uint32 index) const
 uint32
 BUSBInterface::CountAlternates() const
 {
-	usb_raw_command command;
-	command.alternate.config_index = fConfiguration->Index();
-	command.alternate.interface_index = fIndex;
-	if (ioctl(fRawFD, B_USB_RAW_COMMAND_GET_ALT_INTERFACE_COUNT, &command,
-		sizeof(command)) || command.alternate.status != B_USB_RAW_STATUS_SUCCESS)
+	_usb_config_model *model = (_usb_config_model *)fConfiguration->fModel;
+	if (model == NULL || fIndex >= model->interfaceCount)
 		return 1;
 
-	return command.alternate.alternate_info;
+	uint32 count = model->interfaces[fIndex].alternateCount;
+	return count > 0 ? count : 1;
+}
+
+
+uint32
+BUSBInterface::ActiveAlternateIndex() const
+{
+	const BUSBInterface *primary = fConfiguration->InterfaceAt(fIndex);
+	if (primary != NULL && primary != this)
+		return primary->fAlternate;
+
+	return fAlternate;
 }
 
 
@@ -196,38 +249,46 @@ BUSBInterface::AlternateAt(uint32 alternateIndex) const
 		return NULL;
 
 	for (uint32 i = 0; i < fAlternateCount; i++) {
-		fAlternates[i] = new(std::nothrow) BUSBInterface(fConfiguration, fIndex,
-			i, fRawFD);
+		fAlternates[i] = new(std::nothrow) BUSBInterface(fConfiguration,
+			fIndex, i, fRawFD);
+		if (fAlternates[i] == NULL)
+			continue;
+
+		fAlternates[i]->fLibusb = fLibusb;
+		fAlternates[i]->_UpdateDescriptorAndEndpoints();
 	}
 
 	return fAlternates[alternateIndex];
 }
 
 
-uint32
-BUSBInterface::ActiveAlternateIndex() const
-{
-	usb_raw_command command;
-	command.alternate.config_index = fConfiguration->Index();
-	command.alternate.interface_index = fIndex;
-	if (ioctl(fRawFD, B_USB_RAW_COMMAND_GET_ACTIVE_ALT_INTERFACE_INDEX, &command,
-		sizeof(command)) || command.alternate.status != B_USB_RAW_STATUS_SUCCESS)
-		return 0;
-
-	return command.alternate.alternate_info;
-}
-
-
 status_t
 BUSBInterface::SetAlternate(uint32 alternateIndex)
 {
-	usb_raw_command command;
-	command.alternate.alternate_info = alternateIndex;
-	command.alternate.config_index = fConfiguration->Index();
-	command.alternate.interface_index = fIndex;
-	if (ioctl(fRawFD, B_USB_RAW_COMMAND_SET_ALT_INTERFACE, &command,
-		sizeof(command)) || command.alternate.status != B_USB_RAW_STATUS_SUCCESS)
-		return B_ERROR;
+	if (alternateIndex >= CountAlternates())
+		return B_BAD_VALUE;
+
+	_usb_lib_state *state = (_usb_lib_state *)fLibusb;
+	if (state == NULL || state->handle == NULL)
+		return usb_no_handle_status(state);
+
+	// wValue carries the bAlternateSetting value, not our array index.
+	uint16 alternateSetting = alternateIndex;
+	uint16 interfaceNumber = fDescriptor.interface_number;
+	_usb_config_model *model = (_usb_config_model *)fConfiguration->fModel;
+	if (model != NULL && fIndex < model->interfaceCount
+		&& alternateIndex < model->interfaces[fIndex].alternateCount) {
+		_usb_interface_entry *entry = &model->interfaces[fIndex];
+		alternateSetting = entry->alternates[alternateIndex]
+			.descriptor.alternate_setting;
+		interfaceNumber = entry->interfaceNumber;
+	}
+
+	int result = libusb_control_transfer(state->handle,
+		USB_REQTYPE_INTERFACE_OUT, USB_REQUEST_SET_INTERFACE, alternateSetting,
+		interfaceNumber, NULL, 0, USB_KIT_TIMEOUT_MS);
+	if (result < 0)
+		return usb_lib_error(result);
 
 	fAlternate = alternateIndex;
 	_UpdateDescriptorAndEndpoints();
@@ -238,27 +299,44 @@ BUSBInterface::SetAlternate(uint32 alternateIndex)
 void
 BUSBInterface::_UpdateDescriptorAndEndpoints()
 {
+	// Every endpoint handed out before the switch dies here, as the header
+	// promises, even when the new alternate equals the old one.
 	if (fEndpoints != NULL) {
-		// Delete old endpoints
-		for (int32 i = 0; i < fDescriptor.num_endpoints; i++)
+		for (uint32 i = 0; i < fDescriptor.num_endpoints; i++)
 			delete fEndpoints[i];
 		delete[] fEndpoints;
 		fEndpoints = NULL;
 	}
 
-	usb_raw_command command;
-	command.interface_etc.descriptor = &fDescriptor;
-	command.interface_etc.config_index = fConfiguration->Index();
-	command.interface_etc.interface_index = fIndex;
-	command.interface_etc.alternate_index = fAlternate;
-	if (ioctl(fRawFD, B_USB_RAW_COMMAND_GET_INTERFACE_DESCRIPTOR_ETC, &command,
-			sizeof(command)) || command.interface.status != B_USB_RAW_STATUS_SUCCESS)
-		memset(&fDescriptor, 0, sizeof(fDescriptor));
+	memset(&fDescriptor, 0, sizeof(fDescriptor));
 
-	fEndpoints = new(std::nothrow) BUSBEndpoint *[fDescriptor.num_endpoints];
-	if (fEndpoints == NULL)
+	_usb_config_model *model = (_usb_config_model *)fConfiguration->fModel;
+	if (model == NULL || fIndex >= model->interfaceCount)
 		return;
 
-	for (int32 i = 0; i < fDescriptor.num_endpoints; i++)
-		fEndpoints[i] = new(std::nothrow) BUSBEndpoint(this, i, fRawFD);
+	_usb_interface_entry *entry = &model->interfaces[fIndex];
+	if (fAlternate >= entry->alternateCount)
+		return;
+
+	_usb_alt_entry *alt = &entry->alternates[fAlternate];
+	fDescriptor = alt->descriptor;
+
+	fEndpoints = new(std::nothrow) BUSBEndpoint *[fDescriptor.num_endpoints];
+	if (fEndpoints == NULL) {
+		fDescriptor.num_endpoints = 0;
+		return;
+	}
+
+	for (uint32 i = 0; i < fDescriptor.num_endpoints; i++) {
+		BUSBEndpoint *endpoint = new(std::nothrow) BUSBEndpoint(this, i,
+			fRawFD);
+		if (endpoint == NULL) {
+			fEndpoints[i] = NULL;
+			continue;
+		}
+
+		endpoint->fLibusb = fLibusb;
+		endpoint->fDescriptor = alt->endpoints[i].descriptor;
+		fEndpoints[i] = endpoint;
+	}
 }

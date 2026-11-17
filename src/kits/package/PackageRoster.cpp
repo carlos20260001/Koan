@@ -1,401 +1,366 @@
 /*
- * Copyright 2011-2014, Haiku, Inc. All Rights Reserved.
+ * Copyright 2026, Dario Casalinuovo. All rights reserved.
  * Distributed under the terms of the MIT License.
- *
- * Authors:
- *		Oliver Tappe <zooey@hirschkaefer.de>
  */
-
 
 #include <package/PackageRoster.h>
 
-#include <errno.h>
-#include <sys/stat.h>
+#include <Looper.h>
+#include <Message.h>
 
-#include <Directory.h>
-#include <Entry.h>
-#include <Messenger.h>
-#include <Path.h>
-#include <String.h>
-#include <StringList.h>
-
-#include <package/InstallationLocationInfo.h>
+#include "AptCacheAdapter.h"
 #include <package/PackageInfo.h>
-#include <package/PackageInfoContentHandler.h>
-#include <package/PackageInfoSet.h>
-#include <package/RepositoryCache.h>
-#include <package/RepositoryConfig.h>
-
-#include <package/hpkg/PackageReader.h>
 
 
-#if defined(__HAIKU__) && !defined(HAIKU_HOST_PLATFORM_HAIKU)
-#	include <package/DaemonClient.h>
-#	include <RegistrarDefs.h>
-#	include <RosterPrivate.h>
-#endif
+// Internal request codes, never seen outside this file; each is
+// handled on the worker thread and answered to the request's
+// "replyTo" messenger.
+enum {
+	kDoGetPackageList		= 'vwGL',
+	kDoGetUpgradable		= 'vwGU',
+	kDoGetPackageInfo		= 'vwGI',
+	kDoGetPackageContents	= 'vwGC',
+	kDoGetAptLog			= 'vwGG',
+	kDoGetChangelog			= 'vwGH',
+	kDoInvalidateCache		= 'vwIC'
+};
 
 
-namespace BPackageKit {
+class VPackageRoster::Worker : public BLooper {
+public:
+								Worker();
+	virtual						~Worker();
+
+	virtual	void				MessageReceived(BMessage* message);
+
+			// Written by the roster's owner (teardown) and by cancel
+			// requests; read by the worker thread inside the list read.
+			volatile bool		fCancelRequested;
+
+private:
+			void				_DoGetPackageList(const BMessenger& replyTo,
+									bool upgradableOnly);
+			void				_DoGetPackageInfo(const char* name,
+									const BMessenger& replyTo);
+			void				_DoGetPackageContents(const char* name,
+									const BMessenger& replyTo);
+			void				_DoGetAptLog(const BMessenger& replyTo);
+			void				_DoGetChangelog(const char* name,
+										const BMessenger& replyTo);
+
+			VPackageInfo*		_BuildInfo(const apt_raw_package& raw);
+			void				_ReplyError(const BMessenger& replyTo,
+									status_t status,
+									const char* name = NULL);
+
+			AptCacheAdapter		fAdapter;
+};
 
 
-using namespace BHPKG;
+VPackageRoster::Worker::Worker()
+	:
+	BLooper("package roster worker"),
+	fCancelRequested(false)
+{
+	fAdapter.SetCancelFlag(&fCancelRequested);
+	Run();
+}
 
 
-BPackageRoster::BPackageRoster()
+VPackageRoster::Worker::~Worker()
 {
 }
 
 
-BPackageRoster::~BPackageRoster()
+VPackageInfo*
+VPackageRoster::Worker::_BuildInfo(const apt_raw_package& raw)
 {
+	VPackageInfo* info = new VPackageInfo(raw.name.String());
+	info->SetArchitecture(raw.architecture.String());
+	info->SetInstalledVersion(raw.installedVersion.String());
+	info->SetCandidateVersion(raw.candidateVersion.String());
+	info->SetSection(raw.section.String());
+	info->SetSummary(raw.summary.String());
+	info->SetDescription(raw.description.String());
+	info->SetInstalledSize(raw.installedSize);
+	info->SetDownloadSize(raw.downloadSize);
+	info->SetState(raw.state);
+	info->SetChannel(raw.channel);
+	if (raw.depends.Length() > 0)
+		info->SetDepends(raw.depends.String());
+	if (raw.recommends.Length() > 0)
+		info->SetRecommends(raw.recommends.String());
+	if (raw.breaks.Length() > 0)
+		info->SetBreaks(raw.breaks.String());
+	if (raw.conflicts.Length() > 0)
+		info->SetConflicts(raw.conflicts.String());
+	if (raw.provides.Length() > 0)
+		info->SetProvides(raw.provides.String());
+	return info;
 }
 
 
-bool
-BPackageRoster::IsRebootNeeded()
+void
+VPackageRoster::Worker::_ReplyError(const BMessenger& replyTo,
+	status_t status, const char* name)
 {
-// This method makes sense only on an installed Haiku, but not for the build
-// tools.
-#if defined(__HAIKU__) && !defined(HAIKU_HOST_PLATFORM_HAIKU)
-	BInstallationLocationInfo info;
-
-	// We get information on the system package installation location.
-	// If we fail, we just have to assume a reboot is not needed.
-	if (GetInstallationLocationInfo(B_PACKAGE_INSTALLATION_LOCATION_SYSTEM,
-		info) != B_OK)
-		return false;
-
-	// CurrentlyActivePackageInfos() will return 0 if no packages need to be
-	// activated with a reboot. Otherwise, the method will return the total
-	// number of packages in the system package directory.
-	if (info.CurrentlyActivePackageInfos().CountInfos() != 0)
-		return true;
-#endif
-
-	return false;
+	BMessage reply(kVMsgQueryError);
+	reply.AddInt32("status", status);
+	reply.AddInt32("error", (int32)V_PACKAGE_ERROR_UNKNOWN);
+	reply.AddString("detail", strerror(status));
+	if (name != NULL)
+		reply.AddString("name", name);
+	replyTo.SendMessage(&reply);
 }
 
 
-status_t
-BPackageRoster::GetCommonRepositoryConfigPath(BPath* path, bool create) const
+void
+VPackageRoster::Worker::_DoGetPackageList(const BMessenger& replyTo,
+	bool upgradableOnly)
 {
-	return _GetRepositoryPath(path, create, B_SYSTEM_SETTINGS_DIRECTORY);
+	BObjectList<apt_raw_package, true> raw(2048);
+	status_t status = fAdapter.GetPackageList(&raw);
+	if (status != B_OK) {
+		_ReplyError(replyTo, status);
+		return;
+	}
+
+	BMessage reply(kVMsgPackageListReply);
+	reply.AddInt32("status", B_OK);
+	reply.AddBool("lists_empty", fAdapter.ListsLookEmpty());
+	for (int32 i = 0; i < raw.CountItems() && !fCancelRequested; i++) {
+		const apt_raw_package* item = raw.ItemAt(i);
+		if (upgradableOnly && item->state != V_PACKAGE_STATE_UPGRADABLE)
+			continue;
+		// Ownership transfers to whoever FindPointer()s this back out.
+		reply.AddPointer("package", _BuildInfo(*item));
+	}
+	replyTo.SendMessage(&reply);
 }
 
 
-status_t
-BPackageRoster::GetUserRepositoryConfigPath(BPath* path, bool create) const
+void
+VPackageRoster::Worker::_DoGetPackageInfo(const char* name,
+	const BMessenger& replyTo)
 {
-	return _GetRepositoryPath(path, create, B_USER_SETTINGS_DIRECTORY);
+	apt_raw_package raw;
+	status_t status = fAdapter.GetPackageDetails(name, &raw);
+	if (status != B_OK) {
+		_ReplyError(replyTo, status, name);
+		return;
+	}
+
+	BMessage reply(kVMsgPackageDetailsReply);
+	reply.AddInt32("status", B_OK);
+	reply.AddPointer("package", _BuildInfo(raw));
+	replyTo.SendMessage(&reply);
 }
 
 
-status_t
-BPackageRoster::GetCommonRepositoryCachePath(BPath* path, bool create) const
+void
+VPackageRoster::Worker::_DoGetPackageContents(const char* name,
+	const BMessenger& replyTo)
 {
-	return _GetRepositoryPath(path, create, B_SYSTEM_CACHE_DIRECTORY);
+	BObjectList<BString, true> paths(256);
+	status_t status = fAdapter.GetPackageContents(name, &paths);
+	if (status != B_OK) {
+		_ReplyError(replyTo, status, name);
+		return;
+	}
+
+	BMessage reply(kVMsgPackageContentsReply);
+	reply.AddInt32("status", B_OK);
+	for (int32 i = 0; i < paths.CountItems(); i++)
+		reply.AddString("path", *paths.ItemAt(i));
+	replyTo.SendMessage(&reply);
 }
 
 
-status_t
-BPackageRoster::GetUserRepositoryCachePath(BPath* path, bool create) const
+void
+VPackageRoster::Worker::_DoGetAptLog(const BMessenger& replyTo)
 {
-	return _GetRepositoryPath(path, create, B_USER_CACHE_DIRECTORY);
+	BString text;
+	status_t status = fAdapter.GetAptLog(&text);
+	if (status != B_OK) {
+		_ReplyError(replyTo, status);
+		return;
+	}
+
+	BMessage reply(kVMsgAptLogReply);
+	reply.AddInt32("status", B_OK);
+	reply.AddString("text", text);
+	replyTo.SendMessage(&reply);
 }
 
 
-status_t
-BPackageRoster::VisitCommonRepositoryConfigs(BRepositoryConfigVisitor& visitor)
+void
+VPackageRoster::Worker::_DoGetChangelog(const char* name,
+	const BMessenger& replyTo)
 {
-	BPath commonRepositoryConfigPath;
-	status_t result
-		= GetCommonRepositoryConfigPath(&commonRepositoryConfigPath);
-	if (result != B_OK)
-		return result;
+	BString text;
+	status_t status = fAdapter.GetChangelog(name, &text);
+	if (status != B_OK) {
+		_ReplyError(replyTo, status, name);
+		return;
+	}
 
-	return _VisitRepositoryConfigs(commonRepositoryConfigPath, visitor);
+	BMessage reply(kVMsgChangelogReply);
+	reply.AddInt32("status", B_OK);
+	reply.AddString("name", name);
+	reply.AddString("text", text);
+	replyTo.SendMessage(&reply);
 }
 
 
-status_t
-BPackageRoster::VisitUserRepositoryConfigs(BRepositoryConfigVisitor& visitor)
+void
+VPackageRoster::Worker::MessageReceived(BMessage* message)
 {
-	BPath userRepositoryConfigPath;
-	status_t result = GetUserRepositoryConfigPath(&userRepositoryConfigPath);
-	if (result != B_OK)
-		return result;
+	BMessenger replyTo;
+	message->FindMessenger("replyTo", &replyTo);
 
-	return _VisitRepositoryConfigs(userRepositoryConfigPath, visitor);
-}
+	switch (message->what) {
+		case kDoGetPackageList:
+			_DoGetPackageList(replyTo, false);
+			break;
 
+		case kDoGetUpgradable:
+			_DoGetPackageList(replyTo, true);
+			break;
 
-status_t
-BPackageRoster::GetRepositoryNames(BStringList& names)
-{
-	struct RepositoryNameCollector : public BRepositoryConfigVisitor {
-		RepositoryNameCollector(BStringList& _names)
-			: names(_names)
+		case kDoGetPackageInfo:
 		{
-		}
-		status_t operator()(const BEntry& entry)
-		{
-			char name[B_FILE_NAME_LENGTH];
-			status_t result = entry.GetName(name);
-			if (result != B_OK)
-				return result;
-			int32 count = names.CountStrings();
-			for (int i = 0; i < count; ++i) {
-				if (names.StringAt(i).Compare(name) == 0)
-					return B_OK;
-			}
-			names.Add(name);
-			return B_OK;
-		}
-		BStringList& names;
-	};
-	RepositoryNameCollector repositoryNameCollector(names);
-	status_t result = VisitUserRepositoryConfigs(repositoryNameCollector);
-	if (result != B_OK)
-		return result;
-
-	return VisitCommonRepositoryConfigs(repositoryNameCollector);
-}
-
-
-status_t
-BPackageRoster::GetRepositoryCache(const BString& name,
-	BRepositoryCache* repositoryCache)
-{
-	if (repositoryCache == NULL)
-		return B_BAD_VALUE;
-
-	// user path has higher precedence than common path
-	BPath path;
-	status_t result = GetUserRepositoryCachePath(&path);
-	if (result != B_OK)
-		return result;
-	path.Append(name.String());
-
-	BEntry repoCacheEntry(path.Path());
-	if (repoCacheEntry.Exists())
-		return repositoryCache->SetTo(repoCacheEntry);
-
-	if ((result = GetCommonRepositoryCachePath(&path, true)) != B_OK)
-		return result;
-	path.Append(name.String());
-
-	result = repoCacheEntry.SetTo(path.Path());
-	if (result != B_OK)
-		return result;
-	return repositoryCache->SetTo(repoCacheEntry);
-}
-
-
-status_t
-BPackageRoster::GetRepositoryConfig(const BString& name,
-	BRepositoryConfig* repositoryConfig)
-{
-	if (repositoryConfig == NULL)
-		return B_BAD_VALUE;
-
-	// user path has higher precedence than common path
-	BPath path;
-	status_t result = GetUserRepositoryConfigPath(&path);
-	if (result != B_OK)
-		return result;
-	path.Append(name.String());
-
-	BEntry repoConfigEntry(path.Path());
-	if (repoConfigEntry.Exists())
-		return repositoryConfig->SetTo(repoConfigEntry);
-
-	if ((result = GetCommonRepositoryConfigPath(&path, true)) != B_OK)
-		return result;
-	path.Append(name.String());
-
-	result = repoConfigEntry.SetTo(path.Path());
-	if (result != B_OK)
-		return result;
-	return repositoryConfig->SetTo(repoConfigEntry);
-}
-
-
-status_t
-BPackageRoster::GetInstallationLocationInfo(
-	BPackageInstallationLocation location, BInstallationLocationInfo& _info)
-{
-// This method makes sense only on an installed Haiku, but not for the build
-// tools.
-#if defined(__HAIKU__) && !defined(HAIKU_HOST_PLATFORM_HAIKU)
-	return BPackageKit::BPrivate::BDaemonClient().GetInstallationLocationInfo(
-		location, _info);
-#else
-	return B_NOT_SUPPORTED;
-#endif
-}
-
-
-status_t
-BPackageRoster::GetActivePackages(BPackageInstallationLocation location,
-	BPackageInfoSet& packageInfos)
-{
-// This method makes sense only on an installed Haiku, but not for the build
-// tools.
-#if defined(__HAIKU__) && !defined(HAIKU_HOST_PLATFORM_HAIKU)
-	BInstallationLocationInfo info;
-	status_t error = GetInstallationLocationInfo(location, info);
-	if (error != B_OK)
-		return error;
-
-	packageInfos = info.LatestActivePackageInfos();
-	return B_OK;
-#else
-	return B_NOT_SUPPORTED;
-#endif
-}
-
-
-status_t
-BPackageRoster::IsPackageActive(BPackageInstallationLocation location,
-	const BPackageInfo info, bool* active)
-{
-// This method makes sense only on an installed Haiku, but not for the build
-// tools.
-#if defined(__HAIKU__) && !defined(HAIKU_HOST_PLATFORM_HAIKU)
-	BPackageInfoSet packageInfos;
-	status_t error = GetActivePackages(location, packageInfos);
-	if (error != B_OK)
-		return error;
-
-	BPackageInfoSet::Iterator it = packageInfos.GetIterator();
-	while (const BPackageInfo* packageInfo = it.Next()) {
-		if (info.Name() == packageInfo->Name() &&
-			info.Version().Compare(packageInfo->Version()) == 0) {
-			*active = true;
+			BString name;
+			message->FindString("name", &name);
+			_DoGetPackageInfo(name.String(), replyTo);
 			break;
 		}
-	}
 
-	return B_OK;
-#else
-	return B_NOT_SUPPORTED;
-#endif
-}
-
-
-status_t
-BPackageRoster::StartWatching(const BMessenger& target, uint32 eventMask)
-{
-// This method makes sense only on an installed Haiku, but not for the build
-// tools.
-#if defined(__HAIKU__) && !defined(HAIKU_HOST_PLATFORM_HAIKU)
-	// compose the registrar request
-	BMessage request(::BPrivate::B_REG_PACKAGE_START_WATCHING);
-	status_t error;
-	if ((error = request.AddMessenger("target", target)) != B_OK
-		|| (error = request.AddUInt32("events", eventMask)) != B_OK) {
-		return error;
-	}
-
-	// send it
-	BMessage reply;
-	error = BRoster::Private().SendTo(&request, &reply, false);
-	if (error != B_OK)
-		return error;
-
-	// get result
-	if (reply.what != ::BPrivate::B_REG_SUCCESS) {
-		int32 result;
-		if (reply.FindInt32("error", &result) != B_OK)
-			result = B_ERROR;
-		return (status_t)error;
-	}
-
-	return B_OK;
-#else
-	return B_NOT_SUPPORTED;
-#endif
-}
-
-
-status_t
-BPackageRoster::StopWatching(const BMessenger& target)
-{
-// This method makes sense only on an installed Haiku, but not for the build
-// tools.
-#if defined(__HAIKU__) && !defined(HAIKU_HOST_PLATFORM_HAIKU)
-	// compose the registrar request
-	BMessage request(::BPrivate::B_REG_PACKAGE_STOP_WATCHING);
-	status_t error = request.AddMessenger("target", target);
-	if (error  != B_OK)
-		return error;
-
-	// send it
-	BMessage reply;
-	error = BRoster::Private().SendTo(&request, &reply, false);
-	if (error != B_OK)
-		return error;
-
-	// get result
-	if (reply.what != ::BPrivate::B_REG_SUCCESS) {
-		int32 result;
-		if (reply.FindInt32("error", &result) != B_OK)
-			result = B_ERROR;
-		return (status_t)error;
-	}
-
-	return B_OK;
-#else
-	return B_NOT_SUPPORTED;
-#endif
-}
-
-
-status_t
-BPackageRoster::_GetRepositoryPath(BPath* path, bool create,
-	directory_which whichDir) const
-{
-	if (path == NULL)
-		return B_BAD_VALUE;
-
-	status_t result = find_directory(whichDir, path);
-	if (result != B_OK)
-		return result;
-	if ((result = path->Append("package-repositories")) != B_OK)
-		return result;
-
-	if (create) {
-		BEntry entry(path->Path(), true);
-		if (!entry.Exists()) {
-			if (mkdir(path->Path(), 0755) != 0)
-				return errno;
+		case kDoGetPackageContents:
+		{
+			BString name;
+			message->FindString("name", &name);
+			_DoGetPackageContents(name.String(), replyTo);
+			break;
 		}
-	}
 
-	return B_OK;
+		case kDoGetAptLog:
+			_DoGetAptLog(replyTo);
+			break;
+
+		case kDoGetChangelog:
+		{
+			BString name;
+			message->FindString("name", &name);
+			_DoGetChangelog(name.String(), replyTo);
+			break;
+		}
+
+		case kDoInvalidateCache:
+			fAdapter.InvalidateCache();
+			break;
+
+		default:
+			BLooper::MessageReceived(message);
+			break;
+	}
+}
+
+
+VPackageRoster::VPackageRoster()
+	:
+	fWorker(new Worker())
+{
+}
+
+
+VPackageRoster::~VPackageRoster()
+{
+	// A list read over the whole cache can run for minutes; teardown
+	// must not wait it out, so cancel first and only then stop.
+	fWorker->fCancelRequested = true;
+	if (fWorker->Lock())
+		fWorker->Quit();
 }
 
 
 status_t
-BPackageRoster::_VisitRepositoryConfigs(const BPath& path,
-	BRepositoryConfigVisitor& visitor)
+VPackageRoster::GetPackageList(const BMessenger& replyTo)
 {
-	BDirectory directory(path.Path());
-	status_t result = directory.InitCheck();
-	if (result == B_ENTRY_NOT_FOUND)
-		return B_OK;
-	if (result != B_OK)
-		return result;
-
-	BEntry entry;
-	while (directory.GetNextEntry(&entry, true) == B_OK) {
-		if ((result = visitor(entry)) != B_OK)
-			return result;
-	}
-
-	return B_OK;
+	// Re-armed here, not when the request runs: teardown may set the
+	// flag while this request is still queued.
+	fWorker->fCancelRequested = false;
+	BMessage request(kDoGetPackageList);
+	request.AddMessenger("replyTo", replyTo);
+	return fWorker->PostMessage(&request);
 }
 
 
-}	// namespace BPackageKit
+status_t
+VPackageRoster::GetUpgradable(const BMessenger& replyTo)
+{
+	fWorker->fCancelRequested = false;
+	BMessage request(kDoGetUpgradable);
+	request.AddMessenger("replyTo", replyTo);
+	return fWorker->PostMessage(&request);
+}
+
+
+status_t
+VPackageRoster::GetPackageInfo(const char* name, const BMessenger& replyTo)
+{
+	if (name == NULL)
+		return B_BAD_VALUE;
+	BMessage request(kDoGetPackageInfo);
+	request.AddMessenger("replyTo", replyTo);
+	request.AddString("name", name);
+	return fWorker->PostMessage(&request);
+}
+
+
+status_t
+VPackageRoster::GetPackageContents(const char* name,
+	const BMessenger& replyTo)
+{
+	if (name == NULL)
+		return B_BAD_VALUE;
+	BMessage request(kDoGetPackageContents);
+	request.AddMessenger("replyTo", replyTo);
+	request.AddString("name", name);
+	return fWorker->PostMessage(&request);
+}
+
+
+status_t
+VPackageRoster::GetAptLog(const BMessenger& replyTo)
+{
+	BMessage request(kDoGetAptLog);
+	request.AddMessenger("replyTo", replyTo);
+	return fWorker->PostMessage(&request);
+}
+
+
+status_t
+VPackageRoster::GetChangelog(const char* name, const BMessenger& replyTo)
+{
+	if (name == NULL)
+		return B_BAD_VALUE;
+	BMessage request(kDoGetChangelog);
+	request.AddMessenger("replyTo", replyTo);
+	request.AddString("name", name);
+	return fWorker->PostMessage(&request);
+}
+
+
+void
+VPackageRoster::RequestCancel()
+{
+	fWorker->fCancelRequested = true;
+}
+
+
+status_t
+VPackageRoster::InvalidateCache()
+{
+	BMessage request(kDoInvalidateCache);
+	return fWorker->PostMessage(&request);
+}

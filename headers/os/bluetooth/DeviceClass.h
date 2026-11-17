@@ -1,6 +1,9 @@
 /*
  * Copyright 2007 Oliver Ruiz Dorantes, oliver.ruiz.dorantes_at_gmail.com
  * All rights reserved. Distributed under the terms of the MIT License.
+ *
+ * Class-of-device
+ * decoding is pure bit twiddling, no HCI/D-Bus I/O, so it needed no rework.
  */
 #ifndef _DEVICE_CLASS_H
 #define _DEVICE_CLASS_H
@@ -17,7 +20,7 @@ class DeviceClass {
 public:
 
 	static const uint8 PixelsForIcon = 32;
-	static const uint8 IconInsets = 5; 
+	static const uint8 IconInsets = 5;
 
 	DeviceClass(uint8 record[3])
 	{
@@ -41,6 +44,11 @@ public:
 		fRecord = record[0]|record[1]<<8|record[2]<<16;
 	}
 
+	void SetRecord(uint32 record)
+	{
+		fRecord = record;
+	}
+
 	void SetRecord(uint8 major, uint8 minor, uint16 service)
 	{
 		fRecord = (minor & 0x3F) << 2;
@@ -49,27 +57,27 @@ public:
 	}
 
 
-	uint16 ServiceClass()
+	uint16 ServiceClass() const
 	{
 		return (fRecord & 0x00FFE000) >> 13;
 	}
 
-	uint8 MajorDeviceClass()
-	{				
+	uint8 MajorDeviceClass() const
+	{
 		return (fRecord & 0x00001F00) >> 8;
 	}
 
-	uint8 MinorDeviceClass()
+	uint8 MinorDeviceClass() const
 	{
 		return (fRecord & 0x000000FF) >> 2;
 	}
-	
-	uint32 Record()
+
+	uint32 Record() const
 	{
 		return fRecord;
 	}
 
-	bool IsUnknownDeviceClass()
+	bool IsUnknownDeviceClass() const
 	{
 		return (fRecord == UNKNOWN_CLASS_OF_DEVICE);
 	}
@@ -77,9 +85,9 @@ public:
 	void GetServiceClass(BString&);
 	void GetMajorDeviceClass(BString&);
 	void GetMinorDeviceClass(BString&);
-	
+
 	void DumpDeviceClass(BString&);
-	
+
 	void Draw(BView* view, const BPoint& point);
 
 private:

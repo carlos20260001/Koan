@@ -320,9 +320,8 @@ BMailProtocol::_ProcessHeaderFetched(entry_ref& ref, BFile& file,
 		return B_NO_MAIL_ACTION;
 
 	// We have to rename the file
-	node_ref newParentRef;
-	newParentRef.device = outRef.device;
-	newParentRef.node = outRef.directory;
+	// libroot2's entry_ref and node_ref keep their fields private.
+	node_ref newParentRef(outRef.device(), outRef.directory());
 
 	BDirectory newParent(&newParentRef);
 	status_t status = newParent.InitCheck();

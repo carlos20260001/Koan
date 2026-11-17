@@ -1,9 +1,22 @@
 /*
  * Copyright 2007-2008 Oliver Ruiz Dorantes, oliver.ruiz.dorantes_at_gmail.com
+ * Copyright 2026, Vitruvian Project.
  * All rights reserved. Distributed under the terms of the MIT License.
+ *
+ * Backed by BlueZBackend instead of raw HCI inquiry commands:
+ *  - The access code (GIAC/LIAC) of air/OS's StartInquiry() selects an HCI
+ *    inquiry access code; BlueZ's StartDiscovery always does a general
+ *    inquiry, so the code is accepted and ignored.
+ *  - StartInquiry() only queues the request; results arrive at the
+ *    listener. Discovery stops by itself after the inquiry time.
+ *  - VitruvianOS's agents are made for an adapter path (public
+ *    constructor), air/OS's through LocalDevice::GetDiscoveryAgent().
  */
 #ifndef _DISCOVERY_AGENT_H
 #define _DISCOVERY_AGENT_H
+
+#include <String.h>
+#include <SupportDefs.h>
 
 #include <bluetooth/bluetooth.h>
 #include <bluetooth/DiscoveryListener.h>
@@ -24,6 +37,14 @@
 #define BT_MIN_INQUIRY_TIME	(0x01) //  1.18 secs
 #define BT_MAX_INQUIRY_TIME	(0x30) // 61.44 secs
 
+// Default/bounds for the inquiry window in seconds -- the range above,
+// expressed in seconds instead of 1.28 s HCI inquiry ticks.
+#define BT_DEFAULT_INQUIRY_TIME_SECS	10
+#define BT_MIN_INQUIRY_TIME_SECS		1
+#define BT_MAX_INQUIRY_TIME_SECS		61
+
+class BMessageRunner;
+
 namespace Bluetooth {
 
 class LocalDevice;
@@ -39,9 +60,21 @@ public:
 	static const int CACHED = BT_CACHED;
 	static const int NOT_DISCOVERABLE = BT_NOT_DISCOVERABLE;
 
+	explicit DiscoveryAgent(const BString& adapterPath);
+	~DiscoveryAgent();
+
 	RemoteDevicesList RetrieveDevices(int option); /* TODO */
 	status_t StartInquiry(int accessCode, DiscoveryListener* listener); /* Throwing */
 	status_t StartInquiry(uint32 accessCode, DiscoveryListener* listener, bigtime_t secs);
+
+	// Starts BlueZ discovery on this agent's adapter. NOTIFICATION_DEVICE_FOUND
+	// is routed to `listener` for `secs` microseconds, after which discovery
+	// is stopped automatically and listener->InquiryCompleted(INQUIRY_COMPLETED)
+	// fires. BlueZBackend supports any number of concurrent watchers, each
+	// with its own mask, so a scan's DEVICE_FOUND registration coexists with
+	// other property-change watchers (e.g. the preflet's own StartWatching).
+	status_t StartInquiry(DiscoveryListener* listener,
+		bigtime_t secs = BT_DEFAULT_INQUIRY_TIME_SECS * 1000000LL);
 	status_t CancelInquiry(DiscoveryListener* listener);
 
 	/*
@@ -54,12 +87,14 @@ public:
 
 private:
 	DiscoveryAgent(LocalDevice* ld);
-	~DiscoveryAgent();
 	void SetLocalDeviceOwner(LocalDevice* ld);
 
 	DiscoveryListener* fLastUsedListener;
 	LocalDevice*       fLocalDevice;
-	BMessenger*        fMessenger;
+
+	BString fAdapterPath;
+	DiscoveryListener* fListener;
+	BMessageRunner* fTimeoutRunner;
 
 	friend class LocalDevice;
 };

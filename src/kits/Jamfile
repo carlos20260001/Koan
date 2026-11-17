@@ -4,12 +4,3 @@ SubDir HAIKU_TOP src kits ;
 # CMake (src/kits/CMakeLists.txt); this file only includes the kits that
 # are still on Jam.
 
-SubInclude HAIKU_TOP src kits bluetooth ;
-SubInclude HAIKU_TOP src kits debug ;
-SubInclude HAIKU_TOP src kits debugger ;
-SubInclude HAIKU_TOP src kits device ;
-SubInclude HAIKU_TOP src kits mail ;
-SubInclude HAIKU_TOP src kits network ;
-SubInclude HAIKU_TOP src kits package ;
-SubInclude HAIKU_TOP src kits print ;
-SubInclude HAIKU_TOP src kits quicklook ;

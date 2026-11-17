@@ -7,10 +7,11 @@
 
 
 #include <net/if.h>
-#include <net/if_types.h>
 
 #include <ObjectList.h>
 #include <NetworkAddress.h>
+#include <String.h>
+
 
 
 class BNetworkInterface;
@@ -121,6 +122,7 @@ public:
 private:
 			char				fName[IF_NAMESIZE];
 			BList				fAddresses;
+	mutable	BString				fDevicePath;
 };
 
 

@@ -1,13 +1,20 @@
 /*
  * Copyright 2007-2008, Haiku Inc. All rights reserved.
  * Distributed under the terms of the MIT License.
+ *
+ * Restored from the tree history (added by d8e0883a "Mass code update to
+ * hrev52990", removed by dd3e253a "Cleanup") and backed by a new Linux
+ * implementation in src/kits/device: udev enumerates and reports hotplug,
+ * libusb-1.0 reads descriptors and moves data. The private sections gain
+ * the libusb state each level of the object tree needs; the public API is
+ * unchanged. usb_iso_packet_descriptor, which used to come from the
+ * kernel-only USB3.h, now arrives with USB_spec.h.
  */
 #ifndef _USBKIT_H
 #define _USBKIT_H
 
 #include <SupportDefs.h>
 #include <USB_spec.h>
-#include <USB_isochronous.h>
 
 
 class BUSBRoster;
@@ -138,6 +145,7 @@ virtual	status_t					InitCheck();
 										void *data) const;
 
 private:
+friend	class BUSBConfiguration;
 virtual	void						_ReservedUSBDevice1();
 virtual	void						_ReservedUSBDevice2();
 virtual	void						_ReservedUSBDevice3();
@@ -154,6 +162,9 @@ virtual	void						_ReservedUSBDevice5();
 mutable	char *						fManufacturerString;
 mutable	char *						fProductString;
 mutable	char *						fSerialNumberString;
+
+		void *						fLibusb;
+		status_t					fInitStatus;
 
 		uint32						fReserved[10];
 };
@@ -191,9 +202,12 @@ public:
 
 private:
 friend	class BUSBDevice;
+friend	class BUSBInterface;
 									BUSBConfiguration(BUSBDevice *device,
 										uint32 index, int rawFD);
 									~BUSBConfiguration();
+
+		void						_Load();
 
 		BUSBDevice *				fDevice;
 		uint32						fIndex;
@@ -203,6 +217,9 @@ friend	class BUSBDevice;
 		BUSBInterface **			fInterfaces;
 
 mutable	char *						fConfigurationString;
+
+		void *						fModel;
+		void *						fLibusb;
 
 		uint32						fReserved[10];
 };
@@ -297,6 +314,8 @@ mutable	uint32						fAlternateCount;
 mutable	BUSBInterface **			fAlternates;
 
 mutable	char *						fInterfaceString;
+
+		void *						fLibusb;
 
 		uint32						fReserved[10];
 };
@@ -401,6 +420,8 @@ friend	class BUSBInterface;
 		int							fRawFD;
 
 		usb_endpoint_descriptor		fDescriptor;
+
+		void *						fLibusb;
 
 		uint32						fReserved[10];
 };

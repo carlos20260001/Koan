@@ -8,7 +8,9 @@
 #include <string.h>
 
 extern "C" {
-#include "../../libs/compat/openbsd_wlan/crypto/aes.h"
+// The OpenBSD AES from src/libs/compat is kernel code (sys/systm.h); on
+// Linux the block cipher comes from OpenSSL, which be links already.
+#include <openssl/evp.h>
 }
 
 
@@ -34,14 +36,21 @@ EncryptLittleEndian(const uint8_t key[16], const uint8_t input[16],
 		reversedKey[i] = key[15 - i];
 		reversedInput[i] = input[15 - i];
 	}
-	AES_CTX context = {};
-	bool okay = AES_Setkey(&context, reversedKey, 16) == 0;
+	// One AES-128 block: ECB without padding.
+	EVP_CIPHER_CTX* context = EVP_CIPHER_CTX_new();
+	int length = 0;
+	bool okay = context != NULL
+		&& EVP_EncryptInit_ex(context, EVP_aes_128_ecb(), NULL, reversedKey,
+			NULL) == 1
+		&& EVP_CIPHER_CTX_set_padding(context, 0) == 1
+		&& EVP_EncryptUpdate(context, encrypted, &length, reversedInput, 16)
+			== 1
+		&& length == 16;
 	if (okay) {
-		AES_Encrypt(&context, reversedInput, encrypted);
 		for (size_t i = 0; i < 16; i++)
 			output[i] = encrypted[15 - i];
 	}
-	ClearSecret(&context, sizeof(context));
+	EVP_CIPHER_CTX_free(context);
 	ClearSecret(reversedKey, sizeof(reversedKey));
 	ClearSecret(reversedInput, sizeof(reversedInput));
 	ClearSecret(encrypted, sizeof(encrypted));

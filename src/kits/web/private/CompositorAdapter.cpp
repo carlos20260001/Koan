@@ -1,0 +1,373 @@
+/*
+ * Copyright 2026, VitruvianOS Project.
+ * Distributed under the terms of the LGPL License.
+ */
+
+
+#include "compositor_adapter.h"
+#include "logging.h"
+#include "process_manager.h"
+
+#include <Bitmap.h>
+#include <GraphicsDefs.h>
+#include <Rect.h>
+
+// WPEBackend-FDO creates its own internal wl_display in-process — no external
+// Wayland compositor is required. The wl_shm_buffer below is a pure in-process
+// object; we use it only to access the raw pixel pointer and then copy into a
+// BBitmap for Vitruvian's app_server. No Wayland protocol traffic leaves this
+// process.
+#include <wayland-server.h>
+#include <wpe/fdo.h>
+#include <wpe/unstable/fdo-shm.h>
+#include <wpe/wpe.h>
+
+#include <algorithm>
+
+// 30 Hz leaves llvmpipe CPU for video decoding.
+// TODO: 60 Hz on GPU renderers; choose at runtime.
+static const unsigned int kActiveTickMs = 33;
+static const unsigned int kIdleTickMs = 200;
+static const unsigned int kFallbackMs = 50;
+#include <cstdlib>
+#include <cstring>
+
+
+// The web process loads its renderer backend through libwpe; without an
+// explicit loader init libwpe looks for libWPEBackend-default.so and aborts.
+static void
+init_fdo_backend()
+{
+	static bool sDone = false;
+	if (sDone)
+		return;
+	sDone = true;
+	wpe_loader_init("libWPEBackend-fdo-1.0.so.1");
+	wpe_fdo_initialize_shm();
+}
+
+
+CompositorAdapter::CompositorAdapter(int w, int h)
+	:
+	fExportable(nullptr),
+	fOwnsExportable(true),
+	fBackend(nullptr),
+	frontBitmap(nullptr),
+	fBackBitmap(nullptr),
+	fWidth(w),
+	fHeight(h),
+	fFillColor(0xFFFFFFFF),
+	fFrameReady(false),
+	fClockRunning(false),
+	fLastActivity(0),
+	fClockSource(0),
+	fOutstanding(false),
+	fFallbackSource(0)
+{
+	init_fdo_backend();
+
+	// fdo keeps this pointer for the exportable's lifetime: it must not
+	// live on the stack.
+	static struct wpe_view_backend_exportable_fdo_client exportClient;
+	memset(&exportClient, 0, sizeof(exportClient));
+
+	exportClient.export_shm_buffer =
+		[](void* data, struct wpe_fdo_shm_exported_buffer* buffer) {
+			auto* self = static_cast<CompositorAdapter*>(data);
+			struct wl_shm_buffer* shmBuf =
+				wpe_fdo_shm_exported_buffer_get_shm_buffer(buffer);
+			// Set before the copy: a Draw that shows this frame must see it.
+			self->fOutstanding.store(true);
+			if (shmBuf) {
+				wl_shm_buffer_begin_access(shmBuf);
+				const uint8_t* pixels =
+					static_cast<const uint8_t*>(wl_shm_buffer_get_data(shmBuf));
+				int32_t srcW = (int32_t)wl_shm_buffer_get_width(shmBuf);
+				int32_t srcH = (int32_t)wl_shm_buffer_get_height(shmBuf);
+				int32_t stride = wl_shm_buffer_get_stride(shmBuf);
+				self->_BlitSHMFrame(pixels, stride, srcW, srcH);
+				wl_shm_buffer_end_access(shmBuf);
+			}
+			wpe_view_backend_exportable_fdo_dispatch_release_shm_exported_buffer(
+				self->fExportable, buffer);
+			self->_ArmFallback();
+			self->ScheduleFrameComplete();
+		};
+
+	fExportable = wpe_view_backend_exportable_fdo_create(
+		&exportClient, this, (uint32_t)w, (uint32_t)h);
+	if (!fExportable) {
+		log_error("CompositorAdapter: failed to create FDO exportable");
+		return;
+	}
+
+	// FDO creates and owns the backend; do not call wpe_view_backend_initialize.
+	fBackend = wpe_view_backend_exportable_fdo_get_view_backend(fExportable);
+
+	_AllocateBitmaps();
+
+	log_info("CompositorAdapter: created %dx%d (FDO/SHM)", w, h);
+}
+
+
+struct wpe_view_backend_exportable_fdo*
+CompositorAdapter::ReleaseExportable()
+{
+	// The frame callbacks keep using the pointer; only ownership moves.
+	fOwnsExportable = false;
+	return fExportable;
+}
+
+
+CompositorAdapter::~CompositorAdapter()
+{
+	// Destroyed on the GLib thread, so the clock cannot be mid-tick.
+	if (fClockSource != 0)
+		g_source_remove(fClockSource);
+	if (fFallbackSource != 0)
+		g_source_remove(fFallbackSource);
+	// Owned by the WebView once ReleaseExportable() handed it over.
+	if (fExportable && fOwnsExportable)
+		wpe_view_backend_exportable_fdo_destroy(fExportable);
+	delete frontBitmap;
+	delete fBackBitmap;
+}
+
+
+// Fills [x0, x1) of one row of 32-bit pixels.
+static void
+fill_pixels(uint8_t* row, int x0, int x1, uint32_t color)
+{
+	uint32_t* p = (uint32_t*)row;
+	for (int x = x0; x < x1; x++)
+		p[x] = color;
+}
+
+
+// Copies the overlap of old into bmp and fills the rest with color.
+static void
+copy_overlap(BBitmap* bmp, const BBitmap* old, int w, int h, uint32_t color)
+{
+	if (bmp == nullptr || bmp->Bits() == nullptr)
+		return;
+
+	int oldW = 0;
+	int oldH = 0;
+	if (old != nullptr && old->Bits() != nullptr) {
+		oldW = (int)old->Bounds().Width() + 1;
+		oldH = (int)old->Bounds().Height() + 1;
+	}
+	int copyW = std::min(oldW, w);
+	int copyH = std::min(oldH, h);
+
+	uint8_t* dst = (uint8_t*)bmp->Bits();
+	int dstStride = bmp->BytesPerRow();
+	const uint8_t* src = old != nullptr ? (const uint8_t*)old->Bits() : nullptr;
+	int srcStride = old != nullptr ? old->BytesPerRow() : 0;
+
+	for (int y = 0; y < h; y++) {
+		uint8_t* row = dst + y * dstStride;
+		if (y < copyH)
+			memcpy(row, src + y * srcStride, copyW * 4);
+		fill_pixels(row, y < copyH ? copyW : 0, w, color);
+	}
+}
+
+
+void
+CompositorAdapter::_AllocateBitmaps(const BBitmap* old)
+{
+	BRect bounds(0, 0, fWidth - 1, fHeight - 1);
+
+	BBitmap* newFront = new BBitmap(bounds, 0, B_RGB32);
+	BBitmap* newBack = new BBitmap(bounds, 0, B_RGB32);
+
+	if (newFront->InitCheck() != B_OK)
+		log_error("CompositorAdapter: front bitmap allocation failed");
+	if (newBack->InitCheck() != B_OK)
+		log_error("CompositorAdapter: back bitmap allocation failed");
+
+	copy_overlap(newFront, old, fWidth, fHeight, fFillColor);
+	copy_overlap(newBack, old, fWidth, fHeight, fFillColor);
+
+	delete frontBitmap;
+	delete fBackBitmap;
+	frontBitmap = newFront;
+	fBackBitmap = newBack;
+}
+
+
+void
+CompositorAdapter::SetFillColor(uint32_t bgra)
+{
+	std::lock_guard<std::mutex> lock(fBitmapMutex);
+	fFillColor = bgra;
+}
+
+
+void
+CompositorAdapter::Resize(int newWidth, int newHeight)
+{
+	if (newWidth < 1 || newHeight < 1)
+		return;
+	if (newWidth == fWidth && newHeight == fHeight)
+		return;
+
+	log_info("CompositorAdapter::Resize %dx%d -> %dx%d",
+		fWidth, fHeight, newWidth, newHeight);
+
+	std::lock_guard<std::mutex> lock(fBitmapMutex);
+	fWidth = newWidth;
+	fHeight = newHeight;
+	_AllocateBitmaps(frontBitmap);
+	// Caller (WebKitBridge::Resize) dispatches set_size to WPE on the GLib thread.
+}
+
+
+void
+CompositorAdapter::ScheduleFrameComplete()
+{
+	// WebKit draws its next frame only after its frame callback completes,
+	// and it can ask for one on a commit that carries no new buffer (a
+	// full-screen switch, an unchanged scene). Completing only on buffer
+	// export then stalled the page for good, so complete on a clock like a
+	// display's vsync: 60 Hz while frames flow, a slow tick when idle.
+	fLastActivity.store(g_get_monotonic_time());
+	if (fClockRunning.exchange(true))
+		return;
+	ProcessManager::Instance().InvokeOnGLibThread([](void* data) -> gboolean {
+		auto* self = static_cast<CompositorAdapter*>(data);
+		if (self->fClockSource != 0)
+			g_source_remove(self->fClockSource);
+		self->fClockSource = g_timeout_add(kActiveTickMs,
+			(GSourceFunc)&CompositorAdapter::_ClockTick, self);
+		return G_SOURCE_REMOVE;
+	}, this);
+}
+
+
+/* static */ int
+CompositorAdapter::_ClockTick(void* data)
+{
+	auto* self = static_cast<CompositorAdapter*>(data);
+	// An exported frame completes on presentation or the fallback.
+	if (self->fExportable != NULL && !self->fOutstanding.load())
+		wpe_view_backend_exportable_fdo_dispatch_frame_complete(
+			self->fExportable);
+
+	if (!self->fClockRunning.load()
+		|| g_get_monotonic_time() - self->fLastActivity.load() < 500000)
+		return G_SOURCE_CONTINUE;
+
+	// Idle: keep a slow tick so a late request cannot stall the page.
+	self->fClockRunning.store(false);
+	self->fClockSource = g_timeout_add(kIdleTickMs,
+		(GSourceFunc)&CompositorAdapter::_ClockTick, self);
+	return G_SOURCE_REMOVE;
+}
+
+
+void
+CompositorAdapter::NotifyPresented()
+{
+	if (!fOutstanding.load())
+		return;
+	ProcessManager::Instance().InvokeOnGLibThread([](void* data) -> gboolean {
+		static_cast<CompositorAdapter*>(data)->_CompleteExported();
+		return G_SOURCE_REMOVE;
+	}, this);
+}
+
+
+// GLib thread. Exactly one frame_complete per exported buffer.
+void
+CompositorAdapter::_CompleteExported()
+{
+	if (fFallbackSource != 0) {
+		g_source_remove(fFallbackSource);
+		fFallbackSource = 0;
+	}
+	if (fOutstanding.exchange(false) && fExportable != NULL)
+		wpe_view_backend_exportable_fdo_dispatch_frame_complete(fExportable);
+}
+
+
+void
+CompositorAdapter::_ArmFallback()
+{
+	// A hidden view never draws; complete anyway so the page cannot stall.
+	ProcessManager::Instance().InvokeOnGLibThread([](void* data) -> gboolean {
+		auto* self = static_cast<CompositorAdapter*>(data);
+		if (self->fFallbackSource != 0)
+			g_source_remove(self->fFallbackSource);
+		self->fFallbackSource = g_timeout_add(kFallbackMs,
+			(GSourceFunc)&CompositorAdapter::_FallbackTick, self);
+		return G_SOURCE_REMOVE;
+	}, this);
+}
+
+
+/* static */ int
+CompositorAdapter::_FallbackTick(void* data)
+{
+	auto* self = static_cast<CompositorAdapter*>(data);
+	self->fFallbackSource = 0;
+	self->_CompleteExported();
+	return G_SOURCE_REMOVE;
+}
+
+
+void
+CompositorAdapter::_SwapBuffersLocked()
+{
+	std::swap(frontBitmap, fBackBitmap);
+	fFrameReady.store(false);
+}
+
+
+void
+CompositorAdapter::_BlitSHMFrame(const uint8_t* data, int stride,
+	int srcW, int srcH)
+{
+	std::function<void()> cb;
+	{
+		std::lock_guard<std::mutex> lock(fBitmapMutex);
+
+		if (!fBackBitmap || !fBackBitmap->Bits())
+			return;
+
+		int copyW = std::min(srcW, fWidth) * 4;
+		int copyH = std::min(srcH, fHeight);
+		uint8_t* dst = (uint8_t*)fBackBitmap->Bits();
+		int dstStride = fBackBitmap->BytesPerRow();
+
+		// A stale frame of another size must not leave old rows behind.
+		for (int y = 0; y < fHeight; y++) {
+			uint8_t* row = dst + y * dstStride;
+			if (y < copyH)
+				memcpy(row, data + y * stride, copyW);
+			fill_pixels(row, y < copyH ? copyW / 4 : 0, fWidth, fFillColor);
+		}
+
+		_SwapBuffersLocked();
+		fFrameReady.store(true);
+		cb = onFrameReady;
+	}
+	if (cb) cb();
+}
+
+
+BBitmap*
+CompositorAdapter::AcquireFront()
+{
+	// BView::Draw runs on the window looper thread only; single acquirer.
+	fBitmapMutex.lock();
+	return frontBitmap;
+}
+
+
+void
+CompositorAdapter::ReleaseFront()
+{
+	fBitmapMutex.unlock();
+}
