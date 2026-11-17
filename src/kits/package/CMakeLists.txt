@@ -143,7 +143,7 @@ AddOn(
 	solver/SolverRepository.cpp
 	solver/SolverResult.cpp
 
-	LIBS be root ${ZLIB_LIBRARIES} zstd
+	LIBS be root shared localestub ${ZLIB_LIBRARIES} zstd
 
 	RDEF
 	libpackage.rdef
