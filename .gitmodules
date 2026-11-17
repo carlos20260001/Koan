@@ -1,3 +1,4 @@
 [submodule "src/system/kernel/nexus"]
 	path = src/system/kernel/nexus
-	url = https://github.com/Numerio/Nexus.git
+	url = https://github.com/carlos20260001/Nexus.git
+	branch = koan
