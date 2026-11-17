@@ -207,6 +207,11 @@ scroll phases), so this is a three-way merge, not a copy.
 - [x] D2: keyboard/mouse keep only the Linux path — `252ff7be13`; the 8 files and
       `libroot/posix/user_group_common.cpp` are byte-identical to VitruvianOS
       `4d8c5ed719`; `movement_maker.*` and its `touchpad_scroll_test` deleted
+- Userland that M6 deleted with `src/add-ons/kernel` before the "port userland"
+  rule (2026-11-16), to restore when its Linux counterpart is ported: the PPP
+  userland library `network/ppp/shared/libppp` (ppp_up/pppconfig; →
+  ModemManager/pppd), the userlandfs server and netfs server/shared code (→ FUSE).
+  All recoverable from `d61de85d04^`
 - Known fallout (Jam only, nothing CMake builds): 73 userland files include
   kernel add-on sources/headers (BFS tools, disk systems, network bits). They
   are replaced when VitruvianOS's versions of those directories are ported.
@@ -377,7 +382,7 @@ Waves (each on its own `port/*` branch, merged here when green):
       boot/runtime_loader/glue, add-ons/kernel except `graphics/dp_sink`, kernel
       net-stack shells, kernel tests VitruvianOS lacks); the libroot userspace tests
       were restored (`b30650969d`). Jamfiles: 923 → 766
-- [ ] W2: `src/kits/{interface,locale,translation,shared,tracker,...}`, `localestub`;
+- [x] W2: `src/kits/{interface,locale,translation,shared,tracker,...}`, `localestub`;
       `be`, `tracker`, `translation`, `shared`, `localestub` link
       - [x] W2-A merged `2d885506c7`: interface kit merged (air/OS DeviceScale,
             WaitForOutputRetrace, scan timing, multi-monitor kept; VitruvianOS rotation,
@@ -418,7 +423,28 @@ Waves (each on its own `port/*` branch, merged here when green):
             consider putting `headers/os/media` (not media2) on the global path in W4
             and prefixing the ~9 unprefixed media2 includes. libroot2 lacks
             `wait_for_thread_etc` (libneural). Build image gained media2/GL dev packages
-      - [ ] W2-D network/bluetooth/mail/device/package/print/quicklook/debug + VitruvianOS-only kits and libs
+      - [x] W2-D merged `333350f20b`: network merged on VitruvianOS's NetworkManager/
+            ModemManager backends (air/OS LinkSpeed, CA-bundle fallback,
+            `BNetworkRoute` from `/proc/net/*route`, AutoConfigure via NM kept;
+            route add/remove and `AddPersistentNetwork(password)` TODO(linux backend));
+            Bluetooth: air/OS API kept on BlueZ (`GetBluetoothAddress()` → `bdaddr_t`,
+            VitruvianOS's string form renamed `GetBluetoothAddressString()`), AES from
+            OpenSSL; TODO(linux backend): friendly name, authentication, controller
+            properties, ATT/LE pairing, A2DP AVDTP, LE HID (BlueZ HOG + uhid covers it);
+            device: VitruvianOS USB kit (libusb/udev) + air/OS A2D/D2A/DigitalPort/
+            AuxDisplay, isochronous stubs; package: both kits (`libvpackage` apt,
+            `libpackage` hpkg as target `bpackage`; libsolv add-on skipped, Debian has no
+            `repo_haiku`); print utilities on CMake (`pr_server.h` constants kept);
+            quicklook, mail ported; debug/debugger on CMake behind `VOS_WITH_DEBUG_KIT`/
+            `VOS_WITH_DEBUGGER_KIT` (OFF, ptrace port pending); accounts, location,
+            telephony, web and libs backlight, kdbx, libscan, outputaddon, prefs,
+            printcups, xclient imported. CTest backlight 2/2. Follow-ups done here:
+            build image deps (`f9e259f415`), air/OS rumble/device-ID API on evdev
+            (`8baad50179`), duplicate device Joystick/SerialPort dropped (`c3c748229a`),
+            `BPrivate::SHA256` restored into libroot (`985d5b8116`)
+      - **W2 integrated result** (container, full `ninja -k 0`): no failed target;
+            24 shared libraries, all 0 undefined symbols except libneural (1:
+            `wait_for_thread_etc`, Nexus decision below). Jamfiles: 712
       - Integrated check after A+B+C (`c87706e750`, container): configure green;
             `libroot`, `libbe`, `libmedia`, `libmedia2`, `libmidi`, `libmidi2`,
             `libtranslation`, `libtextencoding`, `libhwaccel`, `libalm` link with 0
@@ -507,3 +533,4 @@ counterparts and Mesa:
 | 2026-11-16 | `2d885506c7` | M9 W2-A: interface/locale kits merged, be complete except libshared |
 | 2026-11-16 | `9aa147d50c` | M9 W2-C: classic Media Kit + media2 side by side; game, MIDI, GL, hwaccel, neural kits |
 | 2026-11-17 | `159105bf61` | M9 W2-B: shared, Tracker, translation, textencoding, screensaver merged |
+| 2026-11-17 | `333350f20b` | M9 W2-D merged; W2 complete: all kits on CMake, 24 libraries link |
