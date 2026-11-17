@@ -12,6 +12,7 @@
 static const bool kDefaultShowDisksIcon = false;
 static const bool kDefaultMountVolumesOntoDesktop = true;
 static const bool kDefaultMountSharedVolumesOntoDesktop = true;
+static const bool kDefaultSnapToGrid = true;
 static const bool kDefaultEjectWhenUnmounting = true;
 
 static const bool kDefaultDesktopFilePanelRoot = true;
@@ -22,7 +23,7 @@ static const bool kDefaultSingleWindowBrowse = true;
 static const bool kDefaultShowNavigator = true;
 static const bool kDefaultTransparentSelection = true;
 static const bool kDefaultSortFolderNamesFirst = true;
-static const bool kDefaultHideDotFiles = false;
+static const bool kDefaultHideDotFiles = true;
 static const bool kDefaultTypeAheadFiltering = false;
 static const bool kDefaultGenerateImageThumbnails = true;
 

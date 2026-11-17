@@ -1,4 +1,7 @@
 /*
+ * Copyright 2026, Dario Casalinuovo. All rights reserved.
+ */
+/*
 Open Tracker License
 
 Terms and Conditions
@@ -70,6 +73,7 @@ All rights reserved.
 #include <Volume.h>
 
 #include <fs_info.h>
+#include <string.h>
 
 #include "Bitmaps.h"
 #include "FSUtils.h"
@@ -606,7 +610,7 @@ IconCache::GetVolumeIcon(AutoLock<SimpleIconCache>*nodeCacheLocker,
 	// try getting using the BVolume::GetIcon call; if miss,
 	// go for the default mime based icon
 	if (entry == NULL || !entry->HaveIconBitmap(NORMAL_ICON_ONLY, size)) {
-		BVolume volume(model->NodeRef()->device);
+		BVolume volume(model->NodeRef()->device());
 
 		if (volume.IsShared()) {
 			// check if it's a network share and give it a special icon
@@ -1158,6 +1162,7 @@ IconCache::Draw(Model* model, BView* view, BPoint where, IconDrawMode mode,
 
 	ASSERT(entry != NULL);
 	ASSERT(entry->HaveIconBitmap(mode, size));
+
 	// got the entry, now draw it
 	resultingCacheLocker->LockedItem()->Draw(entry, view, where, mode,
 		size, async);
@@ -1359,6 +1364,13 @@ IconCache::MakeTransformedIcon(const BBitmap* source, BSize /*size*/,
 		InitHighlightTable();
 
 	BBitmap* result = lazyBitmap->Get();
+
+	// Check if bitmaps have valid bits before transforming
+	if (source == NULL || source->Bits() == NULL)
+		return NULL;
+	if (result == NULL || result->Bits() == NULL)
+		return NULL;
+
 	uint8* src = (uint8*)source->Bits();
 	uint8* dst = (uint8*)result->Bits();
 
@@ -1366,7 +1378,6 @@ IconCache::MakeTransformedIcon(const BBitmap* source, BSize /*size*/,
 //		&& result->Bounds() == source->Bounds());
 	if (result->ColorSpace() != source->ColorSpace()
 		|| result->Bounds() != source->Bounds()) {
-		printf("IconCache::MakeTransformedIcon() - bitmap format mismatch!\n");
 		return NULL;
 	}
 
@@ -1645,6 +1656,8 @@ SharedCacheEntry::operator==(const TypeAndSignature& typeAndSignature) const
 NodeCacheEntry::NodeCacheEntry(bool permanent)
 	:
 	fNext(NULL),
+	fHashDev(-1),
+	fHashNode(-1),
 	fPermanent(permanent)
 {
 }
@@ -1656,6 +1669,9 @@ NodeCacheEntry::NodeCacheEntry(const node_ref* node, bool permanent)
 	fRef(*node),
 	fPermanent(permanent)
 {
+	// Snapshot physical identity: hash table requires stable keys.
+	fHashDev = node->device();
+	fHashNode = node->node();
 }
 
 
@@ -1711,22 +1727,27 @@ NodeCacheEntry::Node() const
 size_t
 NodeCacheEntry::Hash() const
 {
-	return Hash(&fRef);
+	ino_t ino = fHashNode;
+	uint32 halves[2];
+	memcpy(halves, &ino, sizeof(ino));
+	return (size_t)fHashDev ^ halves[0] ^ halves[1];
 }
 
 
 /* static */ size_t
 NodeCacheEntry::Hash(const node_ref* node)
 {
-	return node->device ^ ((uint32*)&node->node)[0]
-		^ ((uint32*)&node->node)[1];
+	ino_t ino = node->node();
+	uint32 halves[2];
+	memcpy(halves, &ino, sizeof(ino));
+	return (size_t)node->device() ^ halves[0] ^ halves[1];
 }
 
 
 bool
 NodeCacheEntry::operator==(const node_ref* node) const
 {
-	return fRef == *node;
+	return fHashDev == node->device() && fHashNode == node->node();
 }
 
 
@@ -1909,8 +1930,18 @@ LazyBitmapAllocator::~LazyBitmapAllocator()
 BBitmap*
 LazyBitmapAllocator::Get()
 {
-	if (fBitmap == NULL)
+	if (fBitmap == NULL) {
 		fBitmap = new BBitmap(BRect(BPoint(0, 0), fSize), fColorSpace);
+		if (fBitmap != NULL) {
+			if (fBitmap->InitCheck() != B_OK) {
+				delete fBitmap;
+				fBitmap = NULL;
+			} else if (fBitmap->Bits() == NULL) {
+				delete fBitmap;
+				fBitmap = NULL;
+			}
+		}
+	}
 
 	return fBitmap;
 }

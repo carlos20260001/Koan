@@ -183,7 +183,7 @@ static bool
 ThumbnailFailedBefore(const node_ref& node)
 {
 	BAutolock locker(sNoThumbnailTypesLock);
-	return sFailedNodes.find(std::make_pair(node.device, node.node))
+	return sFailedNodes.find(std::make_pair(node.device(), node.node()))
 		!= sFailedNodes.end();
 }
 
@@ -257,8 +257,8 @@ GenerateThumbnailJob::Execute()
 		if (image == NULL) {
 			{
 				BAutolock locker(sNoThumbnailTypesLock);
-				sFailedNodes.insert(std::make_pair(fNodeRef.device,
-					fNodeRef.node));
+				sFailedNodes.insert(std::make_pair(fNodeRef.device(),
+					fNodeRef.node()));
 			}
 			// draw the type's icon instead
 			BMessage message(kUpdateThumbnail);
@@ -498,7 +498,7 @@ GetThumbnailFromAttr(Model* model, BBitmap* icon, BSize size)
 		// not over the network: reading a whole video to draw an icon is
 		// slow there
 		if (!IsImageType(model->MimeType())
-			&& (!CanCalculateFolderSizes(model->NodeRef()->device)
+			&& (!CanCalculateFolderSizes(model->NodeRef()->device())
 				|| ThumbnailFailedBefore(*model->NodeRef()))) {
 			return B_NOT_SUPPORTED;
 		}

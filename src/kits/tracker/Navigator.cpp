@@ -485,7 +485,7 @@ BNavigator::RunSearchQuery()
 			file.WriteAttr("_trk/directories", B_MESSAGE_TYPE, 0, data, size);
 			buffer.UnlockBuffer(0);
 
-			BVolume volume(folder.device);
+			BVolume volume(folder.device());
 			BMessage volumes;
 			EmbedUniqueVolumeInfo(&volumes, &volume);
 			size = volumes.FlattenedSize();

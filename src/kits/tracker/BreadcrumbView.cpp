@@ -428,7 +428,7 @@ BreadcrumbView::MessageReceived(BMessage* message)
 		entry_ref ref;
 		for (int32 i = 0; message->FindRef("refs", i, &ref) == B_OK; i++) {
 			list->AddItem(new entry_ref(ref));
-			if (ref.device != destStat.st_dev)
+			if (ref.device() != destStat.st_dev)
 				sameVolume = false;
 		}
 		uint32 mode = sameVolume ? kMoveSelectionTo : kCopySelectionTo;

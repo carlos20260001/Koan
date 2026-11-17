@@ -644,9 +644,9 @@ FindWindow::SaveQueryAsAttributes(BNode* file, BEntry* entry, bool queryTemplate
 				continue;
 			BMessage* message = item->Message();
 			dev_t device;
-			if (message->FindInt32("device", &device) != B_OK)
+			if (message->FindUInt64("device", &device) != B_OK)
 				continue;
-			if (device == ref->device)
+			if (device == ref->device())
 				item->SetMarked(true);
 		}
 	}
@@ -658,7 +658,7 @@ FindWindow::SaveQueryAsAttributes(BNode* file, BEntry* entry, bool queryTemplate
 		BMenuItem* volumeMenuItem = volMenu->ItemAt(firstVolumeItem + i);
 		BMessage* messageOfVolumeMenuItem = volumeMenuItem->Message();
 		dev_t device;
-		if (messageOfVolumeMenuItem->FindInt32("device", &device) != B_OK)
+		if (messageOfVolumeMenuItem->FindUInt64("device", &device) != B_OK)
 			continue;
 
 		if (volumeMenuItem->IsMarked() && messageOfVolumeMenuItem->GetBool("boot", false))
@@ -1636,13 +1636,13 @@ FindPanel::MessageReceived(BMessage* message)
 			if (message->FindPointer("source", (void**)&invokedItem) != B_OK)
 				return;
 
-			if (message->FindInt32("device", &dev) != B_OK)
+			if (message->FindUInt64("device", (uint64*)&dev) != B_OK)
 				break;
 
 			BMenu* menu = invokedItem->Menu();
 			ASSERT(menu);
 
-			if (dev == -1) {
+			if (dev == (dev_t)-1) {
 				// all disks selected, uncheck everything else
 				int32 count = 0;
 				BVolumeRoster roster;
@@ -2501,7 +2501,7 @@ FindPanel::AddVolumes()
 	// ToDo: add calls to this to rebuild the menu when a volume gets mounted
 
 	BMessage* message = new BMessage(kVolumeItem);
-	message->AddInt32("device", -1);
+	message->AddUInt64("device", (uint64)-1);
 	fVolMenu->AddItem(new BMenuItem(B_TRANSLATE("All disks"), message));
 	fVolMenu->AddSeparatorItem();
 	PopUpMenuSetTitle(fVolMenu, B_TRANSLATE("All disks"));
@@ -2528,7 +2528,7 @@ FindPanel::AddVolumes()
 				continue;
 
 			message = new BMessage(kVolumeItem);
-			message->AddInt32("device", volume.Device());
+			message->AddUInt64("device", (uint64)volume.Device());
 			if (volume == boot)
 				message->AddBool("boot", true);
 			fVolMenu->AddItem(new ModelMenuItem(&model, model.Name(), message));

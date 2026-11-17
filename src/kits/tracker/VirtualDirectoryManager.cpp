@@ -1,4 +1,5 @@
 /*
+ * Copyright 2026, Dario Casalinuovo. All rights reserved.
  * Copyright 2013 Haiku, Inc. All rights reserved.
  * Distributed under the terms of the MIT License.
  *
@@ -213,9 +214,9 @@ public:
 	status_t ReadDefinition(bool* _changed = NULL)
 	{
 		// open the definition file
+		const entry_ref& defRef = fInfo->DefinitionFileEntryRef();
 		BFile file;
-		status_t error = file.SetTo(&fInfo->DefinitionFileEntryRef(),
-			B_READ_ONLY);
+		status_t error = file.SetTo(&defRef, B_READ_ONLY);
 		if (error != B_OK)
 			return error;
 
@@ -326,6 +327,7 @@ VirtualDirectoryManager::ResolveDirectoryPaths(
 	const entry_ref& definitionFileEntryRef, BStringList& _directoryPaths,
 	node_ref* _definitionFileNodeRef, entry_ref* _definitionFileEntryRef)
 {
+
 	Info* info = _InfoForNodeRef(definitionFileNodeRef);
 	if (info == NULL) {
 		status_t error = _ResolveUnknownDefinitionFile(definitionFileNodeRef,
@@ -423,28 +425,6 @@ VirtualDirectoryManager::GetParentDirectoryDefinitionFile(
 	return _entryRef.name != NULL;
 }
 
-
-status_t
-VirtualDirectoryManager::TranslateDirectoryEntry(
-	const node_ref& definitionFileRef, dirent* buffer)
-{
-	NotOwningEntryRef entryRef(buffer->d_pdev, buffer->d_pino, buffer->d_name);
-	node_ref nodeRef(buffer->d_dev, buffer->d_ino);
-
-	status_t result = TranslateDirectoryEntry(definitionFileRef, entryRef,
-		nodeRef);
-	if (result != B_OK)
-		return result;
-
-	buffer->d_pdev = entryRef.device;
-	buffer->d_pino = entryRef.directory;
-	buffer->d_dev = nodeRef.device;
-	buffer->d_ino = nodeRef.node;
-
-	return B_OK;
-}
-
-
 status_t
 VirtualDirectoryManager::TranslateDirectoryEntry(
 	const node_ref& definitionFileRef, entry_ref& _entryRef, node_ref& _nodeRef)
@@ -475,7 +455,7 @@ VirtualDirectoryManager::TranslateDirectoryEntry(
 
 			struct stat st;
 			if (lstat(path.Path(), &st) != 0)
-				return errno;
+				return -errno;
 
 			parentInfo->SetId(id);
 			parentInfo->SetChildDefinitionsDirectoryRef(
@@ -523,7 +503,7 @@ VirtualDirectoryManager::TranslateDirectoryEntry(
 			"  name \"%s\"\n"
 			"}\n"
 			"subdir \"%s\"\n",
-			rootEntryRef.device, rootEntryRef.directory, rootEntryRef.name,
+			rootEntryRef.vdevice(), rootEntryRef.vdirectory(), rootEntryRef.name,
 			info->Path().String());
 		// failure is not nice, but not mission critical for this application
 		if (!definitionFileContent.IsEmpty()) {
@@ -534,9 +514,7 @@ VirtualDirectoryManager::TranslateDirectoryEntry(
 
 	const entry_ref& entryRef = info->DefinitionFileEntryRef();
 	_nodeRef = info->DefinitionFileNodeRef();
-	_entryRef.device = entryRef.device;
-	_entryRef.directory = entryRef.directory;
-
+	_entryRef = entry_ref(entryRef.vdevice(), entryRef.vdirectory(), _entryRef.name);
 	return B_OK;
 }
 
@@ -770,6 +748,7 @@ status_t
 VirtualDirectoryManager::_CreateRootInfo(const node_ref& definitionFileNodeRef,
 	const entry_ref& definitionFileEntryRef, Info*& _info)
 {
+
 	RootInfo* root = new(std::nothrow) RootInfo(definitionFileNodeRef,
 		definitionFileEntryRef);
 	if (root == NULL || root->InitCheck() != B_OK) {
