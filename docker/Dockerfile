@@ -43,10 +43,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     xfsprogs btrfs-progs grub2-common \
     && rm -rf /var/lib/apt/lists/*
 
-# Host builds outside the Debian sysroot: libpam0g-dev for
+# Host builds outside the Debian sysroot: libssl-dev for libbe (linked with
+# OpenSSL once libshared exists), libpam0g-dev for
 # vos-polkit-grant-helper, libbacktrace-dev for Debug builds of libroot.
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    libpam0g-dev libbacktrace-dev \
+    libpam0g-dev libbacktrace-dev libssl-dev \
     && rm -rf /var/lib/apt/lists/*
 
 # media2 (PipeWire, GStreamer, fluidsynth) and the OpenGL kit (Mesa EGL/GL)
