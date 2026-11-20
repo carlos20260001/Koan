@@ -464,8 +464,22 @@ Waves (each on its own `port/*` branch, merged here when green):
             `wait_for_thread_etc`: fixed — Nexus fork patch `71e5929` (timed
             `NEXUS_THREAD_WAITFOR`) + libroot2 `7e4fd44e54` (relative → one deadline,
             `B_CAN_INTERRUPT`, timed pidfd fallback for other teams)
-- [ ] W3: `src/servers/app` on a new Linux display backend (design below),
+- [x] W3: `src/servers/app` on a new Linux display backend (design below),
       registrar, input_server, the other servers
+      - [x] W3-B merged `15f4ad3df0`: KMS/GBM/Mesa backend in
+            `drawing/interface/linux/kms/` (new, Koan, MIT), plugged in through W3-A's
+            `create_kms_hw_interface()` (NULL → drm → fbdev). See the design section below
+            for what is done. Unit tests 8780 checks, 0 failed (modes, EDID, layouts, no
+            seams at 1.0/1.25/1.5/1.75, cursor hot spot, damage, CPU resample). QEMU, two
+            virtio-gpu heads (`kms_harness`, 40/40 each): CPU dumb/GBM/legacy/double-
+            buffered, GPU pass on llvmpipe and on virgl. Finding kept from air/OS: at a
+            1:1 fractional scale a region overlaps its neighbour by ≤1 column, never a gap.
+            Runtime switches `VOS_KMS_GPU/BUFFERS/ATOMIC/SLOTS/PLANE_SCALING/SEAT/DEVICE`.
+      - **Wave 3 integrated** (container, `VOS_BUILD_TESTS=ON`): full `ninja -k 0` exit
+            0; 33 server/test binaries and 26 shared objects, 0 undefined symbols;
+            app_server links libdrm, gbm, EGL, GLESv2, udev, seat; ctest 9 passed, 1
+            skipped (`pipewire_graph`, no PipeWire in the container). Not yet run:
+            app_server on any display (next: QEMU smoke test)
       - [x] W3-A merged `7e3d6143e8`: app_server merged (251 shared files: 162
             identical, 19 VitruvianOS, 38 air/OS, 32 by hand; bases capped at ~hrev59405).
             air/OS kept: ScreenManager/VirtualScreen/DisplayLayout/MultiLocker (on
@@ -547,11 +561,12 @@ scaling only at rasterisation, app_server/input_server logical; see
 (`docs/airos/RETRACE.md`). A custom backend wires that to the Linux
 counterparts and Mesa:
 
-- [ ] **KMS device** (`drawing/interface/linux/kms/`, new): one per `/dev/dri/cardN`;
+- [x] **KMS device** (`drawing/interface/linux/kms/`, new): one per `/dev/dri/cardN`;
       DRM master through the session (reuse VitruvianOS's VT/logind/seat handling);
       atomic modesetting; enumerates connectors, CRTCs and planes; udev hot-plug
       events feed `ScreenManager` add/remove the way air/OS's monitor hot-plug does
-- [ ] **KMS output = HWInterface** per connector: modes from the connector, EDID
+- [x] **KMS output = HWInterface** per connector (as built: one HWInterface per card, every
+      connector a `display_output`, air/OS's accelerant model): modes from the connector, EDID
       through `decode_edid` into air/OS's monitor info; `SetRenderScale`;
       `WaitForRetrace` and tear-free flushes from page-flip events; hardware cursor
       on the cursor plane at the render scale; per-output gamma/brightness where KMS
@@ -559,9 +574,11 @@ counterparts and Mesa:
       `DrmFlipPolicy` and Koan's `rework/scaling` work on `DrmHWInterface`
       (render scale, cursor plane at render scale, refuse software scale) instead of
       rewriting them
-- [ ] **Scan-out buffers:** GBM buffer objects (`libgbm`), dumb buffers as fallback;
+- [x] **Scan-out buffers:** GBM buffer objects (`libgbm`), dumb buffers as fallback;
       fbdev stays only as a last-resort single-screen fallback
-- [ ] **GPU acceleration through Mesa** (EGL on GBM, GLES2/3):
+- [x] **GPU acceleration through Mesa** (EGL on GBM, GLES2/3) — composition/upload and
+      fractional resample done (display-engine scaling first, then GLES, then CPU);
+      still open: `BGLView` zero-copy dmabuf import, fill/blit hooks (HWInterface has none):
       - composition/flush: damaged regions of the CPU (`Painter`/AGG) back buffer
         uploaded and drawn to the scan-out BO by GLES, which also does the
         fractional-scale resample; CPU path kept when EGL is unavailable;
@@ -572,10 +589,12 @@ counterparts and Mesa:
         `mesa_surfaceless` read-back (kept as fallback); GPU choice through
         VitruvianOS's `GlDeviceSelect`/hwaccel settings;
       - VA-API video decode for air/OS's media add-ons belongs to W4
-- [ ] Build deps: `libgbm-dev`, `libegl-dev`, `libgles-dev`, `libdrm-dev` (container
+- [x] Build deps: `libgbm-dev`, `libegl-dev`, `libgles-dev`, `libdrm-dev` (container
       and chroot); Mesa from Debian; all optional at configure time with the CPU
       path as fallback
-- [ ] Tests: QEMU with two heads (`virtio-gpu-gl`/`virtio-vga-gl`, `max_outputs=2`,
+- [ ] Tests: QEMU two heads done for the backend (40/40 x6); open: app_server on it,
+      udev hot-plug event (QEMU sent none; re-probe works), VT switch/resume, a real GPU.
+      Originally: QEMU with two heads (`virtio-gpu-gl`/`virtio-vga-gl`, `max_outputs=2`,
       virgl) and a llvmpipe/no-GPU run; scales 1.0/1.25/1.5/1.75 with hit-test and
       seam checks (AGENTS.md); hot-plug add/remove; mirroring; VT switch and resume
 - Koan's Wayland server (`VOS_WITH_WLROOTS`) and the DRM display layout it needs
@@ -612,3 +631,4 @@ counterparts and Mesa:
 | 2026-11-20 | `7e3d6143e8` | M9 W3-A: app_server merged on interim DRM/fbdev; full tree builds, ctest 8/8 |
 | 2026-11-20 | `b59b7785d9` | M9 W3-D: the other 20 servers on Linux backends, PipeWire media add-on; integrated build green (31 servers, 26 libs, ctest 8+1 skipped) |
 | 2026-11-20 | `72f99e7e6b` | License audit of the 1183 VitruvianOS-derived files: all license/copyright headers kept; license texts now installed; License.md appendix corrected |
+| 2026-11-20 | `15f4ad3df0` | M9 W3-B: KMS/GBM/Mesa display backend merged; wave 3 code complete, integrated build green, ctest 9+1 skipped |
