@@ -98,15 +98,15 @@ public:
 			const node_ref&		RootDirectoryRef() const
 									{ return fRootDirectoryRef; }
 			dev_t				DeviceID() const
-									{ return fRootDirectoryRef.device; }
+									{ return fRootDirectoryRef.device(); }
 			ino_t				RootDirectoryID() const
-									{ return fRootDirectoryRef.node; }
+									{ return fRootDirectoryRef.node(); }
 
 			const node_ref&		PackagesDirectoryRef() const;
 			dev_t				PackagesDeviceID() const
-									{ return PackagesDirectoryRef().device; }
+									{ return PackagesDirectoryRef().device(); }
 			ino_t				PackagesDirectoryID() const
-									{ return PackagesDirectoryRef().node; }
+									{ return PackagesDirectoryRef().node(); }
 
 			Root*				GetRoot() const
 									{ return fRoot; }

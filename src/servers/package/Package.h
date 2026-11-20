@@ -92,7 +92,7 @@ struct PackageNodeRefHashDefinition {
 
 	size_t HashKey(const node_ref& key) const
 	{
-		return (size_t)key.device + 17 * (size_t)key.node;
+		return (size_t)key.device() + 17 * (size_t)key.node();
 	}
 
 	size_t Hash(const Package* value) const

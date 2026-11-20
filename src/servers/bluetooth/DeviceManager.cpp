@@ -39,14 +39,16 @@ DeviceManager::MessageReceived(BMessage* msg)
 
 					TRACE_BT("Something new in the bus ... ");
 
-					if ((msg->FindInt32("device", &ref.device)!=B_OK)
-						|| (msg->FindInt64("directory", &ref.directory)!=B_OK)
+					int32 device;
+					int64 directory;
+					if ((msg->FindInt32("device", &device)!=B_OK)
+						|| (msg->FindInt64("directory", &directory)!=B_OK)
 						|| (msg->FindString("name",	&name) != B_OK))
 						return;
 
 					TRACE_BT("DeviceManager: -> %s\n", name);
 
-					ref.set_name(name);
+					ref.set_to(device, directory, name);
 
 					// Check if	the	entry is a File	or a directory
 					if (dir.SetTo(&ref) == B_OK) {
@@ -68,10 +70,13 @@ DeviceManager::MessageReceived(BMessage* msg)
 					// it may come back under the same name
 					entry_ref ref;
 					const char* name;
-					if (msg->FindInt32("device", &ref.device) == B_OK
-						&& msg->FindInt64("directory", &ref.directory) == B_OK
+					int32 device;
+					int64 directory;
+					if (msg->FindInt32("device", &device) == B_OK
+						&& msg->FindInt64("directory", &directory) == B_OK
 						&& msg->FindString("name", &name) == B_OK
-						&& ref.set_name(name) == B_OK) {
+						&& (ref.set_to(device, directory, name),
+							ref.init_check() == B_OK)) {
 						BPath path(&ref);
 						BAutolock locker(fLock);
 						if (path.InitCheck() == B_OK
@@ -149,8 +154,8 @@ DeviceManager::RemoveDirectory(node_ref* nref)
 		entry.GetRef(&ref);
 		BMessage msg(B_NODE_MONITOR);
 		msg.AddInt32("opcode", B_ENTRY_REMOVED);
-		msg.AddInt32("device", nref->device);
-		msg.AddInt64("directory", nref->node);
+		msg.AddInt32("device", nref->device());
+		msg.AddInt64("directory", nref->node());
 		msg.AddString("name", ref.name);
 		//addon->fDevice->Control(NULL,	NULL, msg.what,	&msg);
 	}
@@ -181,8 +186,8 @@ DeviceManager::AddDevice(entry_ref* ref)
 	if (message == NULL)
 		return B_NO_MEMORY;
 	message->AddInt32("opcode", B_ENTRY_CREATED);
-	message->AddInt32("device", ref->device);
-	message->AddInt64("directory", ref->directory);
+	message->AddInt32("device", ref->device());
+	message->AddInt64("directory", ref->directory());
 	message->AddString("name", path.Path());
 
 	thread_id thread = spawn_thread(&_PrepareDevice, "bluetooth device setup",

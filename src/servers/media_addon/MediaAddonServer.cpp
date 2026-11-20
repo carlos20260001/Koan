@@ -186,7 +186,7 @@ void
 MediaAddonServer::MonitorHandler::AddOnEnabled(const add_on_entry_info* info)
 {
 	entry_ref ref;
-	make_entry_ref(info->dir_nref.device, info->dir_nref.node,
+	make_entry_ref(info->dir_nref.device(), info->dir_nref.node(),
 		info->name, &ref);
 	BEntry entry(&ref, true);
 	if (!entry.IsFile())
@@ -194,14 +194,14 @@ MediaAddonServer::MonitorHandler::AddOnEnabled(const add_on_entry_info* info)
 
 	BPath path(&ref);
 	if (path.InitCheck() == B_OK)
-		fServer->_AddOnAdded(path.Path(), info->nref.node);
+		fServer->_AddOnAdded(path.Path(), info->nref.node());
 }
 
 
 void
 MediaAddonServer::MonitorHandler::AddOnDisabled(const add_on_entry_info* info)
 {
-	fServer->_AddOnRemoved(info->nref.node);
+	fServer->_AddOnRemoved(info->nref.node());
 }
 
 

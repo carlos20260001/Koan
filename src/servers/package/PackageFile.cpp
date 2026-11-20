@@ -42,8 +42,7 @@ PackageFile::~PackageFile()
 status_t
 PackageFile::Init(const entry_ref& entryRef, PackageFileManager* owner)
 {
-	fDirectoryRef.device = entryRef.device;
-	fDirectoryRef.node = entryRef.directory;
+	fDirectoryRef.set_to(entryRef.device(), entryRef.directory());
 
 	// init the file name
 	fFileName = entryRef.name;

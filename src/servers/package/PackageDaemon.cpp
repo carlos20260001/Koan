@@ -90,9 +90,13 @@ PackageDaemon::MessageReceived(BMessage* message)
 			node_ref nodeRef;
 
 			// Get the node_ref of the filesystem root to see which one it is
-			error = message->FindInt32("volume", &nodeRef.device);
+			int32 device;
+			int64 root;
+			error = message->FindInt32("volume", &device);
 			if (error == B_OK)
-				error = message->FindInt64("root", &nodeRef.node);
+				error = message->FindInt64("root", &root);
+			if (error == B_OK)
+				nodeRef.set_to(device, root);
 
 			if (fSystemRoot != NULL && (error != B_OK
 					|| fSystemRoot->NodeRef() == nodeRef)) {
@@ -208,8 +212,8 @@ PackageDaemon::_GetOrCreateRoot(const node_ref& nodeRef, Root*& _root)
 			fSystemRoot = root;
 
 		INFORM("root at \"%s\" (device: %" B_PRIdDEV ", node: %" B_PRIdINO ") "
-			"registered\n", root->Path().String(), nodeRef.device,
-			nodeRef.node);
+			"registered\n", root->Path().String(), nodeRef.device(),
+			nodeRef.node());
 	}
 
 	_root = root;

@@ -2,6 +2,7 @@
  * Copyright 2013, Jérôme Duval, korli@users.berlios.de.
  * Copyright 2014, Rene Gollent, rene@gollent.com.
  * Copyright 2005, Nathan Whitehorn.
+ * Copyright 2026, Koan contributors. All rights reserved.
  *
  * Distributed under the terms of the MIT License.
  */
@@ -19,6 +20,13 @@
 
 #include <map>
 
+#ifdef __VOS__
+#	include <poll.h>
+#	include <vector>
+
+#	include "linux_power.h"
+#endif
+
 
 class PowerManagementDaemon : public BServer {
 public:
@@ -33,7 +41,7 @@ private:
 
 			thread_id			fEventThread;
 			PowerPolicy			fPolicy;
-			PowerMonitor*		fPowerMonitors[4];
+			PowerMonitor*		fPowerMonitors[5];
 			uint32				fMonitorCount;
 
 			bool				fQuitRequested;
@@ -75,6 +83,19 @@ PowerManagementDaemon::PowerManagementDaemon()
 	else
 		delete acMonitor;
 
+#ifdef __VOS__
+	// AC adapter and lid through UPower (the Haiku drivers the two
+	// monitors above read do not exist on Linux)
+	PowerMonitor* linuxMonitor = new LinuxPowerMonitor(&fPolicy);
+	if (linuxMonitor->FDs().size() > 0)
+		fPowerMonitors[fMonitorCount++] = linuxMonitor;
+	else
+		delete linuxMonitor;
+#endif
+
+	// TODO(linux backend): thermal trips. The kernel shuts down at a
+	// critical trip point itself; the "very hot" notification needs the
+	// thermal netlink events (THERMAL_GENL_EVENT_TZ_TRIP_UP).
 	PowerMonitor* thermalMonitor = new ThermalTripMonitor;
 	if (thermalMonitor->FDs().size() > 0)
 		fPowerMonitors[fMonitorCount++] = thermalMonitor;
@@ -139,6 +160,32 @@ PowerManagementDaemon::_EventLoop()
 
 	std::map<int, PowerMonitor*> descriptorMap;
 
+#ifdef __VOS__
+	// libroot2 has no wait_for_objects(): poll() the same descriptors
+	std::vector<struct pollfd> pollFDs;
+	for (uint32 i = 0; i < fMonitorCount; i++) {
+		const std::set<int>& fds = fPowerMonitors[i]->FDs();
+		for (std::set<int>::iterator it = fds.begin(); it != fds.end(); ++it) {
+			struct pollfd pollFD = { *it, POLLIN, 0 };
+			pollFDs.push_back(pollFD);
+			descriptorMap[*it] = fPowerMonitors[i];
+		}
+	}
+	while (!fQuitRequested) {
+		bigtime_t timeout = fPolicy.PollInterval();
+		int count = poll(&pollFDs[0], pollFDs.size(),
+			timeout == B_INFINITE_TIMEOUT ? 1000 : timeout / 1000);
+			// (wakes up once a second at most to see whether to quit)
+		if (count > 0) {
+			for (size_t i = 0; i < pollFDs.size(); i++) {
+				if ((pollFDs[i].revents & (POLLIN | POLLHUP | POLLERR)) != 0)
+					descriptorMap[pollFDs[i].fd]->HandleEvent(pollFDs[i].fd);
+			}
+		}
+		fPolicy.Poll();
+	}
+#else
+
 	size_t fdCount = 0;
 	for (uint32 i = 0; i < fMonitorCount; i++)
 		fdCount += fPowerMonitors[i]->FDs().size();
@@ -174,4 +221,5 @@ PowerManagementDaemon::_EventLoop()
 		}
 		fPolicy.Poll();
 	}
+#endif
 }

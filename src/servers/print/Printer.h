@@ -42,6 +42,12 @@ public:
 // This class represents one printer definition. It is manages all actions &
 // data related to that printer.
 /*****************************************************************************/
+#ifdef __VOS__
+// the driver of the printers that are CUPS queues (CupsPrinters.cpp)
+static const char* const kCupsDriverName = "CUPS";
+#endif
+
+
 class Printer : public BHandler, public Object
 {
 	typedef BHandler Inherited;
@@ -99,6 +105,13 @@ private:
 
 	static	status_t			print_thread(void* data);
 			void				StartPrintThread();
+
+#ifdef __VOS__
+			bool				_IsCups();
+			status_t			_PrintCupsJob(const char* spoolFile);
+			status_t			_ConfigureCups(BMessage& settings,
+									bool page);
+#endif
 
 private:
 			// the printer spooling directory

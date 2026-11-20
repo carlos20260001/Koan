@@ -3,6 +3,7 @@
  * known traps called out.
  * Copyright 2026 air/OS contributors. MIT license.
  */
+#include <algorithm>
 #include <dirent.h>
 #include <stdio.h>
 #include <stdlib.h>

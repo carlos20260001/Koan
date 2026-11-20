@@ -6,6 +6,7 @@
 
 #include "GenericPreview.h"
 
+#include <algorithm>
 #include <stdio.h>
 #include <time.h>
 

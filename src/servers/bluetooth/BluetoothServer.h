@@ -25,6 +25,10 @@
 
 #include <PortListener.h>
 
+#ifdef __VOS__
+#	include "BlueZAgent.h"
+#endif
+
 #define BT "bluetooth_server: "
 
 // Logs a step of bringing up the radios, with the time since boot.
@@ -107,6 +111,9 @@ private:
 	SDPServer*              fSDPServer;
 	SDPClient*				fSDPClient;
 	HIDHost*				fHIDHost;
+#ifdef __VOS__
+	BlueZAgent				fAgent;
+#endif
 };
 
 #endif

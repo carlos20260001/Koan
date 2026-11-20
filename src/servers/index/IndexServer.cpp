@@ -57,7 +57,7 @@ void
 AnalyserMonitorHandler::AddOnEnabled(const add_on_entry_info* entryInfo)
 {
 	entry_ref ref;
-	make_entry_ref(entryInfo->dir_nref.device, entryInfo->dir_nref.node,
+	make_entry_ref(entryInfo->dir_nref.device(), entryInfo->dir_nref.node(),
 		entryInfo->name, &ref);
 	fIndexServer->RegisterAddOn(ref);
 };
@@ -67,7 +67,7 @@ void
 AnalyserMonitorHandler::AddOnDisabled(const add_on_entry_info* entryInfo)
 {
 	entry_ref ref;
-	make_entry_ref(entryInfo->dir_nref.device, entryInfo->dir_nref.node,
+	make_entry_ref(entryInfo->dir_nref.device(), entryInfo->dir_nref.node(),
 		entryInfo->name, &ref);
 	fIndexServer->UnregisterAddOn(ref);
 };

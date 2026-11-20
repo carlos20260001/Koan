@@ -145,7 +145,9 @@ MDNSServer::ReadyToRun()
 
 	sockaddr_in address;
 	memset(&address, 0, sizeof(address));
+#ifndef __VOS__
 	address.sin_len = sizeof(address);
+#endif
 	address.sin_family = AF_INET;
 	address.sin_port = htons(kPort);
 	address.sin_addr.s_addr = INADDR_ANY;
@@ -478,7 +480,9 @@ MDNSServer::_SendAnswers(MDNSRecord* record, const sockaddr_in* to,
 		destination = *to;
 	else {
 		memset(&destination, 0, sizeof(destination));
+#ifndef __VOS__
 		destination.sin_len = sizeof(destination);
+#endif
 		destination.sin_family = AF_INET;
 		destination.sin_port = htons(kPort);
 		destination.sin_addr.s_addr = htonl(kGroup);
@@ -509,7 +513,9 @@ MDNSServer::_Announce(MDNSRecord* record, uint32 ttl)
 
 		sockaddr_in destination;
 		memset(&destination, 0, sizeof(destination));
+#ifndef __VOS__
 		destination.sin_len = sizeof(destination);
+#endif
 		destination.sin_family = AF_INET;
 		destination.sin_port = htons(kPort);
 		destination.sin_addr.s_addr = htonl(kGroup);

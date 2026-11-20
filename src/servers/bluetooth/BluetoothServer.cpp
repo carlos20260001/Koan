@@ -102,6 +102,9 @@ static const bigtime_t kLinkSecurityDelay = 2000000;
 
 bool BluetoothServer::QuitRequested(void)
 {
+#ifdef __VOS__
+	fAgent.Stop();
+#endif
 	LocalDeviceImpl* lDeviceImpl = NULL;
 	while ((lDeviceImpl = (LocalDeviceImpl*)
 		fLocalDevicesList.RemoveItemAt(0)) != NULL)
@@ -132,6 +135,19 @@ void BluetoothServer::ArgvReceived(int32 argc, char **argv)
 
 void BluetoothServer::ReadyToRun(void)
 {
+#ifdef __VOS__
+	// On Linux BlueZ owns the radios, the SDP server and the HID host
+	// (bluetoothd, its input plugin and uhid), and the Bluetooth kit talks
+	// to it directly (BlueZBackend). The server's part is BlueZ's pairing
+	// agent: the user enters and confirms codes in air/OS's windows.
+	// TODO(linux backend): the HCI device handling, SDP server and HID host
+	// below drive Haiku's Bluetooth stack (/dev/bluetooth, HCI ports) and
+	// are not started; A2DP routing is PipeWire's (its BlueZ plugin).
+	LogStartup("pairing agent for BlueZ");
+	if (fAgent.Start() != B_OK)
+		LogStartup("the pairing agent did not start");
+	return;
+#endif
 	LogStartup("looking for radios");
 	// The device manager's looper has to run for the node monitor to tell
 	// it about radios that appear later (a controller whose firmware is

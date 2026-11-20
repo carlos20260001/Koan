@@ -2,6 +2,17 @@
 # CMakeLists.txt; the others keep their Jamfiles until their wave ports them
 # (PORTING.md M9). VitruvianOS's session servers come first, in its order,
 # then the rest alphabetically, so a new port needs no change here.
+# Adds headers/private/<name> for each name to <target>: UsePrivateHeaders()
+# knows only the directories VitruvianOS has, not air/OS's (media, midi,
+# bluetooth, osd, quicklook, ...). Used by the air/OS servers (W3-D).
+function(VosPrivateHeaders target)
+	UsePrivateHeaders(${target} ${ARGN})
+	foreach(_dir IN LISTS ARGN)
+		target_include_directories(${target} PRIVATE
+			"${PROJECT_SOURCE_DIR}/headers/private/${_dir}")
+	endforeach()
+endfunction()
+
 set(_vos_servers_first
 	janus
 	janus_session

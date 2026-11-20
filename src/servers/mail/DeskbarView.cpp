@@ -136,7 +136,7 @@ void DeskbarView::AttachedToWindow()
 bool DeskbarView::_EntryInTrash(const entry_ref* ref)
 {
 	BEntry entry(ref);
-	BVolume volume(ref->device);
+	BVolume volume(ref->device());
 	BPath path;
 	if (volume.InitCheck() != B_OK
 		|| find_directory(B_TRASH_DIRECTORY, &path, false, &volume) != B_OK)
@@ -254,8 +254,11 @@ DeskbarView::MessageReceived(BMessage* message)
 				case B_ENTRY_REMOVED:
 				{
 					entry_ref ref;
-					message->FindInt32("device", &ref.device);
-					message->FindInt64("directory", &ref.directory);
+					int32 device = -1;
+					int64 directory = -1;
+					message->FindInt32("device", &device);
+					message->FindInt64("directory", &directory);
+					ref.set_to(device, directory);
 
 					if (!_EntryInTrash(&ref)) {
 						if (opcode == B_ENTRY_CREATED)

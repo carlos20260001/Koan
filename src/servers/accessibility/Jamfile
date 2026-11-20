@@ -1,9 +1,0 @@
-SubDir HAIKU_TOP src servers accessibility ;
-
-UsePrivateHeaders app interface ;
-
-Application accessibility_server :
-	AccessibilityServer.cpp
-	: be [ TargetLibstdc++ ]
-	: accessibility_server.rdef
-;

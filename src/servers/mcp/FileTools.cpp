@@ -2,6 +2,7 @@
  * airos_mcp - moving files to and from the device.
  * Copyright 2026 air/OS contributors. MIT license.
  */
+#include <algorithm>
 #include <dirent.h>
 #include <errno.h>
 #include <fcntl.h>
