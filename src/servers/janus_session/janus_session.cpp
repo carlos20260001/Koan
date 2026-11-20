@@ -77,6 +77,17 @@ static const KnownServer kFanOutServers[] = {
 	{ "Tracker",             "application/x-vnd.Be-TRAK",               false, false },
 	{ "vitruvian-login",     "application/x-vnd.vos-login",       false, false },
 	{ "FirstBootPrompt",     "application/x-vnd.vos-FirstBootPrompt", false, false },
+	// air/OS's session services, which its launch_daemon started on demand
+	// (data/launch/system). Nothing here starts a server on its first
+	// message, so they start with the login; a missing binary is skipped.
+	{ "media_controls_server", "application/x-vnd.vos-media_controls_server", false, false },
+	{ "osd_server",          "application/x-vnd.vos-osd_server",       false, false },
+	{ "quick_look_server",   "application/x-vnd.vos-quick_look_server", false, false },
+	{ "accessibility_server", "application/x-vnd.vos-accessibility_server", false, false },
+	{ "location_server",     "application/x-vnd.vos-location_server",  false, false },
+	{ "mdns_server",         "application/x-vnd.vos-mdns_server",      false, false },
+	{ "power_daemon",        "application/x-vnd.vos-powermanagement",  false, false },
+	{ "mcp_server",          "application/x-vnd.vos-mcp_server",       false, false },
 	{ NULL, NULL, false, false }
 };
 
@@ -284,7 +295,7 @@ struct JanusApp {
 	port_id port;
 };
 
-#define JANUS_MAX_APPS 16
+#define JANUS_MAX_APPS 32
 static JanusApp        sApps[JANUS_MAX_APPS];
 static int              sAppCount = 0;
 static BFutexLocker     sAppsLock;
@@ -300,7 +311,7 @@ struct PendingLaunch {
 	bool      restarted;
 };
 
-#define JANUS_MAX_PENDING 8
+#define JANUS_MAX_PENDING 16
 static PendingLaunch sPending[JANUS_MAX_PENDING];
 // Relaunches run on the daemon loop thread while the launch thread drains
 // readiness; sPending[] needs a lock now that two threads claim slots.
@@ -1457,7 +1468,11 @@ fanout_thread(void*)
 		// authenticated subject before login.
 		static const char* const kFanOut[] = {
 			"input_server", "notification_server", "keystore_server",
-			"vos-polkit-agent", "Deskbar", "Tracker", NULL
+			"vos-polkit-agent", "Deskbar", "Tracker",
+			// air/OS session services (kFanOutServers)
+			"media_controls_server", "osd_server", "quick_look_server",
+			"accessibility_server", "location_server", "mdns_server",
+			"power_daemon", "mcp_server", NULL
 		};
 		for (int i = 0; kFanOut[i] != NULL; i++)
 			fire_launch(kFanOut[i]);
