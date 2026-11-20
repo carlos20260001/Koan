@@ -15,6 +15,9 @@
 #include <MessageFilter.h>
 #include <Messenger.h>
 #include <ObjectList.h>
+#include <VRefCache.h>
+
+#include <vector>
 
 
 class Desktop;
@@ -85,13 +88,24 @@ class EventDispatcher : public BLocker {
 
 		void GetMouse(BPoint& where, int32& buttons);
 		void SendFakeMouseMoved(EventTarget& target, int32 viewToken);
+		// Hands an event from an output add-on (remote desktop and
+		// friends) to the stream queue; ownership moves on success.
+		void InjectEvent(BMessage* event);
 		bigtime_t IdleTime();
+		// Set by PowerManager when it turns the display off for idle; the
+		// next input event turns it back on.
+		bool IsDisplayAsleep() { return atomic_get(&fDisplayAsleep) != 0; }
+		void SetDisplayAsleep(bool asleep)
+			{ atomic_set(&fDisplayAsleep, asleep ? 1 : 0); }
 
 		bool HasCursorThread();
 		void SetHWInterface(HWInterface* interface);
 
 		void SetDragMessage(BMessage& message, ServerBitmap* bitmap,
 				const BPoint& offsetFromCursor);
+		void SetDragMessage(BMessage& message,
+				std::vector<std::pair<vref_id, BPrivate::vref_ticket>>&& tickets,
+				ServerBitmap* bitmap, const BPoint& offsetFromCursor);
 			// the message should be delivered on the next
 			// "mouse up".
 			// if the mouse is not pressed, it should
@@ -149,8 +163,11 @@ class EventDispatcher : public BLocker {
 		BPoint			fLastCursorPosition;
 		int32			fLastButtons;
 		bigtime_t		fLastUpdate;
+		int32			fDisplayAsleep;
 
 		BMessage		fDragMessage;
+		std::vector<std::pair<vref_id, BPrivate::vref_ticket>>
+						fDragTickets;
 		bool			fDraggingMessage;
 		BPoint			fDragOffset;
 

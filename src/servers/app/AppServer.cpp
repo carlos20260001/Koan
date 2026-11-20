@@ -7,12 +7,15 @@
  *		Axel Dörfler, axeld@pinc-software.de
  *		Stephan Aßmus <superstippi@gmx.de>
  * 		Christian Packmann
+ *		Dario Casalinuovo
  */
 
 
 #include "AppServer.h"
 
+#include <signal.h>
 #include <syslog.h>
+#include <unistd.h>
 
 #include <AutoDeleter.h>
 #include <LaunchRoster.h>
@@ -22,7 +25,9 @@
 #include "BitmapManager.h"
 #include "Desktop.h"
 #include "GlobalFontManager.h"
+#include "HWInterface.h"
 #include "InputManager.h"
+#include "OutputAddonManager.h"
 #include "ScreenManager.h"
 #include "ServerProtocol.h"
 
@@ -52,7 +57,10 @@ AppServer::AppServer(status_t* status)
 	:
 	SERVER_BASE("application/x-vnd.vos-app_server", "picasso", -1, false,
 		status),
-	fDesktopLock("AppServerDesktopLock")
+	fDesktopLock("AppServerDesktopLock"),
+	fLockRequest(NULL),
+	fLockResult(B_OK),
+	fLockPending(0)
 {
 	openlog("app_server", 0, LOG_DAEMON);
 
@@ -67,6 +75,12 @@ AppServer::AppServer(status_t* status)
 
 	gScreenManager = new ScreenManager();
 	gScreenManager->Run();
+
+	// Output add-ons: created after the screen manager because attach
+	// resolves screens through it; before any desktop because remote
+	// sessions attach as soon as they register.
+	gOutputAddonManager = new OutputAddonManager(this);
+	gOutputAddonManager->InitCheck();
 
 	// Create the bitmap allocator. Object declared in BitmapManager.cpp
 	gBitmapManager = new BitmapManager();
@@ -93,7 +107,14 @@ AppServer::AppServer(status_t* status)
 */
 AppServer::~AppServer()
 {
+	delete fLockRequest;
 	delete gBitmapManager;
+
+	if (gOutputAddonManager != NULL) {
+		gOutputAddonManager->Lock();
+		gOutputAddonManager->Quit();
+		gOutputAddonManager = NULL;
+	}
 
 	gScreenManager->Lock();
 	gScreenManager->Quit();
@@ -105,22 +126,46 @@ AppServer::~AppServer()
 }
 
 
+Desktop*
+AppServer::DesktopForUser(uid_t userID)
+{
+	return _FindDesktop(userID, NULL);
+}
+
+
 void
 AppServer::MessageReceived(BMessage* message)
 {
 	switch (message->what) {
 		case AS_GET_DESKTOP:
 		{
+			// AS_GET_DESKTOP is 0, the code of a bare reply to an
+			// asynchronous send from this team.
+			if (message->IsReply())
+				break;
+
 			Desktop* desktop = NULL;
 
 			int32 userID = message->GetInt32("user", 0);
 			int32 version = message->GetInt32("version", 0);
 			const char* targetScreen = message->GetString("target");
 
+			// Client-supplied "user" must match the kernel-attested writer
+			// uid unless we're running as root (system-mode).
+			uid_t senderUid = message->SenderUid();
+			uid_t serverUid = getuid();
+			bool acceptable = (serverUid == 0)
+				|| (senderUid != (uid_t)-1
+					&& (int32)senderUid == userID);
+
 			if (version != AS_PROTOCOL_VERSION) {
 				syslog(LOG_ERR, "Application for user %" B_PRId32 " does not "
 					"support the current server protocol (%" B_PRId32 ").\n",
 					userID, version);
+			} else if (!acceptable) {
+				syslog(LOG_ERR, "AS_GET_DESKTOP: sender uid %u does not match "
+					"requested user %" B_PRId32 "; refusing.\n",
+					(unsigned)senderUid, userID);
 			} else {
 				desktop = _FindDesktop(userID, targetScreen);
 				if (desktop == NULL) {
@@ -142,6 +187,100 @@ AppServer::MessageReceived(BMessage* message)
 			break;
 		}
 
+		case B_SEAT_ENABLED:
+		case B_SEAT_DISABLED:
+		{
+			bool enable = (message->what == B_SEAT_ENABLED);
+			for (int32 i = 0; i < fDesktops.CountItems(); i++) {
+				Desktop* desktop = fDesktops.ItemAt(i);
+				if (desktop == NULL)
+					continue;
+				::HWInterface* hw = desktop->HWInterface();
+				if (hw == NULL)
+					continue;
+				if (enable)
+					hw->OnSeatEnabled();
+				else
+					hw->OnSeatDisabled();
+			}
+
+			BMessage reply(B_REPLY);
+			message->SendReply(&reply);
+			break;
+		}
+
+		case B_SESSION_LOCK:
+		case B_SESSION_UNLOCK:
+		{
+			// Only root (janus, registrar) may change lock state; a
+			// session app must go through the janus broker.
+			uid_t senderUid = message->SenderUid();
+			if (senderUid != 0) {
+				syslog(LOG_ERR, "B_SESSION_* rejected from uid %u\n",
+					(unsigned)senderUid);
+				break;
+			}
+
+			// Each Desktop applies it on its own thread and answers; reply
+			// once all have. Never wait here: a wedged Desktop must not hang us.
+			int32 unlockTeam = message->GetInt32("team", -1);
+			bool lock = (message->what == B_SESSION_LOCK);
+			// Keep the request (and its reply target) past this handler.
+			BMessage* request = DetachCurrentMessage();
+			if (request == NULL)
+				break;
+
+			{
+				BAutolock locker(fDesktopLock);
+				delete fLockRequest;
+				fLockRequest = request;
+				fLockResult = B_OK;
+				fLockPending = 0;
+				for (int32 i = 0; i < fDesktops.CountItems(); i++) {
+					Desktop* desktop = fDesktops.ItemAt(i);
+					if (desktop == NULL)
+						continue;
+					status_t s = lock
+						? desktop->RequestLockScreen(unlockTeam,
+							BMessenger(this))
+						: desktop->RequestUnlockScreen(BMessenger(this));
+					if (s == B_OK)
+						fLockPending++;
+				}
+			}
+
+			if (fLockPending == 0) {
+				// No desktop to apply it; answer now.
+				BAutolock locker(fDesktopLock);
+				if (fLockRequest != NULL) {
+					BMessage reply(B_ERROR);
+					fLockRequest->SendReply(&reply);
+					delete fLockRequest;
+					fLockRequest = NULL;
+				}
+			}
+			break;
+		}
+
+		case Desktop::kMsgDesktopLockDone:
+		{
+			// A Desktop finished applying the lock state. Reply to
+			// the original requester once all of them have.
+			status_t result = message->GetInt32("result", B_ERROR);
+			BAutolock locker(fDesktopLock);
+			if (result != B_OK)
+				fLockResult = result;
+			if (fLockPending > 0)
+				fLockPending--;
+			if (fLockPending == 0 && fLockRequest != NULL) {
+				BMessage reply(fLockResult == B_OK ? B_REPLY : B_ERROR);
+				fLockRequest->SendReply(&reply);
+				delete fLockRequest;
+				fLockRequest = NULL;
+			}
+			break;
+		}
+
 		default:
 			// We don't allow application scripting
 			STRACE(("AppServer received unexpected code %" B_PRId32 "\n",
@@ -154,26 +293,26 @@ AppServer::MessageReceived(BMessage* message)
 bool
 AppServer::QuitRequested()
 {
-#if TEST_MODE
+	// Tear down desktops so the HWInterface destructor drops the DRM
+	// master — otherwise the next app_server hits EACCES on drmSetMaster.
 	while (fDesktops.CountItems() > 0) {
 		Desktop *desktop = fDesktops.RemoveItemAt(0);
 
 		thread_id thread = desktop->Thread();
 		desktop->PostMessage(B_QUIT_REQUESTED);
 
-		// we just wait for the desktop to kill itself
 		status_t status;
 		wait_for_thread(thread, &status);
 	}
 
+#if TEST_MODE
 	delete this;
 	exit(0);
 
 	return SERVER_BASE::QuitRequested();
 #else
-	return false;
+	return true;
 #endif
-
 }
 
 
@@ -232,10 +371,29 @@ AppServer::_FindDesktop(uid_t userID, const char* targetScreen)
 //	#pragma mark -
 
 
+// Async-signal-safe: post B_QUIT_REQUESTED so the looper unwinds the
+// C++ teardown (Desktop -> HWInterface dtor -> drmDropMaster).
+static void
+signal_quit(int /*signo*/)
+{
+	if (gAppServerPort >= 0)
+		write_port_etc(gAppServerPort, B_QUIT_REQUESTED, NULL, 0,
+			B_RELATIVE_TIMEOUT, 0);
+}
+
+
 int
 main(int argc, char** argv)
 {
 	srand(real_time_clock_usecs());
+
+	struct sigaction sa;
+	memset(&sa, 0, sizeof(sa));
+	sa.sa_handler = signal_quit;
+	sigemptyset(&sa.sa_mask);
+	sa.sa_flags = SA_RESTART;
+	sigaction(SIGTERM, &sa, NULL);
+	sigaction(SIGINT,  &sa, NULL);
 
 	status_t status;
 	AppServer* server = new AppServer(&status);

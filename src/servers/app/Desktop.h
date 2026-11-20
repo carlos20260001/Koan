@@ -1,5 +1,6 @@
 /*
  * Copyright 2001-2020, Haiku.
+ * Copyright 2026, Dario Casalinuovo.
  * Distributed under the terms of the MIT License.
  *
  * Authors:
@@ -29,10 +30,13 @@
 
 #include <ServerProtocolStructs.h>
 
+#include <PointerControlCore.h>
+
 #include "CursorManager.h"
 #include "DelayedMessage.h"
 #include "DesktopListener.h"
 #include "DesktopSettings.h"
+#include "DisplayChangeTracker.h"
 #include "DisplayLayout.h"
 #include "EventDispatcher.h"
 #include "MessageLooper.h"
@@ -48,6 +52,7 @@
 
 
 class BMessage;
+class BMessenger;
 
 class DecorAddOn;
 class DrawingEngine;
@@ -62,6 +67,20 @@ namespace BPrivate {
 };
 
 
+// Live state captured when an unconfirmed display change begins; the
+// revert applies it wholesale when the deadline fires.
+struct screen_change_snapshot {
+			int32				rotation;
+			int32				reflection;
+			int32				columns;
+			int32				rows;
+			int32				modeCount;
+			display_mode		modes[kMaxWorkspaces];
+			bool				hasModes[kMaxWorkspaces];
+};
+
+
+class PowerManager;
 class Desktop : public DesktopObservable, public MessageLooper,
 	public ScreenOwner {
 public:
@@ -131,6 +150,20 @@ public:
 			void				RevertScreenModes(uint32 workspaces);
 
 			status_t			SetBrightness(int32 id, float brightness);
+			status_t			SetRotation(int32 id, int32 rotation);
+			int32				Rotation(int32 id) const;
+			status_t			SetReflection(int32 id, int32 reflection);
+			int32				Reflection(int32 id) const;
+			status_t			SetTemperature(int32 id, float kelvin);
+			float				Temperature(int32 id) const;
+
+	// Unconfirmed display change: the deadline lives here so that the
+	// revert does not depend on the client surviving.
+			status_t			BeginScreenChange(team_id owner);
+			status_t			ConfirmScreenChange(team_id owner);
+			status_t			CancelScreenChange(team_id owner);
+			void				ScreenChangeOwnerDied(team_id owner);
+
 
 	// the monitors making up the screen
 			status_t			GetDisplayLayout(BMessage& layout);
@@ -194,6 +227,15 @@ public:
 									bool fromMinimize = false);
 			void				MinimizeWindow(Window* window, bool minimize);
 
+	// Screen lock: only the unlock team's windows stay visible. Request*
+	// return at once; kMsgDesktopLockDone ("result") reports completion.
+	static const int32	kMsgDesktopLockDone = 'ldDn';
+			status_t			RequestLockScreen(team_id unlockTeam,
+									BMessenger completion);
+			status_t			RequestUnlockScreen(BMessenger completion);
+			bool				IsScreenLocked() const { return fScreenLocked; }
+			bool				IsUnlockWindow(const Window* window) const;
+
 			void				MoveWindowBy(Window* window, float x, float y,
 									int32 workspace = -1);
 			void				BeginWindowDrag();
@@ -243,6 +285,26 @@ public:
 			int32				ViewUnderMouse(const Window* window);
 
 			EventTarget*		KeyboardEventTarget();
+
+			// Pointer/keyboard grabs: one of each per desktop, owned by
+			// a team and anchored to one of its windows. The secure
+			// attention team suppresses both; VT chords never arrive
+			// because the keyboard add-on consumes them upstream.
+			status_t			AcquirePointerGrab(team_id team,
+									int32 token, EventTarget* target,
+									uint32 flags, const BRect& confineTo);
+			status_t			ReleasePointerGrab(team_id team);
+			status_t			AcquireKeyboardGrab(team_id team,
+									int32 token, EventTarget* target,
+									uint32 flags);
+			status_t			ReleaseKeyboardGrab(team_id team);
+			EventTarget*		PointerGrabTarget();
+			EventTarget*		KeyboardGrabTarget();
+			// While a secure-attention team holds the exclusive (the
+			// authentication dialog), grabs deliver nothing; the
+			// dispatcher falls back to the focus path, which the
+			// secure gate then redirects.
+			void				SetSecureAttentionTeam(team_id team);
 
 			void				SetFocusWindow(Window* window = NULL);
 			void				SetFocusLocked(const Window* window);
@@ -298,6 +360,9 @@ private:
 			void				_DispatchMessage(int32 code,
 									BPrivate::LinkReceiver &link);
 
+			status_t			LockScreen();
+			status_t			UnlockScreen();
+
 			void				_UpdateFloating(int32 previousWorkspace = -1,
 									int32 nextWorkspace = -1,
 									Window* mouseEventWindow = NULL);
@@ -339,6 +404,9 @@ private:
 			void				_ResumeDirectFrameBufferAccess();
 
 			void				_ScreenChanged(Screen* screen);
+			bool				_RelayoutWindow(Window* window,
+									const BRect& oldFrame,
+									const BRect& newFrame);
 			status_t			_ConfigureDisplayLayout(
 									::HWInterface* interface, bool switchMode);
 			status_t			_SetDisplayLayout(::HWInterface* interface,
@@ -371,6 +439,17 @@ private:
 			void				_SetWorkspace(int32 index,
 									bool moveFocusWindow = false);
 
+			bool				_ScreenChangeStoreDeferred();
+			void				_StartScreenChangeTimer();
+			void				_StopScreenChangeTimer();
+			void				_TakeScreenChangeSnapshot(
+									screen_change_snapshot& snapshot);
+			void				_RestoreScreenChange();
+			void				_FinishScreenChangeRestore();
+			void				_StoreScreenChange();
+			static	int32			_ScreenChangeTimerEntry(void* data);
+			void				_ScreenChangeTimer(uint32 generation);
+
 private:
 	friend class DesktopSettings;
 	friend class LockedDesktopSettings;
@@ -384,6 +463,7 @@ private:
 								fSettings;
 			port_id				fMessagePort;
 			::EventDispatcher	fEventDispatcher;
+			PowerManager*		fPowerManager;
 			area_id				fSharedReadOnlyArea;
 			server_read_only_memory* fServerReadOnlyMemory;
 
@@ -406,6 +486,12 @@ private:
 			WindowList			fFocusList;
 			Window*				fLastWorkspaceFocus[kMaxWorkspaces];
 
+			bool				fScreenLocked;
+			team_id				fUnlockTeam;
+									// janus names the locker; only that team's windows are exempt
+			BList				fLockHiddenWindows;
+									// windows hidden by LockScreen(); dropped in RemoveWindow
+
 			BObjectList<WorkspacesView> fWorkspacesViews;
 			BLocker				fWorkspacesLock;
 
@@ -422,6 +508,15 @@ private:
 			const Window*		fWindowUnderMouse;
 			const Window*		fLockedFocusWindow;
 			int32				fViewUnderMouse;
+
+			BLocker				fGrabLock;
+			input_grab_state	fInputGrabs;
+			EventTarget*		fPointerGrabTarget;
+			EventTarget*		fKeyboardGrabTarget;
+			BRect				fPointerGrabRect;
+
+			void				_ReleaseGrabsForTarget(
+									EventTarget* target);
 			BPoint				fLastMousePosition;
 			int32				fLastMouseButtons;
 
@@ -432,6 +527,13 @@ private:
 			StackAndTile		fStackAndTile;
 
 			BMessage			fPendingColors;
+
+			DisplayChangeTracker	fScreenChangeTracker;
+			BLocker				fScreenChangeLock;
+			thread_id			fScreenChangeTimer;
+			sem_id				fScreenChangeWakeup;
+			bool				fScreenChangeStoreDeferred;
+			screen_change_snapshot	fScreenChangeSnapshot;
 };
 
 #endif	// DESKTOP_H
