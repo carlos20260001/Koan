@@ -1,6 +1,7 @@
 /*
  * Copyright 2005-2009, Haiku.
  * Copyright 2026, Dario Casalinuovo <b.vitruvio@gmail.com>.
+ * Copyright 2026, Koan contributors. All rights reserved.
  * Distributed under the terms of the MIT License.
  *
  * Authors:
