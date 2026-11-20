@@ -5,7 +5,6 @@ SubInclude HAIKU_TOP src servers app ;
 SubInclude HAIKU_TOP src servers bluetooth ;
 SubInclude HAIKU_TOP src servers debug ;
 SubInclude HAIKU_TOP src servers index ;
-SubInclude HAIKU_TOP src servers launch ;
 SubInclude HAIKU_TOP src servers mail ;
 SubInclude HAIKU_TOP src servers mcp ;
 SubInclude HAIKU_TOP src servers location ;
