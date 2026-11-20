@@ -4,7 +4,6 @@ SubInclude HAIKU_TOP src servers accessibility ;
 SubInclude HAIKU_TOP src servers app ;
 SubInclude HAIKU_TOP src servers bluetooth ;
 SubInclude HAIKU_TOP src servers debug ;
-SubInclude HAIKU_TOP src servers index ;
 SubInclude HAIKU_TOP src servers input ;
 SubInclude HAIKU_TOP src servers keystore ;
 SubInclude HAIKU_TOP src servers launch ;

@@ -84,17 +84,19 @@ WatchNameHandler::MessageReceived(BMessage* msg)
 			case B_STAT_CHANGED: {
 				BString name;
 				entry_ref ref;
-				ino_t node;
+				int64 node;
 				int32 statFields;
 				msg->FindInt32("fields", &statFields);
 				if ((statFields & B_STAT_MODIFICATION_TIME) == 0)
 					break;
-				msg->FindInt32("device", &ref.device);
+				int32 device = -1;
+				int64 directory = -1;
+				msg->FindInt32("device", &device);
 				msg->FindInt64("node", &node);
-				msg->FindInt64("directory", &ref.directory);
+				msg->FindInt64("directory", &directory);
 				msg->FindString("name", &name);
 
-				ref.set_name(name);
+				ref.set_to(device, directory, name);
 
 				BPath path(&ref);
 				printf("stat changed node %i name %s %s\n", (int)node,
