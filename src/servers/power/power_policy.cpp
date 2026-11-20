@@ -29,7 +29,9 @@
 #include <Screen.h>
 #include <Server.h>
 
-#if defined(__i386__) || defined(__x86_64__)
+#ifdef __VOS__
+#	include "linux_power.h"
+#elif defined(__i386__) || defined(__x86_64__)
 #	include <arch/x86/arch_suspend.h>
 
 extern "C" status_t _kern_generic_syscall(const char* subsystem,
@@ -393,10 +395,15 @@ void
 PowerPolicy::_ApplyProfile()
 {
 	bool powerSaving = fOnAC ? fPowerSavingOnAC : fPowerSavingOnBattery;
+#ifdef __VOS__
+	// the power profile is power-profiles-daemon's on Linux
+	linux_power_set_power_saving(powerSaving);
+#else
 	int32 mode = powerSaving
 		? SCHEDULER_MODE_POWER_SAVING : SCHEDULER_MODE_LOW_LATENCY;
 	if (get_scheduler_mode() != mode)
 		set_scheduler_mode(mode);
+#endif
 }
 
 
@@ -458,7 +465,22 @@ PowerPolicy::_HasExternalDisplay()
 PowerPolicy::sleep_result
 PowerPolicy::_Sleep(bool deep, bigtime_t timeout)
 {
-#if defined(__i386__) || defined(__x86_64__)
+#ifdef __VOS__
+	// Suspend through logind. TODO(linux backend): the wake-ups to look at
+	// the lid (sleep_check_seconds) and to sleep deeper after a while
+	// (deep_sleep_minutes) need an RTC wake alarm, which takes
+	// CAP_WAKE_ALARM (timerfd on CLOCK_REALTIME_ALARM) or logind's
+	// suspend-then-hibernate; the machine sleeps until something wakes it.
+	(void)deep;
+	(void)timeout;
+	if (linux_power_suspend() != B_OK)
+		return kSleepFailed;
+
+	BAutolock _(fLock);
+	fWokeUp = system_time();
+	printf("power_daemon: woke up\n");
+	return kWokeUp;
+#elif defined(__i386__) || defined(__x86_64__)
 	x86_suspend_s2idle_args args = {};
 	// The devices with suspend hooks (USB, NVMe) and the legacy drivers'
 	// power hooks (Wi-Fi) go to sleep, too; those for a deep sleep only (the
@@ -502,6 +524,11 @@ PowerPolicy::_Sleep(bool deep, bigtime_t timeout)
 void
 PowerPolicy::_TakeDownWiredInterfaces(InterfaceList& _interfaces)
 {
+#ifdef __VOS__
+	// NetworkManager takes the interfaces down for the sleep and brings
+	// them up again itself (it follows logind's PrepareForSleep).
+	return;
+#endif
 	BNetworkRoster& roster = BNetworkRoster::Default();
 	BNetworkInterface interface;
 	uint32 cookie = 0;
@@ -531,6 +558,9 @@ PowerPolicy::_TakeDownWiredInterfaces(InterfaceList& _interfaces)
 void
 PowerPolicy::_BringUpInterfaces(const InterfaceList& interfaces)
 {
+#ifdef __VOS__
+	return;
+#endif
 	for (int32 i = 0; i < interfaces.CountItems(); i++) {
 		const sleeping_interface* sleeping = interfaces.ItemAt(i);
 		BNetworkInterface interface(sleeping->name);
@@ -553,6 +583,18 @@ PowerPolicy::_BringUpInterfaces(const InterfaceList& interfaces)
 bool
 PowerPolicy::_WaitForLidOpen(bigtime_t timeout)
 {
+#ifdef __VOS__
+	// UPower tells whether the lid is closed
+	bigtime_t end = system_time() + timeout;
+	while (true) {
+		int closed = linux_power_lid_closed();
+		if (closed != 1)
+			return true;
+		if (system_time() >= end)
+			return false;
+		snooze(100000);
+	}
+#else
 	int fd = open("/dev/power/acpi_lid/0", O_RDONLY);
 	if (fd < 0)
 		return true;
@@ -569,4 +611,5 @@ PowerPolicy::_WaitForLidOpen(bigtime_t timeout)
 	}
 	close(fd);
 	return lidOpen;
+#endif
 }

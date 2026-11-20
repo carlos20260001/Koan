@@ -28,6 +28,10 @@ public:
 private:
 			std::set<int>		fFDs;
 			PowerPolicy*		fPolicy;
+#ifdef __VOS__
+			int					fInhibitor;
+				// logind's "handle-power-key" lock
+#endif
 };
 
 
