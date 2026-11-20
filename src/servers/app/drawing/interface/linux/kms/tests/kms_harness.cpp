@@ -498,6 +498,13 @@ main(int argc, char** argv)
 		while (__atomic_load_n(&listener.fChanges, __ATOMIC_SEQ_CST) == 0
 			&& kms_monotonic_time() < until)
 			usleep(50000);
+		int32 events = __atomic_load_n(&listener.fChanges, __ATOMIC_SEQ_CST);
+		result(events > 0, "hot plug event (udev) within 30 s");
+		if (events == 0) {
+			// did the connectors change at all?
+			printf("probing the connectors: %s\n",
+				device->CheckOutputs() ? "changed" : "unchanged");
+		}
 		outputs = get_outputs(*device);
 		int32 now = 0;
 		for (size_t i = 0; i < outputs.size(); i++) {
@@ -505,7 +512,8 @@ main(int argc, char** argv)
 				now++;
 		}
 		result(listener.fChanges > 0 && now != before,
-			"hot plug event: %d connected before, %d after", before, now);
+			"monitors after the change: %d connected before, %d after",
+			before, now);
 		status = set_layout(*device, front, outputs, 125, false, mode);
 		result(status == B_OK, "layout on the new monitors: %ux%u: %s",
 			mode.virtual_width, mode.virtual_height, strerror(-status));
