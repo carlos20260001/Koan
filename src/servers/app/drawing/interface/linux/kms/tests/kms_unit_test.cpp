@@ -1,5 +1,5 @@
 /*
- * Copyright 2026, VitruvianOS contributors.
+ * Copyright 2026, Koan contributors. All rights reserved.
  * Distributed under the terms of the MIT License.
  *
  * Host tests of the KMS backend's pure parts: modes, EDID, layouts, the

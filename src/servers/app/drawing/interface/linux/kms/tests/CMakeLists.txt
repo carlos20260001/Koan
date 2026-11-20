@@ -1,3 +1,6 @@
+# Copyright 2026, Koan contributors. All rights reserved.
+# Distributed under the terms of the MIT License.
+#
 # Host tests of the KMS backend (no hardware), and the harness that drives
 # the backend on a real or virtual KMS device (QEMU: vkms, virtio-gpu).
 

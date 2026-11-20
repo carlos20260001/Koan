@@ -1,5 +1,5 @@
 /*
- * Copyright 2026, Koan contributors.
+ * Copyright 2026, Koan contributors. All rights reserved.
  * Distributed under the terms of the MIT License.
  *
  * The layout rules follow air/OS's amdgpu_kms accelerant (layout.cpp,
