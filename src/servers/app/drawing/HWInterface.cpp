@@ -1,4 +1,5 @@
 /*
+ * Copyright 2026, Dario Casalinuovo. All rights reserved.
  * Copyright 2005-2012, Haiku.
  * Distributed under the terms of the MIT License.
  *
@@ -128,6 +129,18 @@ status_t
 HWInterface::GetDriverPath(BString &path)
 {
 	return B_ERROR;
+}
+
+
+void
+HWInterface::OnSeatEnabled()
+{
+}
+
+
+void
+HWInterface::OnSeatDisabled()
+{
 }
 
 
@@ -604,6 +617,8 @@ HWInterface::InvalidateRegion(const BRegion& region)
 status_t
 HWInterface::Invalidate(const BRect& frame)
 {
+	_NotifyFrameCommitted(frame);
+
 	if (atomic_get(&fHasStale) != 0) {
 		// drawn into: the drawing buffer is the current one there
 		BAutolock _(fStaleLock);
@@ -1994,6 +2009,16 @@ HWInterface::_FlushPending(FlushTarget& target, bigtime_t blank, int32 which)
 }
 
 
+status_t
+HWInterface::CopyBackToFront(const BRegion& region)
+{
+	int32 count = region.CountRects();
+	for (int32 i = 0; i < count; i++)
+		CopyBackToFront(region.RectAt(i));
+	return B_OK;
+}
+
+
 /*!	Waits until everything queued so far has been copied to the screen (or
 	the timeout passes): for reading the screen back. Not to be called with
 	the interface locked, since the flush threads need it.
@@ -2488,11 +2513,22 @@ HWInterface::_CopyToFront(uint8* src, uint32 srcBPR, int32 x, int32 y,
 		return;
 	}
 
-	uint8* dst = (uint8*)frontBuffer->Bits();
-	uint32 dstBPR = frontBuffer->BytesPerRow();
+	_CopyToBuffer(frontBuffer, src, srcBPR, x, y, right, bottom);
+}
+
+
+void
+HWInterface::_CopyToBuffer(RenderingBuffer* buffer, uint8* src,
+	uint32 srcBPR, int32 x, int32 y, int32 right, int32 bottom) const
+{
+	if (buffer == NULL)
+		return;
+
+	uint8* dst = (uint8*)buffer->Bits();
+	uint32 dstBPR = buffer->BytesPerRow();
 
 	// transfer, handle colorspace conversion
-	switch (frontBuffer->ColorSpace()) {
+	switch (buffer->ColorSpace()) {
 		case B_RGB32:
 		case B_RGBA32:
 		{
@@ -2627,7 +2663,7 @@ HWInterface::_CopyToFront(uint8* src, uint32 srcBPR, int32 x, int32 y,
 		}
 
 		case B_GRAY8:
-			if (frontBuffer->Width() > dstBPR) {
+			if (buffer->Width() > dstBPR) {
 				// VGA 16 color grayscale planar mode
 				if (fVGADevice >= 0) {
 					vga_planar_blit_args args;
@@ -2702,7 +2738,7 @@ HWInterface::_CopyToFront(uint8* src, uint32 srcBPR, int32 x, int32 y,
 
 		default:
 			fprintf(stderr, "HWInterface::CopyBackToFront() - unsupported "
-				"front buffer format! (0x%x)\n", frontBuffer->ColorSpace());
+				"front buffer format! (0x%x)\n", buffer->ColorSpace());
 			break;
 	}
 }
@@ -2990,6 +3026,19 @@ HWInterface::_NotifyScreenChanged()
 		HWInterfaceListener* listener
 			= (HWInterfaceListener*)listeners.ItemAtFast(i);
 		listener->ScreenChanged(this);
+	}
+}
+
+
+void
+HWInterface::_NotifyFrameCommitted(const BRect& frame)
+{
+	BList listeners(fListeners);
+	int32 count = listeners.CountItems();
+	for (int32 i = 0; i < count; i++) {
+		HWInterfaceListener* listener
+			= (HWInterfaceListener*)listeners.ItemAtFast(i);
+		listener->FrameCommitted(this, frame);
 	}
 }
 

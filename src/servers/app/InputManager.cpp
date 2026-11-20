@@ -1,5 +1,6 @@
 /*
  * Copyright 2005, Haiku, Inc. All Rights Reserved.
+ * Copyright 2026, Dario Casalinuovo.
  * Distributed under the terms of the MIT License.
  *
  * Authors:
@@ -87,15 +88,32 @@ InputManager::PutStream(EventStream* stream)
 
 
 void
-InputManager::UpdateScreenBounds(BRect bounds, const BRegion* displays)
+InputManager::UpdateScreenBounds(BRect bounds, int32 orientation,
+	int32 reflection, const BRegion* displays)
 {
 	BAutolock _(this);
 
 	for (int32 i = fUsedStreams.CountItems(); i-- > 0;) {
-		fUsedStreams.ItemAt(i)->UpdateScreenBounds(bounds, displays);
+		fUsedStreams.ItemAt(i)->UpdateScreenBounds(bounds, orientation,
+			reflection, displays);
 	}
 
 	for (int32 i = fFreeStreams.CountItems(); i-- > 0;) {
-		fFreeStreams.ItemAt(i)->UpdateScreenBounds(bounds, displays);
+		fFreeStreams.ItemAt(i)->UpdateScreenBounds(bounds, orientation,
+			reflection, displays);
+	}
+}
+
+void
+InputManager::SetPointerConstraint(uint32 flags, const BRect& rect)
+{
+	BAutolock _(this);
+
+	for (int32 i = fUsedStreams.CountItems(); i-- > 0;) {
+		fUsedStreams.ItemAt(i)->SetPointerConstraint(flags, rect);
+	}
+
+	for (int32 i = fFreeStreams.CountItems(); i-- > 0;) {
+		fFreeStreams.ItemAt(i)->SetPointerConstraint(flags, rect);
 	}
 }

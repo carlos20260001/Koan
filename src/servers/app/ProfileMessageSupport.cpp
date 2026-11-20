@@ -1,5 +1,6 @@
 /*
  * Copyright 2007-2016, Haiku Inc. All rights reserved.
+ * Copyright 2026, Dario Casalinuovo.
  * Distributed under the terms of the MIT License.
  *
  * Authors:
@@ -155,7 +156,14 @@ string_for_message_code(uint32 code)
 		CODE(AS_GET_DPMS_CAPABILITIES);
 
 		CODE(AS_SCREEN_SET_BRIGHTNESS);
+		CODE(AS_SCREEN_SET_ROTATION);
+		CODE(AS_SCREEN_GET_ROTATION);
+		CODE(AS_SCREEN_SET_REFLECTION);
+		CODE(AS_SCREEN_GET_REFLECTION);
 		CODE(AS_SCREEN_GET_BRIGHTNESS);
+		CODE(AS_SCREEN_SET_TEMPERATURE);
+		CODE(AS_SCREEN_GET_TEMPERATURE);
+		CODE(AS_SCREEN_GET_CONNECTOR_NAME);
 
 		// Misc stuff
 		CODE(AS_GET_ACCELERANT_PATH);

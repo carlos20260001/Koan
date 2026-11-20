@@ -381,7 +381,8 @@ TabDecorator::_DoTabLayout()
 		fDrawState.Font().GetHeight(fontHeight);
 
 		if (tab->look != kLeftTitledWindowLook) {
-			const float spacing = fBorderWidth * 1.4f;
+			// BeOS-like compact proportions (was 1.4f in Haiku)
+			const float spacing = fBorderWidth * 1.2f;
 			tabRect.Set(fFrame.left - fBorderWidth,
 				fFrame.top - fBorderWidth
 					- ceilf(fontHeight.ascent + fontHeight.descent + spacing),
@@ -1080,10 +1081,11 @@ TabDecorator::_LayoutTabItems(Decorator::Tab* _tab, const BRect& tabRect)
 float
 TabDecorator::_DefaultTextOffset() const
 {
+	// BeOS-like compact text offset (was 3.4f/3.6f in Haiku)
 	if (fTopTab->look == B_FLOATING_WINDOW_LOOK
 			|| fTopTab->look == kLeftTitledWindowLook)
-		return int32(fBorderWidth * 3.4f);
-	return int32(fBorderWidth * 3.6f);
+		return int32(fBorderWidth * 3.0f);
+	return int32(fBorderWidth * 3.2f);
 }
 
 

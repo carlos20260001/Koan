@@ -1,0 +1,68 @@
+/*
+ * Copyright 2019, Dario Casalinuovo
+ * All rights reserved. Distributed under the terms of the GPL license.
+ */
+#ifndef ACCELERANT_BUFFER_H
+#define ACCELERANT_BUFFER_H
+
+#include "RenderingBuffer.h"
+
+#include "FBDevFormat.h"
+
+#include <linux/fb.h>
+
+
+#if DEBUG
+	#define CALLED() 			printf("CALLED %s\n",__PRETTY_FUNCTION__)
+#else
+  	#define CALLED() 			((void)0)
+#endif
+
+
+class FBDevBuffer : public RenderingBuffer {
+public:
+								FBDevBuffer(int fd,
+									struct fb_var_screeninfo vInfo);
+	virtual						~FBDevBuffer();
+
+	virtual	status_t			InitCheck() const;
+
+	virtual	color_space			ColorSpace() const;
+	virtual	void*				Bits() const;
+	virtual	uint32				BytesPerRow() const;
+	virtual	uint32				Width() const;
+	virtual	uint32				Height() const;
+
+private:
+			uint8_t*			fBuffer;
+			color_space			fSpace;
+			struct fb_var_screeninfo fVInfo;
+			struct fb_fix_screeninfo fInfo;
+};
+
+
+// One page of a panned framebuffer: a non-owning view at
+// page * BytesPerRow() * Height() into the mapping. The front buffer
+// reported to app_server is whichever page the scanout shows.
+class FBDevPage : public RenderingBuffer {
+public:
+								FBDevPage();
+								FBDevPage(FBDevBuffer* buffer, uint32 page);
+								~FBDevPage();
+
+			void				SetTo(FBDevBuffer* buffer, uint32 page);
+
+	virtual	status_t			InitCheck() const;
+
+	virtual	color_space			ColorSpace() const;
+	virtual	void*				Bits() const;
+	virtual	uint32				BytesPerRow() const;
+	virtual	uint32				Width() const;
+	virtual	uint32				Height() const;
+
+private:
+			FBDevBuffer*		fBuffer;
+			uint32				fPage;
+};
+
+#endif // ACCELERANT_BUFFER_H

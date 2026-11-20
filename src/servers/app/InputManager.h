@@ -1,5 +1,6 @@
 /*
  * Copyright 2005, Haiku, Inc. All Rights Reserved.
+ * Copyright 2026, Dario Casalinuovo.
  * Distributed under the terms of the MIT License.
  *
  * Authors:
@@ -21,7 +22,12 @@ class InputManager : public BLocker {
 		InputManager();
 		virtual ~InputManager();
 
-		void UpdateScreenBounds(BRect bounds, const BRegion* displays = NULL);
+		void UpdateScreenBounds(BRect bounds, int32 orientation = 0,
+				int32 reflection = 0, const BRegion* displays = NULL);
+
+		// Relays the seat pointer constraint (confinement rect and
+		// relative mode) that a grab established.
+		void SetPointerConstraint(uint32 flags, const BRect& rect);
 
 		bool AddStream(EventStream* stream);
 		void RemoveStream(EventStream* stream);

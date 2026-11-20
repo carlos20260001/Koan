@@ -1,5 +1,6 @@
 /*
  * Copyright 2005-2009, Axel Dörfler, axeld@pinc-software.de.
+ * Copyright 2026, Dario Casalinuovo.
  * This file may be used under the terms of the MIT License.
  */
 
@@ -134,6 +135,13 @@ ScreenConfigurations::Set(int32 id, const monitor_info* info,
 		if (configuration == NULL)
 			return B_NO_MEMORY;
 
+		// POD with no constructor, and Set() does not touch either field.
+		configuration->brightness = 1.0f;
+		configuration->rotation = 0;
+		configuration->legacy_rotation = -1;
+		configuration->reflection = 0;
+		configuration->temperature = 6500.0f;
+
 		fConfigurations.AddItem(configuration);
 	}
 
@@ -150,6 +158,103 @@ ScreenConfigurations::Set(int32 id, const monitor_info* info,
 	memcpy(&configuration->mode, &mode, sizeof(display_mode));
 
 	return B_OK;
+}
+
+
+void
+ScreenConfigurations::SetBrightness(int32 id, float brightness)
+{
+	screen_configuration* configuration = GetByID(id);
+	if (configuration != NULL)
+		configuration->brightness = brightness;
+}
+
+
+void
+ScreenConfigurations::SetRotation(int32 id, int32 rotation)
+{
+	screen_configuration* configuration = GetByID(id);
+	if (configuration != NULL) {
+		configuration->rotation = rotation;
+		configuration->legacy_rotation = -1;
+	}
+}
+
+
+int32
+ScreenConfigurations::Rotation(int32 id)
+{
+	screen_configuration* configuration = GetByID(id);
+	if (configuration == NULL)
+		return 0;
+
+	return configuration->rotation;
+}
+
+
+int32
+ScreenConfigurations::LegacyRotation(int32 id)
+{
+	screen_configuration* configuration = GetByID(id);
+	if (configuration == NULL)
+		return -1;
+
+	return configuration->legacy_rotation;
+}
+
+
+void
+ScreenConfigurations::SetReflection(int32 id, int32 reflection)
+{
+	screen_configuration* configuration = GetByID(id);
+	if (configuration != NULL)
+		configuration->reflection = reflection;
+}
+
+
+int32
+ScreenConfigurations::Reflection(int32 id)
+{
+	screen_configuration* configuration = GetByID(id);
+
+	// No auto state, unlike Rotation(): B_PANEL_REFLECTION_NONE unless set.
+	if (configuration == NULL)
+		return 0;
+
+	return configuration->reflection;
+}
+
+
+float
+ScreenConfigurations::Brightness(int32 id)
+{
+	screen_configuration* configuration = GetByID(id);
+
+	if (configuration == NULL)
+		return -1;
+
+	return configuration->brightness;
+}
+
+
+void
+ScreenConfigurations::SetTemperature(int32 id, float temperature)
+{
+	screen_configuration* configuration = GetByID(id);
+	if (configuration != NULL)
+		configuration->temperature = temperature;
+}
+
+
+float
+ScreenConfigurations::Temperature(int32 id)
+{
+	screen_configuration* configuration = GetByID(id);
+
+	if (configuration == NULL)
+		return 6500.0f;
+
+	return configuration->temperature;
 }
 
 
@@ -195,6 +300,10 @@ ScreenConfigurations::Store(BMessage& settings) const
 		screenSettings.AddData("mode", B_RAW_TYPE, &configuration->mode,
 			sizeof(display_mode));
 		screenSettings.AddFloat("brightness", configuration->brightness);
+		// A new key: "rotation" held absolute values, see LegacyRotation().
+		screenSettings.AddInt32("user_rotation", configuration->rotation);
+		screenSettings.AddInt32("reflection", configuration->reflection);
+		screenSettings.AddFloat("temperature", configuration->temperature);
 
 		settings.AddMessage("screen", &screenSettings);
 	}
@@ -256,6 +365,18 @@ ScreenConfigurations::Restore(const BMessage& settings)
 
 		if (stored.FindFloat("brightness", &configuration->brightness) != B_OK)
 			configuration->brightness = 1.0f;
+		configuration->legacy_rotation = -1;
+		if (stored.FindInt32("user_rotation", &configuration->rotation)
+				!= B_OK) {
+			configuration->rotation = 0;
+			if (stored.FindInt32("rotation",
+					&configuration->legacy_rotation) != B_OK)
+				configuration->legacy_rotation = -1;
+		}
+		if (stored.FindInt32("reflection", &configuration->reflection) != B_OK)
+			configuration->reflection = 0;
+		if (stored.FindFloat("temperature", &configuration->temperature) != B_OK)
+			configuration->temperature = 6500.0f;
 
 		fConfigurations.AddItem(configuration);
 	}
