@@ -74,6 +74,9 @@ class ScreenManager : public BLooper {
 		};
 
 		void			_ScanDrivers();
+#if defined(__VOS__) && !defined(HAIKU_TARGET_PLATFORM_LIBBE_TEST)
+		HWInterface*	_CreateLinuxHWInterface();
+#endif
 		screen_item*	_AddHWInterface(HWInterface* interface,
 							int32 id = -1);
 		bool			_IsReady(ScreenOwner* owner) const;

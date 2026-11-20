@@ -33,6 +33,13 @@ using std::nothrow;
 #else
 #	include "DrmHWInterface.h"
 #	include "FBDevHWInterface.h"
+#	include <stdio.h>
+#	include <stdlib.h>
+#	ifdef VOS_HAVE_KMS_BACKEND
+// Provided by drawing/interface/linux/kms/: NULL, or an interface whose
+// InitCheck() fails, when no KMS device can be driven.
+HWInterface* create_kms_hw_interface();
+#	endif
 #endif
 #else
  #	include "ViewHWInterface.h"
@@ -329,26 +336,78 @@ ScreenManager::_ScanDrivers()
 	//	power and data here, and should do the scanning on our own
 
 #ifndef HAIKU_TARGET_PLATFORM_LIBBE_TEST
+#ifndef __VOS__
 	bool initDrivers = true;
 	while (initDrivers) {
-	#ifndef __VOS__
 		interface = new AccelerantHWInterface();
-	#else
-		DrmHWInterface* drm = new(nothrow) DrmHWInterface();
-		if (drm != NULL && drm->InitCheck() == B_OK) {
-			interface = drm;
-		} else {
-			fprintf(stderr, "DRM backend failed, falling back to FBDev\n");
-			delete drm;
-			interface = new(nothrow) FBDevHWInterface();
-		}
-#endif
 
 		_AddHWInterface(interface);
 		initDrivers = false;
 	}
+#else
+	interface = _CreateLinuxHWInterface();
+	if (interface != NULL)
+		_AddHWInterface(interface);
+#endif
 #endif
 }
+
+
+#if defined(__VOS__) && !defined(HAIKU_TARGET_PLATFORM_LIBBE_TEST)
+/*!	Picks the Linux display backend. VOS_DISPLAY_BACKEND names the one to
+	use first ("kms", "drm" or "fbdev"); the others follow in that order as
+	fallbacks. Without it: kms (when built), drm, fbdev.
+*/
+HWInterface*
+ScreenManager::_CreateLinuxHWInterface()
+{
+	enum { kKMS, kDRM, kFBDev, kBackendCount };
+	static const char* const kNames[kBackendCount] = { "kms", "drm", "fbdev" };
+
+	int32 order[kBackendCount] = { kKMS, kDRM, kFBDev };
+	const char* wanted = getenv("VOS_DISPLAY_BACKEND");
+	if (wanted != NULL) {
+		for (int32 i = 0; i < kBackendCount; i++) {
+			if (strcmp(wanted, kNames[i]) != 0)
+				continue;
+			for (int32 j = i; j > 0; j--)
+				order[j] = order[j - 1];
+			order[0] = i;
+			break;
+		}
+	}
+
+	for (int32 i = 0; i < kBackendCount; i++) {
+		HWInterface* interface = NULL;
+		switch (order[i]) {
+			case kKMS:
+#ifdef VOS_HAVE_KMS_BACKEND
+				interface = create_kms_hw_interface();
+#endif
+				break;
+			case kDRM:
+				interface = new(nothrow) DrmHWInterface();
+				break;
+			case kFBDev:
+				interface = new(nothrow) FBDevHWInterface();
+				break;
+		}
+		if (interface == NULL)
+			continue;
+		if (interface->InitCheck() == B_OK) {
+			fprintf(stderr, "app_server: %s display backend\n",
+				kNames[order[i]]);
+			return interface;
+		}
+		fprintf(stderr, "app_server: %s display backend unavailable\n",
+			kNames[order[i]]);
+		delete interface;
+	}
+
+	fprintf(stderr, "app_server: no display backend could be opened\n");
+	return NULL;
+}
+#endif
 
 
 ScreenManager::screen_item*
