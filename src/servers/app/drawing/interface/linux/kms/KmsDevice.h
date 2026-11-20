@@ -216,6 +216,7 @@ private:
 			void				_FlipDone(Scanout* scanout, uint32 crtcId,
 									bigtime_t when);
 			void				_ArmBlanks();
+			int					_TimedBlanks();
 
 			void				_ApplyCursor(Output& output);
 			void				_ApplyGamma(Output& output);

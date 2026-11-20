@@ -321,8 +321,13 @@ KmsGles::CreateTarget(uint32 width, uint32 height, uint32 regionWidth,
 				error = B_NO_MEMORY;
 		}
 		if (error != B_OK) {
+			TRACE("no %ux%u surface: %s (EGL 0x%x)\n", width, height,
+				strerror(error), eglGetError());
 			DestroyTarget(target);
 			target = NULL;
+		} else {
+			eglMakeCurrent(fDisplay, EGL_NO_SURFACE, EGL_NO_SURFACE,
+				EGL_NO_CONTEXT);
 		}
 	}
 	if (_error != NULL)
@@ -376,13 +381,28 @@ gbm_bo*
 KmsGles::Render(KmsGlTarget* target, const uint8* source,
 	uint32 sourceBytesPerRow, const std::vector<KmsRect>& damage, bool full)
 {
-	if (!_MakeCurrent(target))
+	if (!_MakeCurrent(target)) {
+		TRACE("eglMakeCurrent: 0x%x\n", eglGetError());
 		return NULL;
+	}
 
 	glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
 	glBindTexture(GL_TEXTURE_2D, target->texture);
 	KmsRect regionBounds(0, 0, target->regionWidth, target->regionHeight);
 	KmsRect changed;
+	if (source == NULL) {
+		// nothing to show yet: black
+		glDisable(GL_SCISSOR_TEST);
+		glViewport(0, 0, target->width, target->height);
+		glClearColor(0, 0, 0, 1);
+		glClear(GL_COLOR_BUFFER_BIT);
+		target->frames = 0;
+		bool swapped = eglSwapBuffers(fDisplay, target->eglSurface);
+		eglMakeCurrent(fDisplay, EGL_NO_SURFACE, EGL_NO_SURFACE,
+			EGL_NO_CONTEXT);
+		return swapped ? gbm_surface_lock_front_buffer(target->surface)
+			: NULL;
+	}
 	if (full) {
 		_Upload(target, source, sourceBytesPerRow, regionBounds);
 		changed = KmsRect(0, 0, target->width, target->height);
@@ -439,11 +459,13 @@ KmsGles::Render(KmsGlTarget* target, const uint8* source,
 		glDisableVertexAttribArray(fPositionLocation);
 		glDisable(GL_SCISSOR_TEST);
 	}
-	if (!eglSwapBuffers(fDisplay, target->eglSurface)) {
+	bool swapped = eglSwapBuffers(fDisplay, target->eglSurface);
+	if (!swapped)
 		TRACE("eglSwapBuffers: 0x%x\n", eglGetError());
-		return NULL;
-	}
-	return gbm_surface_lock_front_buffer(target->surface);
+	// not current anywhere: the next frame may come from another thread
+	// (a mode set on app_server's, the present thread's frames)
+	eglMakeCurrent(fDisplay, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);
+	return swapped ? gbm_surface_lock_front_buffer(target->surface) : NULL;
 }
 
 

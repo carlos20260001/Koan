@@ -149,6 +149,8 @@ struct KmsDevice::Output {
 	KmsBuffer*			cursor;
 	bool				cursorShown;
 	bool				gammaSet;
+	bool				noBlankEvents;	// the driver has no vblank
+	bigtime_t			nextBlank;		// then: blanks at the mode's rate
 
 	Output()
 		:
@@ -156,7 +158,7 @@ struct KmsDevice::Output {
 		possibleCrtcs(0), widthMM(0), heightMM(0), preferred(-1),
 		edidLength(0), crtcIdProperty(0), dpmsProperty(0), crtcIndex(-1),
 		blankArmed(false), lastBlank(0), cursor(NULL), cursorShown(false),
-		gammaSet(false)
+		gammaSet(false), noBlankEvents(false), nextBlank(0)
 	{
 		name[0] = '\0';
 	}
@@ -262,6 +264,9 @@ KmsDevice::KmsDevice(uint32 flags)
 KmsDevice::~KmsDevice()
 {
 	pthread_mutex_lock(&fLock);
+	// the flips under way finish while the event thread still takes them
+	if (fSession.IsActive())
+		_Drain(200000);
 	fQuit = true;
 	pthread_cond_broadcast(&fCondition);
 	pthread_mutex_unlock(&fLock);
@@ -272,8 +277,6 @@ KmsDevice::~KmsDevice()
 		pthread_join(fEventThread, NULL);
 
 	pthread_mutex_lock(&fLock);
-	if (fSession.IsActive())
-		_Drain(200000);
 	_HideCursors();
 	_DestroyScanouts(fScanouts);
 	for (size_t i = 0; i < fCrtcs.size(); i++) {
@@ -391,7 +394,10 @@ KmsDevice::_Init(const char* path)
 #ifdef VOS_HAVE_KMS_UDEV
 	fUdev = udev_new();
 	if (fUdev != NULL) {
-		fUdevMonitor = udev_monitor_new_from_netlink(fUdev, "udev");
+		// udevd's events; the kernel's own where no udevd runs (an
+		// initramfs, a test VM)
+		fUdevMonitor = udev_monitor_new_from_netlink(fUdev,
+			access("/run/udev/control", F_OK) == 0 ? "udev" : "kernel");
 		if (fUdevMonitor != NULL) {
 			udev_monitor_filter_add_match_subsystem_devtype(fUdevMonitor,
 				"drm", NULL);
@@ -1985,9 +1991,58 @@ KmsDevice::_ArmBlanks()
 		blank.request.sequence = 1;
 		blank.request.signal = (unsigned long)event_data(kEventBlank, o,
 			fBlankGeneration);
+		if (output.noBlankEvents)
+			continue;
 		if (drmWaitVBlank(Fd(), &blank) == 0)
 			output.blankArmed = true;
+		else if (errno == EINVAL || errno == EOPNOTSUPP || errno == ENOSYS) {
+			// virtio-gpu and other drivers without a vertical blank
+			// interrupt: blanks at the mode's rate, as accelerants
+			// release an output's semaphore that is not driven
+			TRACE("%s: no vertical blank events (%s): timed blanks\n",
+				output.name, strerror(errno));
+			output.noBlankEvents = true;
+		}
 	}
+}
+
+
+/*!	The timed blanks of outputs without blank events: due ones are told,
+	the time to the next one returned (-1: none). Locked. */
+int
+KmsDevice::_TimedBlanks()
+{
+	if (!fSession.IsActive() || fDPMSMode != B_DPMS_ON)
+		return -1;
+	bigtime_t now = kms_monotonic_time();
+	if (now >= fRetraceWantedUntil)
+		return -1;
+	bigtime_t soonest = -1;
+	for (size_t o = 0; o < fOutputs.size(); o++) {
+		Output& output = fOutputs[o];
+		if (output.crtcIndex < 0 || !output.noBlankEvents)
+			continue;
+		bigtime_t period = 0;
+		for (uint32 i = 0; i < fCurrent.count; i++) {
+			if (fCurrent.outputs[i].id == output.connector)
+				period = kms_frame_period(fCurrent.outputs[i].timing);
+		}
+		if (period <= 0)
+			period = 16667;
+		if (output.nextBlank == 0 || output.nextBlank < now - period)
+			output.nextBlank = now + period;
+		else if (output.nextBlank <= now) {
+			output.lastBlank = now;
+			if (fListener != NULL)
+				fListener->KmsRetrace(output.connector, now);
+			output.nextBlank += period;
+			pthread_cond_broadcast(&fCondition);
+		}
+		bigtime_t wait = output.nextBlank - now;
+		if (soonest < 0 || wait < soonest)
+			soonest = wait;
+	}
+	return soonest < 0 ? -1 : (int)((soonest + 999) / 1000);
 }
 
 
@@ -2053,7 +2108,8 @@ KmsDevice::ScanLine(uint32 outputID, int32* _line, int32* _lines,
 			driven = &fCurrent.outputs[i];
 	}
 	if (output == NULL || driven == NULL || output->crtcIndex < 0
-		|| !fSession.IsActive() || fDPMSMode != B_DPMS_ON) {
+		|| output->noBlankEvents || !fSession.IsActive()
+		|| fDPMSMode != B_DPMS_ON) {
 		pthread_mutex_unlock(&fLock);
 		return B_UNSUPPORTED;
 	}
@@ -2601,6 +2657,7 @@ KmsDevice::_EventThread()
 	while (!fQuit) {
 		pthread_mutex_lock(&fLock);
 		_ArmBlanks();
+		int timed = _TimedBlanks();
 		bool waiting = kms_monotonic_time() < fRetraceWantedUntil;
 		bool retry = false;
 		for (size_t s = 0; s < fScanouts.size(); s++) {
@@ -2633,6 +2690,8 @@ KmsDevice::_EventThread()
 			fds[count++] = (struct pollfd){ fSession.DispatchFd(), POLLIN, 0 };
 		}
 		int timeout = retry ? 4 : waiting ? 100 : 1000;
+		if (timed >= 0 && timed < timeout)
+			timeout = timed;
 		int result = poll(fds, count, timeout);
 		if (result < 0 && errno != EINTR)
 			break;

@@ -43,6 +43,15 @@ using std::nothrow;
 static const int32 kDisplayChangeCode = 'dchg';
 
 
+static bool
+same_mode(const display_mode& a, const display_mode& b)
+{
+	return a.virtual_width == b.virtual_width
+		&& a.virtual_height == b.virtual_height && a.space == b.space
+		&& memcmp(&a.timing, &b.timing, sizeof(display_timing)) == 0;
+}
+
+
 /*!	app_server's way in (ScreenManager::_CreateLinuxHWInterface()): NULL when
 	the backend cannot be built for this machine; otherwise an interface
 	whose InitCheck() says whether a KMS device could be opened. */
@@ -319,7 +328,7 @@ KmsHWInterface::_SetMode(const display_mode& mode, bool force)
 	AutoWriteLocker _(this);
 	if (fDevice == NULL)
 		return B_NO_INIT;
-	if (!force && fFrontBuffer.IsSet() && fDisplayMode == mode)
+	if (!force && fFrontBuffer.IsSet() && same_mode(fDisplayMode, mode))
 		return B_OK;
 	if (!_IsValidMode(mode))
 		return B_BAD_VALUE;

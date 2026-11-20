@@ -101,6 +101,17 @@ public:
 };
 
 
+class Listener : public KmsDeviceListener {
+public:
+	Listener() : fChanges(0), fRetraces(0) {}
+	virtual void KmsOutputsChanged() { __atomic_add_fetch(&fChanges, 1,
+		__ATOMIC_SEQ_CST); }
+	virtual void KmsRetrace(uint32 id, bigtime_t when) { fRetraces++; }
+	int32 fChanges;
+	int64 fRetraces;
+};
+
+
 /*!	Tiles of flat colour, 48 frame buffer pixels a side, with a seed. */
 static uint32
 tile_color(int32 x, int32 y, uint32 seed)
@@ -299,7 +310,9 @@ main(int argc, char** argv)
 		return 1;
 	}
 	Front front;
+	Listener listener;
 	device->SetFrontSource(&front);
+	device->SetListener(&listener);
 	bool exact = !device->UsesGpu();
 	printf("device %s, driver %s, %s, %s path%s%s\n", device->Path(),
 		device->DriverName(), device->IsAtomic() ? "atomic" : "legacy",
@@ -354,9 +367,12 @@ main(int argc, char** argv)
 
 		// partial updates: the ring's buffers stay complete
 		for (int i = 0; i < 7; i++) {
-			int32 w = 30 + (i * 37) % 200, h = 20 + (i * 53) % 150;
-			int32 x = (i * 211) % std::max(1, (int32)front.fWidth - w);
-			int32 y = (i * 97) % std::max(1, (int32)front.fHeight - h);
+			// on the tile grid, so that tiles stay flat
+			int32 w = 48 * (1 + i % 4), h = 48 * (1 + (i * 3) % 3);
+			int32 x = 48 * ((i * 5) % std::max(1, (int32)front.fWidth / 48
+				- 4));
+			int32 y = 48 * ((i * 3) % std::max(1, (int32)front.fHeight / 48
+				- 3));
 			draw(front, *device, seed++, KmsRect(x, y, w, h));
 			device->WaitIdle(1000000);
 		}
@@ -402,10 +418,15 @@ main(int argc, char** argv)
 		result(waited == 30 && llabs(period - expected) < expected / 5 + 1000,
 			"%s: 30 blanks waited for, %.2f ms apart (mode: %.2f ms)",
 			output.name, period / 1000.0, expected / 1000.0);
-		int32 line, lines;
-		bigtime_t scanStart, framePeriod;
+		int32 line = 0, lines = 0;
+		bigtime_t scanStart = 0, framePeriod = 0;
 		status = device->ScanLine(output.id, &line, &lines, &scanStart,
 			&framePeriod);
+		if (status == B_UNSUPPORTED) {
+			printf("SKIP: %s: no scan line (the driver has no vertical "
+				"blank events)\n", output.name);
+			continue;
+		}
 		result(status == B_OK && lines == output.height && line < lines
 				&& line > -(int32)lines,
 			"%s: scan line %d of %d, frame began %lld us ago, period %lld us",
@@ -465,6 +486,42 @@ main(int argc, char** argv)
 
 	// hot plug: nothing changed
 	result(!device->CheckOutputs(), "connectors probed again: no change");
+	result(listener.fRetraces > 0, "%lld retraces told to the listener",
+		(long long)listener.fRetraces);
+
+	if (getenv("KMS_HARNESS_HOTPLUG") != NULL) {
+		// the host changes the monitors now (QEMU: the second head)
+		int32 before = connected;
+		printf("HOTPLUG-READY\n");
+		fflush(stdout);
+		bigtime_t until = kms_monotonic_time() + 30000000;
+		while (__atomic_load_n(&listener.fChanges, __ATOMIC_SEQ_CST) == 0
+			&& kms_monotonic_time() < until)
+			usleep(50000);
+		outputs = get_outputs(*device);
+		int32 now = 0;
+		for (size_t i = 0; i < outputs.size(); i++) {
+			if ((outputs[i].flags & B_DISPLAY_OUTPUT_CONNECTED) != 0)
+				now++;
+		}
+		result(listener.fChanges > 0 && now != before,
+			"hot plug event: %d connected before, %d after", before, now);
+		status = set_layout(*device, front, outputs, 125, false, mode);
+		result(status == B_OK, "layout on the new monitors: %ux%u: %s",
+			mode.virtual_width, mode.virtual_height, strerror(-status));
+		if (status == B_OK) {
+			outputs = get_outputs(*device);
+			draw(front, *device, seed++, KmsRect(0, 0, front.fWidth,
+				front.fHeight));
+			device->WaitIdle(2000000);
+			for (size_t i = 0; i < outputs.size(); i++) {
+				if ((outputs[i].flags & B_DISPLAY_OUTPUT_ENABLED) != 0) {
+					check_output(front, *device, outputs[i], exact,
+						"after hot plug");
+				}
+			}
+		}
+	}
 
 	// a gamma ramp
 	status = device->SetTemperature(4500);
