@@ -1,5 +1,9 @@
 if(NOT BUILDTOOLS_MODE STREQUAL "1")
 
+# Declared before any subdirectory reads it (system/boot_splash builds its
+# host test by default when tests are on).
+option(VOS_BUILD_TESTS "Build the tests in a non-Debug build too" OFF)
+
 add_subdirectory(system)
 add_subdirectory(tools)
 
@@ -27,9 +31,8 @@ foreach(_dir libs servers add-ons preferences data)
 	endif()
 endforeach()
 
-# Debug builds add the tests; VOS_BUILD_TESTS adds them to other builds
-# too (a Debug build needs libbacktrace, which the build container lacks).
-option(VOS_BUILD_TESTS "Build the tests in a non-Debug build too" OFF)
+# Debug builds add the tests; VOS_BUILD_TESTS (declared at the top)
+# adds them to other builds too.
 if((CMAKE_BUILD_TYPE STREQUAL "Debug" OR VOS_BUILD_TESTS)
 		AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tests/CMakeLists.txt")
 	add_subdirectory(tests)

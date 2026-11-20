@@ -31,6 +31,11 @@ message(STATUS "Build config written to: ${CMAKE_BINARY_DIR}/buildconfig.conf")
 
 include(build/engine.cmake)
 
+# Tests register with add_test() in their own directories (src/tests,
+# boot_splash, media, neural); enable testing here so ctest finds them from
+# the top of the build tree.
+enable_testing()
+
 add_subdirectory(src)
 
 if(NOT BUILDTOOLS_MODE STREQUAL "1")
