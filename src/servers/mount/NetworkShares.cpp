@@ -8,6 +8,9 @@
 
 #include <ctype.h>
 #include <errno.h>
+#include <sys/wait.h>
+#include <stdlib.h>
+#include <fcntl.h>
 #include <stdio.h>
 #include <string.h>
 #include <sys/stat.h>
@@ -116,24 +119,178 @@ struct NetworkShares::Job {
 };
 
 
-/*!	Writes \a value so that it is one word to those who take a parameter
-	string apart at the blanks.
+//	#pragma mark - Linux SMB mounts
+
+
+/*!	The host part of a share's "server", which may end in ":port". An IPv6
+	address is written in brackets then, as in "[::1]:4445".
 */
 static BString
-encode(const BString& value)
+server_host(const BString& server)
 {
-	BString result;
-	for (int32 i = 0; i < value.Length(); i++) {
-		const unsigned char c = value[i];
-		if (isalnum(c) || strchr("-._~:/@", c) != NULL)
-			result << (char)c;
-		else {
-			char buffer[8];
-			snprintf(buffer, sizeof(buffer), "%%%02X", c);
-			result << buffer;
+	BString host(server);
+	if (host.StartsWith("[")) {
+		int32 end = host.FindFirst(']');
+		if (end > 0)
+			host.Truncate(end).Remove(0, 1);
+		return host;
+	}
+	int32 colon = host.FindFirst(':');
+	if (colon >= 0 && host.FindLast(':') == colon)
+		host.Truncate(colon);
+	return host;
+}
+
+
+static int32
+server_port(const BString& server)
+{
+	int32 colon = server.FindLast(':');
+	if (colon < 0 || (!server.StartsWith("[") && server.FindFirst(':') != colon))
+		return 0;
+	if (server.StartsWith("[") && server.FindLast(']') > colon)
+		return 0;
+	return atoi(server.String() + colon + 1);
+}
+
+
+/*!	The uid and gid the files of a share belong to: the session's user,
+	which the mount server, running as root, learns the way AutoMounter
+	does (janus starts it with sudo's SUDO_UID/SUDO_GID).
+*/
+static void
+session_ids(BString& options)
+{
+	const char* uid = getenv("SUDO_UID");
+	const char* gid = getenv("SUDO_GID");
+	if (uid != NULL && isdigit((unsigned char)*uid))
+		options << ",uid=" << uid;
+	if (gid != NULL && isdigit((unsigned char)*gid))
+		options << ",gid=" << gid;
+}
+
+
+/*!	Mounts //server/share[/path] at \a mountPoint with mount.cifs from
+	cifs-utils. It resolves the server's name, which the kernel's SMB client
+	cannot do by itself, and takes the password from $PASSWD, so it is on no
+	command line. Without cifs-utils this is \c B_DEVICE_NOT_FOUND, which
+	is not tried again, like air/OS's smbfs not being installed.
+*/
+static status_t
+mount_cifs(const BString& server, const BString& share, const BString& path,
+	const BString& user, const BString& password, const BString& domain,
+	bool readOnly, bool encrypt, const BString& mountPoint)
+{
+	static const char* const kMountCifs[] = {
+		"/usr/sbin/mount.cifs", "/sbin/mount.cifs", NULL
+	};
+	const char* mountCifs = NULL;
+	for (int32 i = 0; kMountCifs[i] != NULL; i++) {
+		if (access(kMountCifs[i], X_OK) == 0) {
+			mountCifs = kMountCifs[i];
+			break;
 		}
 	}
-	return result;
+	if (mountCifs == NULL)
+		return B_DEVICE_NOT_FOUND;
+
+	// mount.cifs splits its options at commas and has no quoting
+	if (user.FindFirst(',') >= 0 || domain.FindFirst(',') >= 0
+		|| user.FindFirst('=') >= 0 || domain.FindFirst('=') >= 0) {
+		return B_BAD_VALUE;
+	}
+
+	BString unc;
+	unc.SetToFormat("//%s/%s", server_host(server).String(), share.String());
+	if (!path.IsEmpty()) {
+		BString subPath(path);
+		subPath.ReplaceAll('\\', '/');
+		while (subPath.StartsWith("/"))
+			subPath.Remove(0, 1);
+		if (!subPath.IsEmpty())
+			unc << "/" << subPath;
+	}
+
+	BString options(readOnly ? "ro" : "rw");
+	if (user.IsEmpty())
+		options << ",guest";
+	else
+		options << ",username=" << user;
+	if (!domain.IsEmpty())
+		options << ",domain=" << domain;
+	if (int32 port = server_port(server))
+		options << ",port=" << port;
+	if (encrypt)
+		options << ",seal";
+	options << ",nosuid,nodev";
+	session_ids(options);
+
+	int errorPipe[2];
+	if (pipe2(errorPipe, O_CLOEXEC) != 0)
+		return -errno;
+
+	pid_t child = fork();
+	if (child < 0) {
+		status_t error = -errno;
+		close(errorPipe[0]);
+		close(errorPipe[1]);
+		return error;
+	}
+
+	if (child == 0) {
+		dup2(errorPipe[1], STDERR_FILENO);
+		dup2(errorPipe[1], STDOUT_FILENO);
+		if (!user.IsEmpty() && !password.IsEmpty())
+			setenv("PASSWD", password.String(), 1);
+		else
+			unsetenv("PASSWD");
+		execl(mountCifs, "mount.cifs", unc.String(), mountPoint.String(),
+			"-o", options.String(), (char*)NULL);
+		_exit(127);
+	}
+
+	close(errorPipe[1]);
+	char output[512];
+	size_t length = 0;
+	ssize_t bytes;
+	while ((bytes = read(errorPipe[0], output + length,
+			sizeof(output) - 1 - length)) != 0) {
+		if (bytes < 0) {
+			if (errno == EINTR)
+				continue;
+			break;
+		}
+		length += bytes;
+		if (length == sizeof(output) - 1) {
+			// keep the start, which has the error, and drain the rest
+			char drain[256];
+			while (read(errorPipe[0], drain, sizeof(drain)) > 0)
+				;
+			break;
+		}
+	}
+	output[length] = '\0';
+	close(errorPipe[0]);
+
+	int status;
+	while (waitpid(child, &status, 0) < 0) {
+		if (errno != EINTR)
+			return -errno;
+	}
+	if (WIFEXITED(status) && WEXITSTATUS(status) == 0)
+		return B_OK;
+	if (WIFEXITED(status) && WEXITSTATUS(status) == 127)
+		return B_DEVICE_NOT_FOUND;
+
+	// "mount error(13): Permission denied" carries the kernel's errno,
+	// which tells a wrong password from a server that is not up yet
+	const char* found = strstr(output, "mount error(");
+	if (found != NULL) {
+		int code = atoi(found + strlen("mount error("));
+		if (code > 0)
+			return -code;
+	}
+	return B_ERROR;
 }
 
 
@@ -869,38 +1026,13 @@ NetworkShares::_Mount(int32 id, bool byUser)
 		if (error == B_OK)
 			error = _CreateMountPoint(copy, mountPoint);
 		if (error == B_OK) {
-			// Each share has a server of its own, a FUSE file system
-			// cannot do with less.
-			BString parameters;
-			parameters.SetToFormat("smbfs:%" B_PRId32 " server=%s share=%s "
-				"name=%s", copy.id, encode(copy.server).String(),
-				encode(copy.share).String(), encode(copy.name).String());
-			if (!copy.path.IsEmpty())
-				parameters << " path=" << encode(copy.path);
-			if (!copy.user.IsEmpty())
-				parameters << " user=" << encode(copy.user);
-			if (!password.IsEmpty())
-				parameters << " password=" << encode(password);
-			if (!copy.domain.IsEmpty())
-				parameters << " domain=" << encode(copy.domain);
-			if (copy.readOnly)
-				parameters << " ro";
-			if (copy.encrypt)
-				parameters << " encrypt";
-
-			dev_t volume = fs_mount_volume(mountPoint.String(), NULL,
-				"userlandfs", copy.readOnly ? B_MOUNT_READ_ONLY : 0,
-				parameters.String());
-
-			// it has the password in it
-			memset(parameters.LockBuffer(parameters.Length()), 0,
-				parameters.Length());
-			parameters.UnlockBuffer(0);
-
-			if (volume < 0) {
-				error = volume;
+			// air/OS mounted its smbfs userlandfs add-on here; Linux has
+			// the kernel's SMB client, mounted through mount.cifs.
+			error = mount_cifs(copy.server, copy.share, copy.path, copy.user,
+				password, copy.domain, copy.readOnly, copy.encrypt,
+				mountPoint);
+			if (error != B_OK)
 				rmdir(mountPoint.String());
-			}
 		}
 
 		syslog(error == B_OK ? LOG_INFO : LOG_ERR,
@@ -990,9 +1122,19 @@ NetworkShares::_Unmount(int32 id)
 NetworkShares::_FindVolume(const Share& share, dev_t& _device,
 	BString& _mountPoint)
 {
+	// what the kernel's SMB client shows as the source: the UNC name
+	// mount.cifs was given, without a port
 	BString deviceName;
-	deviceName.SetToFormat("//%s/%s", share.server.String(),
+	deviceName.SetToFormat("//%s/%s", server_host(share.server).String(),
 		share.share.String());
+	if (!share.path.IsEmpty()) {
+		BString path(share.path);
+		path.ReplaceAll('\\', '/');
+		while (path.StartsWith("/"))
+			path.Remove(0, 1);
+		if (!path.IsEmpty())
+			deviceName << "/" << path;
+	}
 
 	BVolumeRoster roster;
 	BVolume volume;
@@ -1001,10 +1143,15 @@ NetworkShares::_FindVolume(const Share& share, dev_t& _device,
 		if (fs_stat_dev(volume.Device(), &info) != B_OK)
 			continue;
 
+		// The volume is named after its mount point, which is the share's
+		// name, or that name and a number (_CreateMountPoint()).
+		BString volumeName(info.volume_name);
 		if ((info.flags & B_FS_IS_SHARED) == 0
-			|| strcmp(info.fsh_name, "userlandfs") != 0
+			|| (strcmp(info.fsh_name, "cifs") != 0
+				&& strcmp(info.fsh_name, "smb3") != 0)
 			|| deviceName != info.device_name
-			|| share.name != info.volume_name) {
+			|| (volumeName != share.name
+				&& !volumeName.StartsWith(BString(share.name) << " "))) {
 			continue;
 		}
 
@@ -1139,7 +1286,7 @@ NetworkShares::_IsWorthTryingAgain(status_t error)
 		case B_NO_MEMORY:
 		case B_FILE_EXISTS:
 		case B_DEVICE_NOT_FOUND:
-			// userlandfs or smbfs are not installed
+			// cifs-utils (mount.cifs) is not installed
 		case B_NAME_NOT_FOUND:
 			return false;
 	}

@@ -40,15 +40,18 @@ private:
 			void				_MountVolumes(mount_mode normal,
 									mount_mode removable,
 									bool initialRescan = false,
-									partition_id deviceID = -1);
+									partition_id deviceID = B_INVALID_DEV);
 			void				_MountVolume(const BMessage* message);
-			bool				_SuggestForceUnmount(const char* name,
-									status_t error);
-			void				_ReportUnmountError(const char* name,
-									status_t error);
-			void				_UnmountAndEjectVolume(BPartition* partition,
-									BPath& mountPoint, const char* name);
+	static	void				_NotifyMountError(const char* volumeName,
+									status_t status);
+			status_t			_UnmountAndEjectVolume(BPartition* partition,
+									BPath& mountPoint, uint32 unmountFlags);
 			void				_UnmountAndEjectVolume(BMessage* message);
+	static	void				_SendUnmountReply(BMessage* request,
+									status_t error, const char* name,
+									const char* mountPoint);
+	static	void				_AppendBusyProcesses(const char* mountPoint,
+									BMessage* reply);
 
 			void				_FromMode(mount_mode mode, bool& all,
 									bool& bfs, bool& restore);

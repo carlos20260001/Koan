@@ -1,5 +1,6 @@
 /*
  * Copyright 2004-2013 Haiku, Inc. All rights reserved.
+ * Copyright 2026, Dario Casalinuovo <b.vitruvio@gmail.com>.
  * Distributed under the terms of the MIT License.
  *
  * Authors:
@@ -7,6 +8,7 @@
  *		Jérôme Duval
  *		Marcus Overhagen
  *		John Scipione, jscipione@gmail.com
+ *		Dario Casalinuovo
  */
 
 
@@ -35,6 +37,9 @@
 #include "MethodReplicant.h"
 
 
+static const uint32 kMsgRetryPendingDevices = 'ispd';
+
+
 #undef TRACE
 //#define TRACE_ADD_ON_MONITOR
 #ifdef TRACE_ADD_ON_MONITOR
@@ -59,7 +64,7 @@ public:
 	{
 		CALLED();
 		entry_ref ref;
-		make_entry_ref(entryInfo->dir_nref.device, entryInfo->dir_nref.node,
+		make_entry_ref(entryInfo->dir_nref.vdevice(), entryInfo->dir_nref.vnode(),
 			entryInfo->name, &ref);
 		BEntry entry(&ref, false);
 
@@ -70,7 +75,7 @@ public:
 	{
 		CALLED();
 		entry_ref ref;
-		make_entry_ref(entryInfo->dir_nref.device, entryInfo->dir_nref.node,
+		make_entry_ref(entryInfo->dir_nref.vdevice(), entryInfo->dir_nref.vnode(),
 			entryInfo->name, &ref);
 		BEntry entry(&ref, false);
 
@@ -114,7 +119,7 @@ instantiate_add_on(image_id image, const char* path, const char* type)
 		delete addOn;
 		return NULL;
 	}
-
+	printf("addon instantiated\n");
 	return addOn;
 }
 
@@ -125,15 +130,16 @@ instantiate_add_on(image_id image, const char* path, const char* type)
 AddOnManager::AddOnManager()
 	:
 	AddOnMonitor(),
+	fRetryRunner(NULL),
 	fHandler(new(std::nothrow) MonitorHandler(this))
 {
-	openlog("input_server", LOG_PERROR, LOG_USER);
 	SetHandler(fHandler);
 }
 
 
 AddOnManager::~AddOnManager()
 {
+	delete fRetryRunner;
 	delete fHandler;
 }
 
@@ -170,6 +176,9 @@ AddOnManager::MessageReceived(BMessage* message)
 		case IS_CONTROL_DEVICES:
 			status = _HandleControlDevices(message, &reply);
 			break;
+		case IS_DEVICE_ADDON_CONTROL:
+			_ControlDeviceAddOns(message);
+			return;
 		case SYSTEM_SHUTTING_DOWN:
 			status = _HandleSystemShuttingDown(message, &reply);
 			break;
@@ -179,6 +188,10 @@ AddOnManager::MessageReceived(BMessage* message)
 
 		case B_PATH_MONITOR:
 			_HandleDeviceMonitor(message);
+			return;
+
+		case kMsgRetryPendingDevices:
+			_RetryPendingDevices();
 			return;
 
 		default:
@@ -203,6 +216,88 @@ AddOnManager::SaveState()
 {
 	CALLED();
 	_UnregisterAddOns();
+}
+
+
+ 
+static const bigtime_t kRetryInterval = 25000;
+static const bigtime_t kRetryGiveUpAfter = 5000000;
+
+
+void
+AddOnManager::_QueueRetry(DeviceAddOn* addOn, const char* watchedPath,
+	const char* path)
+{
+	for (int32 i = 0; i < fPendingDevices.CountItems(); i++) {
+		pending_device* pending = fPendingDevices.ItemAt(i);
+		if (pending->add_on == addOn && pending->path == path)
+			return;
+	}
+
+	pending_device* pending = new(std::nothrow) pending_device;
+	if (pending == NULL)
+		return;
+
+	pending->add_on = addOn;
+	pending->watched_path = watchedPath;
+	pending->path = path;
+	pending->give_up_at = system_time() + kRetryGiveUpAfter;
+
+	if (!fPendingDevices.AddItem(pending)) {
+		delete pending;
+		return;
+	}
+
+	if (fRetryRunner == NULL) {
+		BMessage retry(kMsgRetryPendingDevices);
+		fRetryRunner = new(std::nothrow) BMessageRunner(BMessenger(this),
+			&retry, kRetryInterval);
+		if (fRetryRunner != NULL && fRetryRunner->InitCheck() != B_OK) {
+			delete fRetryRunner;
+			fRetryRunner = NULL;
+		}
+	}
+}
+
+
+void
+AddOnManager::_RetryPendingDevices()
+{
+	bigtime_t now = system_time();
+
+	for (int32 i = fPendingDevices.CountItems() - 1; i >= 0; i--) {
+		pending_device* pending = fPendingDevices.ItemAt(i);
+
+		// The add-on may have been unregistered while this retry was in flight.
+		if (!fDeviceAddOns.HasItem(pending->add_on)) {
+			fPendingDevices.RemoveItemAt(i);
+			continue;
+		}
+
+		BMessage message(B_PATH_MONITOR);
+		message.AddInt32("opcode", B_ENTRY_CREATED);
+		message.AddString("watched_path", pending->watched_path.String());
+		message.AddString("path", pending->path.String());
+
+		status_t status = pending->add_on->Device()->Control(NULL, NULL,
+			B_NODE_MONITOR, &message);
+
+		if (status != B_PERMISSION_DENIED) {
+			fPendingDevices.RemoveItemAt(i);
+			continue;
+		}
+
+		if (now >= pending->give_up_at) {
+			syslog(LOG_ERR, "input_server: gave up waiting for %s to become "
+				"readable\n", pending->path.String());
+			fPendingDevices.RemoveItemAt(i);
+		}
+	}
+
+	if (fPendingDevices.IsEmpty()) {
+		delete fRetryRunner;
+		fRetryRunner = NULL;
+	}
 }
 
 
@@ -319,6 +414,8 @@ status_t
 AddOnManager::_RegisterAddOn(BEntry& entry)
 {
 	BPath path(&entry);
+
+	printf("register addon %s\n", path.Path());
 
 	entry_ref ref;
 	status_t status = entry.GetRef(&ref);
@@ -773,10 +870,8 @@ AddOnManager::_HandleWatchDevices(BMessage* message, BMessage* reply)
 		if (!startWatching)
 			fWatcherMessengerList.erase(watcherMessenger);
 	}
-
 	return B_OK;
 }
-
 
 status_t
 AddOnManager::_HandleNotifyDevice(BMessage* message, BMessage* reply)
@@ -831,7 +926,6 @@ AddOnManager::_HandleNotifyDevice(BMessage* message, BMessage* reply)
 	return B_OK;
 }
 
-
 status_t
 AddOnManager::_HandleIsDeviceRunning(BMessage* message, BMessage* reply)
 {
@@ -863,8 +957,30 @@ AddOnManager::_HandleControlDevices(BMessage* message, BMessage* reply)
 	if (message->FindMessage("message", &controlMessage) != B_OK)
 		hasMessage = false;
 
-	return gInputServer->ControlDevices(name, (input_device_type)type,
-		code, hasMessage ? &controlMessage : NULL);
+	status_t status = gInputServer->ControlDevices(name,
+		(input_device_type)type, code, hasMessage ? &controlMessage : NULL);
+
+	// ControlDevices() may have written into controlMessage; hand it back
+	// so the client side's reply.FindMessage("message") finds it.
+	if (status == B_OK && hasMessage)
+		reply->AddMessage("message", &controlMessage);
+
+	return status;
+}
+
+
+void
+AddOnManager::_ControlDeviceAddOns(BMessage* message)
+{
+	uint32 code = 0;
+	if (message->FindInt32("code", (int32*)&code) != B_OK)
+		return;
+
+	for (int32 i = 0; i < fDeviceAddOns.CountItems(); i++) {
+		DeviceAddOn* addOn = fDeviceAddOns.ItemAt(i);
+		if (addOn->Device() != NULL)
+			addOn->Device()->Control(NULL, NULL, code, NULL);
+	}
 }
 
 
@@ -946,9 +1062,15 @@ AddOnManager::_HandleDeviceMonitor(BMessage* message)
 				if (!addOn->HasPath(watchedPath))
 					continue;
 
-				addOn->Device()->Control(NULL, NULL, B_NODE_MONITOR, message);
-			}
+				status_t status = addOn->Device()->Control(NULL, NULL,
+					B_NODE_MONITOR, message);
 
+				// B_PERMISSION_DENIED means udev has not finished; every
+				// other result is final.
+				if (opcode == B_ENTRY_CREATED
+					&& status == B_PERMISSION_DENIED)
+					_QueueRetry(addOn, watchedPath, path);
+			}
 			break;
 		}
 	}

@@ -1,11 +1,13 @@
 /*
  * Copyright 2004-2009, Haiku, Inc. All rights reserved.
+ * Copyright 2026, Dario Casalinuovo <b.vitruvio@gmail.com>.
  * Distributed under the terms of the MIT License.
  *
  * Authors:
  *		Jérôme Duval
  *		Andrew McCall (mccall@digitalparadise.co.uk)
  *		Axel Dörfler, axeld@pinc-software.de
+ *		Dario Casalinuovo
  */
 
 
@@ -17,6 +19,8 @@
 #include <File.h>
 #include <Path.h>
 #include <View.h>
+
+#include <touchpad_settings.h>
 
 
 MouseSettings::MouseSettings()
@@ -42,6 +46,10 @@ MouseSettings::MouseSettings(const mouse_settings* originalSettings)
 
 		if (MouseType() < 1 || MouseType() > B_MAX_MOUSE_BUTTONS)
 			SetMouseType(kDefaultMouseType);
+		// click_speed <= 0 makes double-clicks permanently impossible;
+		// a garbage-large value makes every click count as one.
+		if (ClickSpeed() <= 0 || ClickSpeed() > kMaxClickSpeed)
+			SetClickSpeed(kDefaultClickSpeed);
 		_EnsureValidMapping();
 	}
 
@@ -202,10 +210,13 @@ MouseSettings::_EnsureValidMapping()
 {
 	bool hasPrimary = false;
 
-	for (int i = 0; i < MouseType(); i++) {
+	// Whole array: the add-on remaps every bit the device reports, not
+	// just the buttons the preflet draws.
+	for (int i = 0; i < B_MAX_MOUSE_BUTTONS; i++) {
 		if (fSettings.map.button[i] == 0)
 			fSettings.map.button[i] = B_MOUSE_BUTTON(i + 1);
-		hasPrimary |= fSettings.map.button[i] & B_MOUSE_BUTTON(1);
+		if (i < MouseType())
+			hasPrimary |= fSettings.map.button[i] & B_MOUSE_BUTTON(1);
 	}
 
 	if (!hasPrimary)
@@ -376,6 +387,14 @@ MultipleMouseSettings::AddMouseSettings(BString mouse_name)
 	settings = new(std::nothrow) MouseSettings();
 
 	if(settings != NULL) {
+		// Pad deltas are scaled to screen pixels before speed applies,
+		// so a fresh touchpad must not inherit the mouse defaults.
+		if (mouse_name.IFindFirst("touchpad") >= 0
+			|| mouse_name.IFindFirst("trackpad") >= 0) {
+			settings->SetMouseSpeed(kDefaultTouchpadSettings.trackpad_speed);
+			settings->SetAccelerationFactor(
+				kDefaultTouchpadSettings.trackpad_acceleration);
+		}
 		fMouseSettingsObject.insert(std::pair<BString, MouseSettings*>
 			(mouse_name, settings));
 		return settings;
