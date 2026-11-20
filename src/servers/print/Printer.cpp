@@ -15,6 +15,10 @@
 
 	// posix
 #include <limits.h>
+
+#ifdef __VOS__
+#	include <printcups.h>
+#endif
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
@@ -228,9 +232,23 @@ Printer::ConfigurePrinter(const char* driverName,
 // Returns:
 //    B_OK if successful or errorcode otherwise.
 // ---------------------------------------------------------------
+#ifdef __VOS__
+bool
+Printer::_IsCups()
+{
+	BString driver;
+	return GetDriverName(&driver) == B_OK && driver == kCupsDriverName;
+}
+#endif
+
+
 status_t 
 Printer::ConfigurePage(BMessage& settings)
 {
+#ifdef __VOS__
+	if (_IsCups())
+		return _ConfigureCups(settings, true);
+#endif
 	BString driver;
 	status_t result = GetDriverName(&driver);
 	if (result != B_OK)
@@ -261,6 +279,10 @@ Printer::ConfigurePage(BMessage& settings)
 status_t 
 Printer::ConfigureJob(BMessage& settings)
 {
+#ifdef __VOS__
+	if (_IsCups())
+		return _ConfigureCups(settings, false);
+#endif
 	BString driver;
 	status_t result = GetDriverName(&driver);
 	if (result != B_OK)
@@ -305,6 +327,13 @@ Printer::HandleSpooledJob()
 status_t 
 Printer::GetDefaultSettings(BMessage& settings)
 {
+#ifdef __VOS__
+	if (_IsCups()) {
+		settings.RemoveName(PSRV_FIELD_CURRENT_PRINTER);
+		settings.AddString(PSRV_FIELD_CURRENT_PRINTER, Name());
+		return printcups_default_settings(&settings);
+	}
+#endif
 	BString driver;
 	status_t result = GetDriverName(&driver);
 	if (result != B_OK)
@@ -491,6 +520,10 @@ Printer::FindSpooledJob()
 status_t 
 Printer::PrintSpooledJob(const char* spoolFile)
 {
+#ifdef __VOS__
+	if (_IsCups())
+		return _PrintCupsJob(spoolFile);
+#endif
 	BString driver;
 	status_t result = GetDriverName(&driver);
 	if (result != B_OK)

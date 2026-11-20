@@ -21,6 +21,7 @@
 #include <FindDirectory.h>
 #include <image.h>
 #include <Locale.h>
+#include <MessageRunner.h>
 #include <Mime.h>
 #include <NodeInfo.h>
 #include <NodeMonitor.h>
@@ -87,6 +88,9 @@ PrintServerApp::PrintServerApp(status_t* err)
 	fHasReferences(0),
 	fUseConfigWindow(true),
 	fFolder(NULL)
+#ifdef __VOS__
+	, fCupsRunner(NULL)
+#endif
 {
 	fSettings = Settings::GetSettings();
 	LoadSettings();
@@ -104,6 +108,13 @@ PrintServerApp::PrintServerApp(status_t* err)
 
 	SetupPrinterList();
 	RetrieveDefaultPrinter();
+#ifdef __VOS__
+	// the printers are CUPS queues: look again now and then for queues
+	// added or removed with CUPS's tools
+	SyncCupsPrinters();
+	BMessage sync(kMsgSyncCupsPrinters);
+	fCupsRunner = new BMessageRunner(be_app_messenger, &sync, 30000000);
+#endif
 
 	// Cache icons for selected printer
 	BMimeType type(PSRV_PRINTER_FILETYPE);
@@ -118,6 +129,9 @@ PrintServerApp::~PrintServerApp()
 {
 	SaveSettings();
 	delete fSettings;
+#ifdef __VOS__
+	delete fCupsRunner;
+#endif
 }
 
 
@@ -321,6 +335,12 @@ PrintServerApp::MessageReceived(BMessage* msg)
 		case PSRV_GET_DEFAULT_SETTINGS:
 			Handle_BeOSR5_Message(msg);
 			break;
+
+#ifdef __VOS__
+		case kMsgSyncCupsPrinters:
+			SyncCupsPrinters();
+			break;
+#endif
 
 		case B_GET_PROPERTY:
 		case B_SET_PROPERTY:

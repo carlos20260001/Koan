@@ -30,6 +30,12 @@ extern BLocker *gLock;
 
 
 // The print_server application.
+#ifdef __VOS__
+class BMessageRunner;
+static const uint32 kMsgSyncCupsPrinters = 'cupS';
+#endif
+
+
 class PrintServerApp : public BServer, public FolderListener {
 private:
 		typedef BServer Inherited;
@@ -61,6 +67,9 @@ private:
 			void				SaveSettings();
 
 			status_t			SetupPrinterList();
+#ifdef __VOS__
+			void				SyncCupsPrinters();
+#endif
 
 			void				HandleSpooledJobs();
 
@@ -99,6 +108,9 @@ private:
 			Settings*			fSettings;
 			bool				fUseConfigWindow;
 			FolderWatcher*		fFolder;
+#ifdef __VOS__
+			BMessageRunner*		fCupsRunner;
+#endif
 };
 
 
