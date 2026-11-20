@@ -4,7 +4,6 @@ SubInclude HAIKU_TOP src servers app ;
 SubInclude HAIKU_TOP src servers input ;
 SubInclude HAIKU_TOP src servers keystore ;
 SubInclude HAIKU_TOP src servers launch ;
-SubInclude HAIKU_TOP src servers media ;
 SubInclude HAIKU_TOP src servers mount ;
 SubInclude HAIKU_TOP src servers notification ;
 SubInclude HAIKU_TOP src servers registrar ;

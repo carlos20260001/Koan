@@ -6,6 +6,8 @@
 
 #include "DefaultManager.h"
 
+#include <PipeWireNodes.h>
+
 #include <Application.h>
 #include <Directory.h>
 #include <File.h>
@@ -579,13 +581,22 @@ DefaultManager::_FindPhysical(volatile media_node_id *id, uint32 default_type,
 	// last: it is silent unless a display with speakers is connected, and it
 	// is often found before the speakers. (With a saved default the order
 	// does not matter, as only the saved device is taken.)
-	if (isAudio && !isInput) {
+	// On Linux the PipeWire node add-on's nodes that follow PipeWire's
+	// default sink and source come first: without a saved default, the
+	// Media Kit plays and records where the rest of the desktop does.
+	if (isAudio) {
+		const char* pipeWireDefault = isInput
+			? PIPEWIRE_DEFAULT_INPUT_NAME : PIPEWIRE_DEFAULT_OUTPUT_NAME;
 		live_node_info ordered[MAX_NODE_INFOS];
 		int orderedCount = 0;
-		for (int pass = 0; pass < 2; pass++) {
+		for (int pass = 0; pass < 3; pass++) {
 			for (int i = 0; i < count; i++) {
-				bool display = strstr(info[i].name, "(HDMI)") != NULL;
-				if (display == (pass == 1))
+				int rank = 1;
+				if (strcmp(info[i].name, pipeWireDefault) == 0)
+					rank = 0;
+				else if (!isInput && strstr(info[i].name, "(HDMI)") != NULL)
+					rank = 2;
+				if (rank == pass)
 					ordered[orderedCount++] = info[i];
 			}
 		}
