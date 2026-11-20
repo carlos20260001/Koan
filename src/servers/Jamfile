@@ -1,6 +1,5 @@
 SubDir HAIKU_TOP src servers ;
 
-SubInclude HAIKU_TOP src servers accessibility ;
 SubInclude HAIKU_TOP src servers app ;
 SubInclude HAIKU_TOP src servers bluetooth ;
 SubInclude HAIKU_TOP src servers debug ;
