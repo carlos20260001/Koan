@@ -40,6 +40,10 @@
 
 #include <location_server.h>
 
+#ifdef __VOS__
+#	include "GeoClue.h"
+#endif
+
 
 using namespace BPrivate::Network;
 
@@ -141,6 +145,23 @@ LocationServer::_Position(bigtime_t maxAge, Position& _position)
 		_position = fCached;
 		return B_OK;
 	}
+
+#ifdef __VOS__
+	// GeoClue first: it also knows a GPS or a modem, and it may be set up
+	// to use another service. Without it, the server looks up the
+	// position itself as on air/OS.
+	double latitude, longitude, accuracy;
+	if (geoclue_position(kRequestTimeout, latitude, longitude, accuracy)
+			== B_OK) {
+		_position.latitude = latitude;
+		_position.longitude = longitude;
+		_position.accuracy = accuracy;
+		_position.source = "geoclue";
+		_position.time = real_time_clock_usecs();
+		fCached = _position;
+		return B_OK;
+	}
+#endif
 
 	status_t status = _LookUp(_position);
 	if (status == B_OK)

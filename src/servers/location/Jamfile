@@ -1,9 +1,0 @@
-SubDir HAIKU_TOP src servers location ;
-
-UsePrivateHeaders app net netservices shared ;
-
-Application location_server :
-	LocationServer.cpp
-	: be bnetapi network libnetservices.a shared [ TargetLibstdc++ ]
-	: location_server.rdef
-;
