@@ -229,42 +229,16 @@ ClientMemoryAllocator::_AllocateChunk(size_t size)
 	// round up to multiple of page size
 	size = (size + B_PAGE_SIZE - 1) & ~(B_PAGE_SIZE - 1);
 
-	// At first, try to resize our existing areas
-
-	chunk_iterator iterator = fChunks.GetIterator();
-	struct chunk* chunk;
-	while ((chunk = iterator.Next()) != NULL) {
-		// Extend a free block at the end before adding a separate block. In
-		// particular, successively larger temporary bitmaps should reuse the
-		// old bitmap's space rather than grow the area by each bitmap's size.
-		struct block* tail = NULL;
-		block_iterator blockIterator = fFreeBlocks.GetIterator();
-		while (struct block* freeBlock = blockIterator.Next()) {
-			if (freeBlock->chunk == chunk
-				&& freeBlock->base + freeBlock->size == chunk->base + chunk->size) {
-				tail = freeBlock;
-				break;
-			}
-		}
-
-		if (tail != NULL) {
-			size_t growth = (size - tail->size + B_PAGE_SIZE - 1)
-				& ~(B_PAGE_SIZE - 1);
-			if (resize_area(chunk->area, chunk->size + growth) == B_OK) {
-				chunk->size += growth;
-				tail->size += growth;
-				return tail;
-			}
-			continue;
-		}
-
-		status_t status = resize_area(chunk->area, chunk->size + size);
-		if (status == B_OK)
-			break;
-	}
-
-	// TODO: resize and relocate while holding the write lock
-
+	// Skip resize_area entirely: when the server grows a chunk, the
+	// client's ServerMemoryAllocator returns its cached (original-size)
+	// clone_area mapping for any subsequent bitmap in that chunk, so a
+	// bitmap placed past the original chunk size lands outside the
+	// client's mapping and faults on access. Always allocate a fresh
+	// chunk; modest area overhead, no protocol changes needed.
+	// TODO(air/OS merge): growing a free tail block in place with
+	// resize_area() - air/OS a8b31c4d09 - needs the client to remap a
+	// grown chunk first.
+	struct chunk* chunk = NULL;
 	struct block* block;
 	uint8* address;
 

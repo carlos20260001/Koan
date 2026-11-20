@@ -1,9 +1,11 @@
 /*
  * Copyright 2007-2022, Haiku. All rights reserved.
+ * Copyright 2026, Dario Casalinuovo <b.vitruvio@gmail.com>.
  * Distributed under the terms of the MIT License.
  *
  * Authors:
  *		Stephan Aßmus <superstippi@gmx.de>
+ *		Dario Casalinuovo
  */
 
 #ifndef GLYPH_LAYOUT_ENGINE_H
@@ -629,13 +631,53 @@ GlyphLayoutEngine::PopulateFallbacks(
 		"Noto Sans",
 		"Noto Sans Thai",
 		"Noto Sans CJK JP",
+		// Living scripts from fonts-noto-core, most widely used first.
+		"Noto Sans Arabic",
+		"Noto Sans Hebrew",
+		"Noto Sans Devanagari",
+		"Noto Sans Bengali",
+		"Noto Sans Tamil",
+		"Noto Sans Telugu",
+		"Noto Sans Kannada",
+		"Noto Sans Malayalam",
+		"Noto Sans Gujarati",
+		"Noto Sans Gurmukhi",
+		"Noto Sans Oriya",
+		"Noto Sans Sinhala",
+		"Noto Sans Armenian",
+		"Noto Sans Georgian",
+		"Noto Sans Ethiopic",
+		"Noto Sans Khmer",
+		"Noto Sans Lao",
+		"Noto Sans Myanmar",
+		"Noto Serif Tibetan",
+		"Noto Sans Thaana",
+		"Noto Sans Syriac",
+		"Noto Sans Mongolian",
+		"Noto Sans Javanese",
+		"Noto Sans Balinese",
+		"Noto Sans Sundanese",
+		"Noto Sans Tifinagh",
+		"Noto Sans Canadian Aboriginal",
+		"Noto Sans NKo",
+		"Noto Sans Ol Chiki",
+		"Noto Sans Yi",
+		"Noto Sans Vai",
+		"Noto Sans Adlam",
 		"Noto Sans Cherokee",
 		"Noto Sans Symbols",
+		// Debian's fonts-noto-core spells this "Noto Sans Symbols2" (no
+		// space); both spellings listed so this still works on upstream too.
 		"Noto Sans Symbols 2",
+		"Noto Sans Symbols2",
+		"Noto Sans Math",
 		"Noto Color Emoji",
 		"Twemoji Mozilla",
 		"Twemoji",
 		"Noto Emoji",
+		// Last resort, not a Noto family: covers every glyph
+		// kUTF8ControlMap uses so no menu shortcut draws as tofu.
+		"DejaVu Sans",
 	};
 
 	if (!gFontManager->Lock())

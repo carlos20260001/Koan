@@ -1,9 +1,11 @@
 /*
  * Copyright 2005-2009, Haiku.
+ * Copyright 2026, Dario Casalinuovo <b.vitruvio@gmail.com>.
  * Distributed under the terms of the MIT License.
  *
  * Authors:
  *		Axel Dörfler, axeld@pinc-software.de
+ *		Dario Casalinuovo
  */
 
 /**	Manages all available physical screens */
@@ -13,23 +15,28 @@
 
 #include "Screen.h"
 #include "ServerConfig.h"
-
-#include "RemoteHWInterface.h"
+#include "VirtualOutput.h"
 
 #include <Autolock.h>
 #include <Entry.h>
 #include <NodeMonitor.h>
 
 #include <new>
+#include <string.h>
 
 using std::nothrow;
 
 
 #ifndef HAIKU_TARGET_PLATFORM_LIBBE_TEST
+#ifndef __VOS__
 #	include "AccelerantHWInterface.h"
 #else
-#	include "ViewHWInterface.h"
-#	include "DWindowHWInterface.h"
+#	include "DrmHWInterface.h"
+#	include "FBDevHWInterface.h"
+#endif
+#else
+ #	include "ViewHWInterface.h"
+ #	include "DWindowHWInterface.h"
 #endif
 
 
@@ -81,12 +88,13 @@ ScreenManager::ScreenManager()
 #	endif
 #else
 	_ScanDrivers();
-
+	#ifndef __VOS__
 	// turn on node monitoring the graphics driver directory
 	BEntry entry("/dev/graphics");
 	node_ref nodeRef;
 	if (entry.InitCheck() == B_OK && entry.GetNodeRef(&nodeRef) == B_OK)
 		watch_node(&nodeRef, B_WATCH_DIRECTORY, this);
+#endif
 #endif
 }
 
@@ -120,6 +128,90 @@ ScreenManager::CountScreens() const
 }
 
 
+Screen*
+ScreenManager::ScreenByID(int32 id) const
+{
+	if (!IsLocked())
+		debugger("Called ScreenManager::ScreenByID() without lock!");
+
+	for (int32 i = 0; i < fScreenList.CountItems(); i++) {
+		screen_item* item = fScreenList.ItemAt(i);
+		if (item->screen->ID() == id)
+			return item->screen.Get();
+	}
+
+	return NULL;
+}
+
+
+status_t
+ScreenManager::AddVirtualOutput(uint16 width, uint16 height, const char* name,
+	bool testPattern, int32* id)
+{
+	BAutolock locker(this);
+
+	// Ids must stay unique for the life of the server: removals shrink
+	// the list, so counting items would eventually collide.
+	int32 nextID = 0;
+	for (int32 i = 0; i < fScreenList.CountItems(); i++) {
+		int32 screenID = fScreenList.ItemAt(i)->screen->ID();
+		if (screenID >= nextID)
+			nextID = screenID + 1;
+	}
+
+	VirtualOutput* interface = new(nothrow) VirtualOutput(width, height, name);
+	if (interface == NULL)
+		return B_NO_MEMORY;
+
+	if (testPattern)
+		interface->SetTestPattern(true);
+
+	screen_item* item = _AddHWInterface(interface, nextID);
+	if (item == NULL) {
+		delete interface;
+		return B_ERROR;
+	}
+
+	item->isVirtual = true;
+
+	if (id != NULL)
+		*id = item->screen->ID();
+
+	return B_OK;
+}
+
+
+status_t
+ScreenManager::RemoveVirtualOutput(int32 id)
+{
+	BAutolock locker(this);
+
+	for (int32 i = 0; i < fScreenList.CountItems(); i++) {
+		screen_item* item = fScreenList.ItemAt(i);
+		if (item->screen->ID() != id)
+			continue;
+
+		if (!item->isVirtual)
+			return B_NOT_ALLOWED;
+		if (item->owner != NULL)
+			return B_BUSY;
+
+		Screen* screen = item->screen.Get();
+		HWInterface* interface = screen->HWInterface();
+
+		fScreenList.RemoveItem(item);
+		if (interface != NULL)
+			screen->HWInterface()->RemoveListener(item->listener.Get());
+		screen->Shutdown();
+		delete screen;
+		delete item;
+		return B_OK;
+	}
+
+	return B_BAD_VALUE;
+}
+
+
 status_t
 ScreenManager::AcquireScreens(ScreenOwner* owner, int32* wishList,
 	int32 wishCount, const char* target, bool force, ScreenList& list)
@@ -143,26 +235,6 @@ ScreenManager::AcquireScreens(ScreenOwner* owner, int32* wishList,
 			}
 		}
 	}
-
-	if (added == 0 && target != NULL) {
-		// there's a specific target screen we want to initialize
-		// TODO: right now we only support remote screens, but we could
-		// also target specific accelerants to support other graphics cards
-		HWInterface* interface;
-#ifdef HAIKU_TARGET_PLATFORM_LIBBE_TEST
-		interface = new(nothrow) ViewHWInterface();
-#else
-		interface = new(nothrow) RemoteHWInterface(target);
-#endif
-		if (interface != NULL) {
-			screen_item* item = _AddHWInterface(interface);
-			if (item != NULL && list.AddItem(item->screen.Get())) {
-				item->owner = owner;
-				added++;
-			}
-		}
-	}
-
 	return added > 0 ? B_OK : B_ENTRY_NOT_FOUND;
 }
 
@@ -259,7 +331,18 @@ ScreenManager::_ScanDrivers()
 #ifndef HAIKU_TARGET_PLATFORM_LIBBE_TEST
 	bool initDrivers = true;
 	while (initDrivers) {
+	#ifndef __VOS__
 		interface = new AccelerantHWInterface();
+	#else
+		DrmHWInterface* drm = new(nothrow) DrmHWInterface();
+		if (drm != NULL && drm->InitCheck() == B_OK) {
+			interface = drm;
+		} else {
+			fprintf(stderr, "DRM backend failed, falling back to FBDev\n");
+			delete drm;
+			interface = new(nothrow) FBDevHWInterface();
+		}
+#endif
 
 		_AddHWInterface(interface);
 		initDrivers = false;
@@ -269,10 +352,12 @@ ScreenManager::_ScanDrivers()
 
 
 ScreenManager::screen_item*
-ScreenManager::_AddHWInterface(HWInterface* interface)
+ScreenManager::_AddHWInterface(HWInterface* interface, int32 id)
 {
-	ObjectDeleter<Screen> screen(
-		new(nothrow) Screen(interface, fScreenList.CountItems()));
+	if (id < 0)
+		id = fScreenList.CountItems();
+
+	ObjectDeleter<Screen> screen(new(nothrow) Screen(interface, id));
 	if (!screen.IsSet()) {
 		delete interface;
 		return NULL;
@@ -286,6 +371,7 @@ ScreenManager::_AddHWInterface(HWInterface* interface)
 		if (item != NULL) {
 			item->screen.SetTo(screen.Detach());
 			item->owner = NULL;
+			item->isVirtual = false;
 			item->changedUnowned = false;
 			item->listener.SetTo(
 				new(nothrow) ScreenChangeListener(*this, item->screen.Get()));

@@ -1,5 +1,6 @@
 /*
  * Copyright 2001-2016, Haiku.
+ * Copyright 2026, Dario Casalinuovo.
  * Distributed under the terms of the MIT License.
  *
  * Authors:
@@ -170,6 +171,7 @@ ServerApp::~ServerApp()
 	snooze(20000);
 
 	fDesktop->RevertScreenModes(fTemporaryDisplayModeChange);
+	fDesktop->ScreenChangeOwnerDied(fClientTeam);
 
 	fWindowListLock.Lock();
 	for (int32 i = fWindowList.CountItems(); i-- > 0;) {
@@ -518,6 +520,16 @@ ServerApp::_DispatchMessage(int32 code, BPrivate::LinkReceiver& link)
 				&& (!stream->IsValid() || !gInputManager->AddStream(stream))) {
 				delete stream;
 				break;
+			}
+
+			// A fresh input_server otherwise only learns the screen
+			// bounds and panel orientation on the next mode change.
+			if (stream != NULL) {
+				AutoReadLocker screenLocker(fDesktop->ScreenLocker());
+				BRegion displays = fDesktop->Displays().Region();
+				stream->UpdateScreenBounds(fDesktop->VirtualScreen().Frame(),
+					fDesktop->HWInterface()->PanelScanoutOrientation(),
+					fDesktop->HWInterface()->PanelReflection(), &displays);
 			}
 
 			// TODO: this should be done using notifications (so that an
@@ -3529,6 +3541,94 @@ ServerApp::_DispatchMessage(int32 code, BPrivate::LinkReceiver& link)
 			break;
 		}
 
+		case AS_SCREEN_SET_ROTATION:
+		{
+			STRACE(("ServerApp %s: AS_SCREEN_SET_ROTATION\n", Signature()));
+			int32 id;
+			link.Read<int32>(&id);
+
+			int32 rotation;
+			link.Read<int32>(&rotation);
+
+			status_t status = fDesktop->SetRotation(id, rotation);
+			fLink.StartMessage(status);
+
+			fLink.Flush();
+			break;
+		}
+
+		case AS_SCREEN_GET_ROTATION:
+		{
+			STRACE(("ServerApp %s: AS_SCREEN_GET_ROTATION\n", Signature()));
+			int32 id;
+			link.Read<int32>(&id);
+
+			fLink.StartMessage(B_OK);
+			fLink.Attach<int32>(fDesktop->Rotation(id));
+
+			fLink.Flush();
+			break;
+		}
+
+		case AS_SCREEN_SET_REFLECTION:
+		{
+			STRACE(("ServerApp %s: AS_SCREEN_SET_REFLECTION\n", Signature()));
+			int32 id;
+			link.Read<int32>(&id);
+
+			int32 reflection;
+			link.Read<int32>(&reflection);
+
+			status_t status = fDesktop->SetReflection(id, reflection);
+			fLink.StartMessage(status);
+
+			fLink.Flush();
+			break;
+		}
+
+		case AS_SCREEN_GET_REFLECTION:
+		{
+			STRACE(("ServerApp %s: AS_SCREEN_GET_REFLECTION\n", Signature()));
+			int32 id;
+			link.Read<int32>(&id);
+
+			fLink.StartMessage(B_OK);
+			fLink.Attach<int32>(fDesktop->Reflection(id));
+
+			fLink.Flush();
+			break;
+		}
+
+		case AS_SCREEN_BEGIN_CHANGE:
+		{
+			STRACE(("ServerApp %s: AS_SCREEN_BEGIN_CHANGE\n", Signature()));
+			status_t status = fDesktop->BeginScreenChange(fClientTeam);
+			fLink.StartMessage(status);
+
+			fLink.Flush();
+			break;
+		}
+
+		case AS_SCREEN_CONFIRM_CHANGE:
+		{
+			STRACE(("ServerApp %s: AS_SCREEN_CONFIRM_CHANGE\n", Signature()));
+			status_t status = fDesktop->ConfirmScreenChange(fClientTeam);
+			fLink.StartMessage(status);
+
+			fLink.Flush();
+			break;
+		}
+
+		case AS_SCREEN_CANCEL_CHANGE:
+		{
+			STRACE(("ServerApp %s: AS_SCREEN_CANCEL_CHANGE\n", Signature()));
+			status_t status = fDesktop->CancelScreenChange(fClientTeam);
+			fLink.StartMessage(status);
+
+			fLink.Flush();
+			break;
+		}
+
 		case AS_SCREEN_SET_BRIGHTNESS:
 		{
 			STRACE(("ServerApp %s: AS_SCREEN_SET_BRIGHTNESS\n", Signature()));
@@ -3556,6 +3656,53 @@ ServerApp::_DispatchMessage(int32 code, BPrivate::LinkReceiver& link)
 			fLink.StartMessage(result);
 			if (result == B_OK)
 				fLink.Attach<float>(brightness);
+			fLink.Flush();
+			break;
+		}
+
+		case AS_SCREEN_SET_TEMPERATURE:
+		{
+			STRACE(("ServerApp %s: AS_SCREEN_SET_TEMPERATURE\n", Signature()));
+			int32 id;
+			link.Read<int32>(&id);
+
+			float kelvin;
+			link.Read<float>(&kelvin);
+
+			status_t status = fDesktop->HWInterface()->SetTemperature(kelvin);
+			fLink.StartMessage(status);
+
+			fLink.Flush();
+			break;
+		}
+
+		case AS_SCREEN_GET_TEMPERATURE:
+		{
+			STRACE(("ServerApp %s: AS_SCREEN_GET_TEMPERATURE\n", Signature()));
+			int32 id;
+			link.Read<int32>(&id);
+
+			float kelvin;
+			status_t result = fDesktop->HWInterface()->GetTemperature(&kelvin);
+			fLink.StartMessage(result);
+			if (result == B_OK)
+				fLink.Attach<float>(kelvin);
+			fLink.Flush();
+			break;
+		}
+
+		case AS_SCREEN_GET_CONNECTOR_NAME:
+		{
+			STRACE(("ServerApp %s: AS_SCREEN_GET_CONNECTOR_NAME\n",
+				Signature()));
+			int32 id;
+			link.Read<int32>(&id);
+
+			BString name;
+			status_t result = fDesktop->HWInterface()->GetConnectorName(name);
+			fLink.StartMessage(result);
+			if (result == B_OK)
+				fLink.AttachString(name.String());
 			fLink.Flush();
 			break;
 		}

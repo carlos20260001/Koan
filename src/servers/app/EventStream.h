@@ -1,5 +1,6 @@
 /*
  * Copyright 2005, Haiku, Inc. All Rights Reserved.
+ * Copyright 2026, Dario Casalinuovo.
  * Distributed under the terms of the MIT License.
  *
  * Authors:
@@ -12,6 +13,7 @@
 #include <LinkReceiver.h>
 #include <MessageQueue.h>
 #include <Messenger.h>
+#include <SharedEvent.h>
 #include <Region.h>
 
 
@@ -28,8 +30,21 @@ class EventStream {
 
 		virtual bool SupportsCursorThread() const;
 
-		virtual void UpdateScreenBounds(BRect bounds,
-			const BRegion* displays = NULL) = 0;
+		virtual void UpdateScreenBounds(BRect bounds) = 0;
+		// orientation: 0..3, matching DRM_MODE_PANEL_ORIENTATION_*.
+		// reflection: B_PANEL_REFLECTION_*. Not pure, so backends that
+		// don't care about rotation or reflection need no change.
+		// displays: the parts of bounds that are monitors (NULL: all).
+		virtual void UpdateScreenBounds(BRect bounds, int32 orientation,
+				int32 reflection = 0, const BRegion* displays = NULL)
+				{ UpdateScreenBounds(bounds); }
+
+		// Relays the seat pointer constraint (flags: 1 = confined to
+		// rect, 2 = relative mode) to input_server; default is a no-op
+		// for streams that do not reach the device add-ons.
+		virtual void SetPointerConstraint(uint32 /*flags*/,
+				const BRect& /*rect*/)
+				{}
 
 		virtual bool GetNextEvent(BMessage** _event) = 0;
 		virtual status_t GetNextCursorPosition(BPoint& where,
@@ -38,6 +53,9 @@ class EventStream {
 		virtual status_t InsertEvent(BMessage* event) = 0;
 
 		virtual BMessage* PeekLatestMouseMoved() = 0;
+
+		virtual bool GetCurrentMouseState(BPoint& where, uint32& buttons) const
+			{ return false; }
 };
 
 
@@ -53,10 +71,14 @@ class InputServerStream : public EventStream {
 		virtual bool IsValid();
 		virtual void SendQuit();
 
-		virtual bool SupportsCursorThread() const { return fCursorSemaphore >= B_OK; }
+		virtual bool SupportsCursorThread() const { return fCursorBuffer != NULL; }
 
-		virtual void UpdateScreenBounds(BRect bounds,
-			const BRegion* displays = NULL);
+		virtual void UpdateScreenBounds(BRect bounds);
+		virtual void UpdateScreenBounds(BRect bounds, int32 orientation,
+				int32 reflection = 0, const BRegion* displays = NULL);
+
+		virtual void SetPointerConstraint(uint32 flags,
+				const BRect& rect);
 
 		virtual bool GetNextEvent(BMessage** _event);
 		virtual status_t GetNextCursorPosition(BPoint& where,
@@ -74,7 +96,7 @@ class InputServerStream : public EventStream {
 		BMessageQueue fEvents;
 		port_id	fPort;
 		bool	fQuitting;
-		sem_id	fCursorSemaphore;
+		BSharedEvent	fCursorEvent;
 		area_id	fCursorArea;
 		shared_cursor* fCursorBuffer;
 		BMessage* fLatestMouseMoved;

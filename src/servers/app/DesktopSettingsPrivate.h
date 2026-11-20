@@ -71,7 +71,8 @@ public:
 			void				SetDisplaysMessage(const BMessage& message);
 			const BMessage*		DisplaysMessage() const;
 
-			void				SetWorkspacesLayout(int32 columns, int32 rows);
+			void				SetWorkspacesLayout(int32 columns,
+									int32 rows, bool save = true);
 			int32				WorkspacesCount() const;
 			int32				WorkspacesColumns() const;
 			int32				WorkspacesRows() const;

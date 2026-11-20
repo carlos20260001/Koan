@@ -1,0 +1,419 @@
+/*
+ * Copyright 2021-2026, Dario Casalinuovo.
+ * Distributed under the terms of the GPL License.
+ */
+#ifndef DRM_INTERFACE_H
+#define DRM_INTERFACE_H
+
+#include <xf86drm.h>
+#include <xf86drmMode.h>
+extern "C" {
+#include <libseat.h>
+}
+#include <libudev.h>
+
+#include <OS.h>
+#include <Region.h>
+#include <BFutexLocker.h>
+#include <pthread.h>
+#include <atomic>
+#include <vector>
+
+#include "BufferAgeTracker.h"
+#include "DrmBuffer.h"
+#include "HWInterface.h"
+#include "MallocBuffer.h"
+#include "TTy.h"
+
+#ifdef HAVE_GBM
+extern "C" {
+#include <gbm.h>
+}
+#endif
+
+#include <libbacklight.h>
+
+
+#if DEBUG
+	#define CALLED() 			printf("CALLED %s\n",__PRETTY_FUNCTION__)
+#else
+  	#define CALLED() 			((void)0)
+#endif
+
+
+struct PlaneProps {
+	uint32_t fb_id;
+	uint32_t crtc_id;
+	uint32_t src_x, src_y, src_w, src_h;
+	uint32_t crtc_x, crtc_y, crtc_w, crtc_h;
+	uint32_t fb_damage_clips;
+	// Captured but never committed: the reference cursor plane (amdgpu)
+	// does not advertise this property. Kept for a plane class that does.
+	uint32_t rotation;
+};
+
+struct CrtcProps {
+	uint32_t active;
+	uint32_t mode_id;
+	uint32_t vrr_enabled;
+};
+
+struct ConnProps {
+	uint32_t crtc_id;
+	uint32_t dpms;
+};
+
+// A cursor-plane change held back until the next frame commit, so it
+// rides that commit instead of colliding with an in-flight flip (EBUSY).
+struct CursorUpdate {
+	bool		valid;
+	uint32_t	fb_id;
+	int32_t		x, y;
+	uint32_t	w, h;
+};
+
+// Values match the kernel's "panel orientation" connector property
+// (drm_connector.h, DRM_MODE_PANEL_ORIENTATION_*) so a property read casts
+// straight into this enum.
+enum PanelOrientation {
+	PANEL_ORIENTATION_NORMAL      = 0,
+	PANEL_ORIENTATION_UPSIDE_DOWN = 1,
+	PANEL_ORIENTATION_LEFT_UP     = 2,
+	PANEL_ORIENTATION_RIGHT_UP    = 3
+};
+
+class DrmBuffer;
+
+class DrmHWInterface : public HWInterface {
+public:
+								DrmHWInterface();
+	virtual						~DrmHWInterface();
+
+	virtual	status_t			Initialize();
+	virtual	status_t			Shutdown();
+
+	virtual	EventStream*		CreateEventStream();
+
+	virtual	status_t			SetMode(const display_mode& mode);
+	virtual	void				GetMode(display_mode* mode);
+	virtual	status_t			GetPreferredMode(display_mode* mode);
+			// Same mode policy, no connector probe; for the poll.
+			status_t			GetPreferredModeCurrent(display_mode* mode);
+	virtual	int32				PanelOrientation() const;
+	virtual	status_t			SetPanelOrientation(int32 orientation);
+	virtual	int32				PanelScanoutOrientation() const;
+	virtual	int32				PanelReflection() const;
+	virtual	status_t			SetPanelReflection(int32 reflection);
+
+	virtual status_t			GetDeviceInfo(accelerant_device_info* info);
+	virtual status_t			GetMonitorInfo(monitor_info* info);
+	virtual status_t			GetFrameBufferConfig(
+									frame_buffer_config& config);
+
+	virtual status_t			GetModeList(display_mode** _modeList,
+									uint32* _count);
+	virtual status_t			GetPixelClockLimits(display_mode* mode,
+									uint32* _low, uint32* _high);
+	virtual status_t			GetTimingConstraints(display_timing_constraints*
+									constraints);
+	virtual status_t			ProposeMode(display_mode* candidate,
+									const display_mode* low,
+									const display_mode* high);
+
+	virtual sem_id				RetraceSemaphore();
+	virtual status_t			WaitForRetrace(
+									bigtime_t timeout = B_INFINITE_TIMEOUT);
+
+	virtual status_t			SetDPMSMode(uint32 state);
+	virtual uint32				DPMSMode();
+	virtual uint32				DPMSCapabilities();
+
+	virtual status_t			SetBrightness(float brightness);
+	virtual status_t			GetBrightness(float* brightness);
+
+	virtual status_t			SetTemperature(float kelvin);
+	virtual status_t			GetTemperature(float* kelvin);
+	virtual status_t			GetConnectorName(BString& name);
+
+	virtual	RenderingBuffer*	FrontBuffer() const;
+	virtual	RenderingBuffer*	BackBuffer() const;
+	virtual	bool				IsDoubleBuffered() const;
+
+	virtual	status_t			CopyBackToFront(const BRect& frame);
+	virtual	status_t			CopyBackToFront(const BRegion& region);
+
+	virtual	void				SetCursor(ServerCursor* cursor);
+	virtual	void				SetCursorVisible(bool visible);
+	virtual	void				MoveCursorTo(float x, float y);
+	virtual	void				_DrawCursor(IntRect area) const;
+
+	virtual	void				SetDragBitmap(const ServerBitmap* bitmap,
+									const BPoint& offsetFromCursor);
+
+			void				_OnSessionEnable();
+			void				_OnSessionDisable();
+
+	virtual	void				OnSeatEnabled();
+	virtual	void				OnSeatDisabled();
+
+			status_t			CreateLease(uint32_t* connectors, int connCount,
+									uint32_t* crtcs, int crtcCount,
+									int* leaseFd);
+			void				RevokeLease(int leaseFd);
+
+			status_t			InitCheck() const;
+
+private:
+	struct FlipToken;
+
+	static	int32				_EventThreadEntry(void* data);
+			void				_EventThreadMain();
+			void				_RestoreDisplay();
+			void				_RepaintAfterDPMS();
+			void				_HandleHotplug();
+			bool				_RescanConnectors();
+			bool				_CheckResume();
+			void				_OnResume();
+			void				_DrainPendingFlip();
+			void				_ScheduleResize();
+	static	int32				_ResizeThreadEntry(void* data);
+			void				_ApplyResize();
+			status_t			_GetPreferredMode(display_mode* mode,
+									bool probe);
+	static	void				_FillModeInfo(display_mode& mode,
+									const drmModeModeInfo& m);
+
+	static	void				_PageFlipHandler(int fd, unsigned int frame,
+									unsigned int sec, unsigned int usec,
+									void* data);
+			// Front/back swap + damage rotation, flip event or paced flip.
+			// Entered with fFlipMutex held; releases it.
+			void				_FinishFrameSwap(uint64_t generation);
+			// Fallback for drivers whose page flip never works: wait a
+			// vblank, drmModeSetCrtc the back fb, then swap as a flip
+			// completion would. Tearing possible, display usable.
+			void				_VblankPacedFlip();
+
+			// Direct render: the painter draws into the scanout buffers
+			// and the flip completion copies only the region the recycled
+			// target is missing. Opt-in with VOS_DRM_DIRECT_RENDER=1.
+			void				_SetupDirectRender();
+			void				_LeaveDirectRender();
+			int32				_AgeSlotForFb(uint32_t fbId) const;
+			void				_DirectFlipComplete();
+			bigtime_t			_FramePeriod() const;
+
+			void				_BlitRect(RenderingBuffer* src,
+									RenderingBuffer* dst,
+									const BRect& frame);
+
+		void				_BlendCursor(RenderingBuffer* srcBg,
+								RenderingBuffer* dst,
+								IntRect area) const;
+
+		virtual	void				_CopyToFront(uint8* src, uint32 srcBPR,
+									int32 x, int32 y,
+									int32 right, int32 bottom) const;
+
+		void				_PushCursorTrackDirty(int32 oldX, int32 oldY,
+								int32 newX, int32 newY);
+
+#if defined(__x86_64__) || defined(__i386__)
+	static	void				_BlitRect_AVX2(const uint8* s, uint8* d,
+									uint32 srcBpr, uint32 dstBpr,
+									int32 bytes, int32 rows);
+#endif
+
+			int					_CrtcIndex(uint32_t crtc_id);
+			void				_ProbeAtomic();
+			void				_ProbeCursor();
+			void				_DisableHardwareCursor();
+			void				_DiscoverProperties();
+			void				_DiscoverPlaneProps(uint32_t plane_id,
+									PlaneProps& props);
+			void				_DiscoverCrtcProps(uint32_t crtc_id);
+			void				_DiscoverConnProps(uint32_t conn_id);
+			void				_DiscoverPanelOrientation();
+			void				_DiscoverPanelReflection();
+			bool				_ApplyDmiOrientationQuirk(uint32_t width,
+									uint32_t height);
+			void				_ApplyOrientationSwap(uint32_t w, uint32_t h,
+									uint32_t& outW, uint32_t& outH) const;
+			// False when rotated or when we own no cursor plane.
+			// VOS_HW_CURSOR forces the legacy sprite on for testing.
+			bool				_HardwareCursorUsable() const;
+
+			status_t			_AtomicModeset(uint32_t fb_id,
+									drmModeModeInfo* mode);
+		status_t			_AtomicFlip(uint32_t fb_id,
+								FlipToken* token,
+								const BRect* dirty_rects,
+								uint32_t nrects);
+			// One request: primary fb (+damage clips) and cursor plane.
+			status_t			_AtomicCommitFrame(uint32_t fb_id,
+								const BRegion* damage,
+								const CursorUpdate* cursor,
+								FlipToken* token);
+			status_t			_AtomicSetCursor(uint32_t fb_id,
+									uint32_t crtc_id,
+									int32 x, int32 y,
+									uint32_t w, uint32_t h);
+
+			static int			fFd;
+
+			DrmBuffer*			fFrontBuffer;
+			DrmBuffer*			fBackBuffer;
+			DrmBuffer*			fWriteTarget;
+
+			display_mode		fDisplayMode;
+
+			struct libseat*		fSeat;
+			int					fDeviceId;
+			std::atomic<bool>	fSessionActive;
+
+			std::atomic<bool>	fInitialized;
+			std::atomic<bool>	fRunning;
+
+			thread_id			fEventThread;
+			thread_id			fResizeThread;
+			std::atomic<bool>	fResizeBusy;
+			std::atomic<bool>	fResizePending;
+			bigtime_t			fLastModeCheck;
+			// Written from SetMode() (app thread) and the event/resize
+			// threads; the poll reads them without the mode lock.
+			std::atomic<uint32_t>	fLastPreferredWidth;
+			std::atomic<uint32_t>	fLastPreferredHeight;
+			std::atomic<bool>	fUserSetMode;
+			sem_id				fSessionSem;
+
+			struct udev*		fUdev;
+			struct udev_monitor* fUdevMonitor;
+			int					fUdevFd;
+			bigtime_t			fLastSuspendCheck;
+
+#ifdef HAVE_GBM
+			struct gbm_device*  fGbmDevice;
+			bool				fUseGbm;
+#endif
+
+			MallocBuffer*		fRenderBuffer;
+
+			// Written only under fFlipMutex (SetMode, _OnSessionEnable),
+			// read lock-free by the event thread's flip gate; atomic so
+			// the unlocked read is well-defined. The buffer pointers it
+			// gates are validated under fFlipMutex before use.
+			std::atomic<bool>	fPageFlipEnabled;
+			std::atomic<bool>	fPageFlipPending;
+
+			// Serializes buffer pointer swaps (page-flip completion) against
+			// the SetMode() teardown that deletes those same buffers, and
+			// guards fDisplayMode's virtual size while a flip blits. Never
+			// held across a LockExclusiveAccess: the flip handler runs on
+			// the event thread and must not block on the mode lock, which
+			// SetMode() holds while it waits for that very handler.
+			pthread_mutex_t		fFlipMutex;
+			// Bumped whenever buffers are torn down or a drain gives up on
+			// an in-flight flip; a completion event whose token generation
+			// no longer matches is stale and must not swap anything.
+			uint64_t			fFlipGeneration;
+			// One heap token per issued flip, freed by the completion
+			// handler. A token for an abandoned flip stays listed so the
+			// eventual late event can be recognised and dropped, and the
+			// destructor reaps any the kernel never delivered.
+			struct FlipToken {
+				DrmHWInterface*	hw;
+				uint64_t		generation;
+			};
+			std::vector<FlipToken*> fFlipTokens;
+			pthread_cond_t		fFlipCond;
+			// Guards the modeset_dev list against udev hotplug/rescan while
+			// the event thread's flip path and the cursor ioctls hold a
+			// pointer into it. Copy scalars under this lock; the long users
+			// (SetMode, resize) are already serialized by the mode lock.
+			pthread_mutex_t		fModesetMutex;
+
+			// Dirty-rect accumulator (replaces fixed fFlipDirtyRects array).
+			// fAccumulatedDirty collects damage between flips. On flip
+			// completion the union of accumulated + previous is blitted
+			// (covering double-buffer staleness), then previous <- current
+			// and current is cleared.
+			BRegion				fAccumulatedDirty;
+			BRegion				fPreviousDirty;
+			bool				fNeedsFlip;
+			BFutexLocker		fDirtyMutex;
+
+			// Serialises _BlendCursor's write to the scanout buffer
+			// (fWriteTarget) between the main thread (CopyBackToFront,
+			// under the parallel lock) and the DRM event thread
+			// (_PageFlipHandler, under the exclusive lock only when it
+			// has damage to present). A software cursor blended with no
+			// new damage races the main-thread blend otherwise.
+			mutable pthread_mutex_t	fCursorBlendMutex;
+
+			// Direct render state. fAgeTracker and the slot map are only
+			// touched under the exclusive lock. The pacing lock is the
+			// event thread's exclusive lock, held from flip issue to
+			// completion so no painter writes the scanned buffer.
+			BufferAgeTracker	fAgeTracker;
+			std::atomic<bool>	fDirectRender;
+			int64				fFrameSerial;
+			uint32_t			fAgeFbIds[2];
+			int32				fAgeSlotCount;
+			bool				fPacingLockHeld;
+			bigtime_t			fFlipIssueTime;
+			bigtime_t			fLastFlipIssue;
+
+			int					fWakeFd;
+
+			// Written by SetDPMSMode() on an app thread, read by the event
+			// thread's flip gate; atomic so the flip path can check it
+			// under fFlipMutex without the connector lock.
+			std::atomic<uint32>	fDpmsState;
+
+			struct backlight*	fBacklight;
+
+			float				fTemperature;
+			// Cleared when gamma_size is 0 or drmModeCrtcSetGamma fails.
+			bool				fTemperatureSupported;
+
+			bool				fAtomicSupported;
+			uint32_t			fPrimaryPlaneId;
+			uint32_t			fCursorPlaneId;
+			// Which API armed the cursor plane; set once by _ProbeCursor().
+			bool				fCursorUsesAtomic;
+			// VOS_ATOMIC_BATCH: flip, cursor and damage ride one atomic
+			// request. Off keeps the legacy page-flip and cursor ioctls.
+			bool				fAtomicBatch;
+			CursorUpdate		fStagedCursor;
+		// Armed once unsupported flip errors reach the limit: the
+		// driver has dumb buffers but no working page flip. Cleared
+		// on session enable; only flip-unsupported errnos count.
+		bool				fVblankPacedFlip;
+		uint32_t			fFlipFailures;
+		// Set while a modeset is in flight; a flip EINVAL during a
+		// modeset is transient, not proof the flip is broken.
+		std::atomic<bool>	fModesetActive;
+			uint32_t			fModeBlobId;
+			struct PlaneProps	fPlaneProps;
+			struct PlaneProps	fCursorPlaneProps;
+			struct CrtcProps	fCrtcProps;
+			struct ConnProps	fConnProps;
+
+			bool				fVRRSupported;
+			bool				fVRREnabled;
+
+			// Elaborated as "enum PanelOrientation": the PanelOrientation()
+			// accessor above hides the bare type name inside this class.
+			// What the scanout applies: fMountingOrientation composed with
+			// fUserOrientation. Every present path rotates by this.
+			enum PanelOrientation
+								fPanelOrientation;
+			// How the panel sits in the device (kernel property, DMI quirk,
+			// VOS_PANEL_ORIENTATION), and the user's rotation relative to it.
+			int32				fMountingOrientation;
+			int32				fUserOrientation;
+			// B_PANEL_REFLECTION_* from PanelOrientationTransform.h.
+			int32				fPanelReflection;
+};
+
+#endif
