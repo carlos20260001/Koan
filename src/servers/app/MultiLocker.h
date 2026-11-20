@@ -24,6 +24,11 @@
 #include <locks.h>
 
 
+#ifdef __VOS__
+class BRWLocker;
+#endif
+
+
 #define MULTI_LOCKER_TIMING	0
 #if DEBUG
 #	include <assert.h>
@@ -73,7 +78,13 @@ private:
 									// not implemented
 
 #if !MULTI_LOCKER_DEBUG
+#ifdef __VOS__
+			// libroot2 has no userland rw_lock; the futex lock from libshared
+			// has the same rules (writers nest and may read).
+			BRWLocker*			fLock;
+#else
 			rw_lock				fLock;
+#endif
 #else
 			// functions for managing the DEBUG reader array
 			void				_RegisterThread();

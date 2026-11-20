@@ -13,6 +13,17 @@
 #include <Errors.h>
 #include <OS.h>
 
+#ifdef __VOS__
+#	include <new>
+
+// Its auto lockers have the names of MultiLocker's own.
+#	define AutoWriteLocker BRWAutoWriteLocker
+#	define AutoReadLocker BRWAutoReadLocker
+#	include <BRWLocker.h>
+#	undef AutoWriteLocker
+#	undef AutoReadLocker
+#endif
+
 
 #define TIMING	MULTI_LOCKER_TIMING
 #ifndef DEBUG
@@ -34,9 +45,14 @@ MultiLocker::MultiLocker(const char* baseName)
 	fInit(B_NO_INIT)
 {
 #if !DEBUG
+#ifdef __VOS__
+	fLock = new(std::nothrow) BRWLocker(baseName);
+	fInit = fLock != NULL ? B_OK : B_NO_MEMORY;
+#else
 	rw_lock_init_etc(&fLock, baseName != NULL ? baseName : "some MultiLocker",
 		baseName != NULL ? RW_LOCK_FLAG_CLONE_NAME : 0);
 	fInit = B_OK;
+#endif
 #else
 	// we are in debug mode!
 	fLock = create_sem(LARGE_NUMBER, baseName != NULL ? baseName : "MultiLocker");
@@ -68,14 +84,18 @@ MultiLocker::MultiLocker(const char* baseName)
 MultiLocker::~MultiLocker()
 {
 	// become the writer
-	if (!IsWriteLocked())
+	if (fInit == B_OK && !IsWriteLocked())
 		WriteLock();
 
 	// set locker to be uninitialized
 	fInit = B_NO_INIT;
 
 #if !DEBUG
+#ifdef __VOS__
+	delete fLock;
+#else
 	rw_lock_destroy(&fLock);
+#endif
 #else
 	delete_sem(fLock);
 	free(fDebugArray);
@@ -118,7 +138,11 @@ MultiLocker::IsWriteLocked() const
 	bool writeLockHolder = false;
 
 	if (fInit == B_OK)
+#ifdef __VOS__
+		writeLockHolder = fLock->IsWriteLocked();
+#else
 		writeLockHolder = (find_thread(NULL) == fLock.holder);
+#endif
 
 #if TIMING
 	bigtime_t end = system_time();
@@ -137,7 +161,11 @@ MultiLocker::ReadLock()
 	bigtime_t start = system_time();
 #endif
 
+#ifdef __VOS__
+	bool locked = fLock->ReadLock();
+#else
 	bool locked = (rw_lock_read_lock(&fLock) == B_OK);
+#endif
 
 #if TIMING
 	bigtime_t end = system_time();
@@ -156,7 +184,11 @@ MultiLocker::WriteLock()
 	bigtime_t start = system_time();
 #endif
 
+#ifdef __VOS__
+	bool locked = fLock->WriteLock();
+#else
 	bool locked = (rw_lock_write_lock(&fLock) == B_OK);
+#endif
 
 #if TIMING
 	bigtime_t end = system_time();
@@ -175,7 +207,11 @@ MultiLocker::ReadUnlock()
 	bigtime_t start = system_time();
 #endif
 
+#ifdef __VOS__
+	bool unlocked = fLock->ReadUnlock();
+#else
 	bool unlocked = (rw_lock_read_unlock(&fLock) == B_OK);
+#endif
 
 #if TIMING
 	bigtime_t end = system_time();
@@ -194,7 +230,11 @@ MultiLocker::WriteUnlock()
 	bigtime_t start = system_time();
 #endif
 
+#ifdef __VOS__
+	bool unlocked = fLock->WriteUnlock();
+#else
 	bool unlocked = (rw_lock_write_unlock(&fLock) == B_OK);
+#endif
 
 #if TIMING
 	bigtime_t end = system_time();
