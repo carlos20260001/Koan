@@ -2,6 +2,7 @@
  * airos_mcp - what hardware the machine has and what drives it.
  * Copyright 2026 air/OS contributors. MIT license.
  */
+#include <algorithm>
 #include <dirent.h>
 #include <stdio.h>
 #include <stdlib.h>
