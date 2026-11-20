@@ -1,6 +1,6 @@
 /*
  * Copyright 2006-2019, Haiku, Inc. All Rights Reserved.
- * Copyright 2026, air/OS.
+ * Copyright 2026, Koan contributors. All rights reserved.
  * Distributed under the terms of the MIT License.
  */
 

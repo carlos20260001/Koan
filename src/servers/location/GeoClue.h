@@ -1,5 +1,5 @@
 /*
- * Copyright 2026, air/OS. All rights reserved.
+ * Copyright 2026, Koan contributors. All rights reserved.
  * Distributed under the terms of the MIT License.
  */
 #ifndef GEOCLUE_H

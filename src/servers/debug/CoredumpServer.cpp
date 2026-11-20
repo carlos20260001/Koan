@@ -1,5 +1,5 @@
 /*
- * Copyright 2026, air/OS. All rights reserved.
+ * Copyright 2026, Koan contributors. All rights reserved.
  * Copyright 2005-2009, Ingo Weinhold, bonefish@users.sf.net.
  * Distributed under the terms of the MIT License.
  */

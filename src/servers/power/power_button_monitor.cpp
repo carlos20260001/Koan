@@ -1,5 +1,6 @@
 /*
  * Copyright 2005-2014, Haiku, Inc.
+ * Copyright 2026, Koan contributors. All rights reserved.
  * Distributed under the terms of the MIT license.
  *
  * Authors:

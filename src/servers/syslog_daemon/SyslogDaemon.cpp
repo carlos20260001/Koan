@@ -1,5 +1,6 @@
 /*
  * Copyright 2003-2015, Axel Dörfler, axeld@pinc-software.de.
+ * Copyright 2026, Koan contributors. All rights reserved.
  * Distributed under the terms of the MIT License.
  */
 

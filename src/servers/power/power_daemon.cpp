@@ -2,6 +2,7 @@
  * Copyright 2013, Jérôme Duval, korli@users.berlios.de.
  * Copyright 2014, Rene Gollent, rene@gollent.com.
  * Copyright 2005, Nathan Whitehorn.
+ * Copyright 2026, Koan contributors. All rights reserved.
  *
  * Distributed under the terms of the MIT License.
  */
