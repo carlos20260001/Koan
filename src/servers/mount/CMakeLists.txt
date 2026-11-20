@@ -3,6 +3,7 @@ Server(
 
 	SOURCES
 	AutoMounter.cpp
+	NetworkShares.cpp
 
 	INCLUDES
 	LIBS tracker localestub
