@@ -8,7 +8,6 @@ SubInclude HAIKU_TOP src servers input ;
 SubInclude HAIKU_TOP src servers keystore ;
 SubInclude HAIKU_TOP src servers launch ;
 SubInclude HAIKU_TOP src servers location ;
-SubInclude HAIKU_TOP src servers mdns ;
 SubInclude HAIKU_TOP src servers media ;
 SubInclude HAIKU_TOP src servers media_addon ;
 SubInclude HAIKU_TOP src servers media_controls ;
