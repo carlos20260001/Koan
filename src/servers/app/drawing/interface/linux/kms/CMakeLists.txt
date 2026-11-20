@@ -120,5 +120,8 @@ if(NOT KMS_STANDALONE)
 endif()
 
 if(KMS_BUILD_TESTS)
+	# CTest files from here down: ctest --test-dir <build>/src/servers/app
+	# (src/tests enables testing for its own directory only)
+	enable_testing()
 	add_subdirectory("${KMS_DIR}/tests" "${CMAKE_CURRENT_BINARY_DIR}/kms_tests")
 endif()

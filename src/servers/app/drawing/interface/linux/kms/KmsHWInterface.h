@@ -103,6 +103,7 @@ public:
 	virtual	bool				IsDoubleBuffered() const;
 
 	virtual	status_t			CopyBackToFront(const BRect& frame);
+	using HWInterface::CopyBackToFront;
 
 protected:
 	virtual	void				_DrawCursor(IntRect area) const;

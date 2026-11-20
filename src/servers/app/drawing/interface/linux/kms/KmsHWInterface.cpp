@@ -440,9 +440,10 @@ KmsHWInterface::GetDeviceInfo(accelerant_device_info* info)
 		return B_NO_INIT;
 	memset(info, 0, sizeof(accelerant_device_info));
 	info->version = B_ACCELERANT_VERSION;
-	snprintf(info->name, sizeof(info->name), "KMS %s", fDevice->DriverName());
-	snprintf(info->chipset, sizeof(info->chipset), "%s",
-		fDevice->UsesGpu() ? fDevice->GpuRenderer() : fDevice->DriverName());
+	snprintf(info->name, sizeof(info->name), "KMS %.27s",
+		fDevice->DriverName());
+	strlcpy(info->chipset, fDevice->UsesGpu() ? fDevice->GpuRenderer()
+		: fDevice->DriverName(), sizeof(info->chipset));
 	strlcpy(info->serial_no, fDevice->Path(), sizeof(info->serial_no));
 	return B_OK;
 }
