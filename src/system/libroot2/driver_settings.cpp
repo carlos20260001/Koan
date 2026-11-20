@@ -855,11 +855,12 @@ parse_driver_settings_string(const char *settingsString)
 	the "buffer" parameter is NULL, B_BAD_VALUE is returned.
 */
 status_t
-get_driver_settings_string(void *_handle, char *buffer, ssize_t *_bufferSize,
+get_driver_settings_string(void *_handle, char *buffer, size_t *_bufferSize,
 	bool flat)
 {
 	settings_handle *handle = (settings_handle *)_handle;
-	ssize_t bufferSize = *_bufferSize;
+	// The puts count down a signed size and go negative on overflow.
+	ssize_t bufferSize = (ssize_t)*_bufferSize;
 	int32 i;
 
 	if (!check_handle(handle) || !buffer || *_bufferSize == 0)
@@ -870,7 +871,7 @@ get_driver_settings_string(void *_handle, char *buffer, ssize_t *_bufferSize,
 			0, flat);
 	}
 
-	*_bufferSize -= bufferSize;
+	*_bufferSize = (size_t)((ssize_t)*_bufferSize - bufferSize);
 	return bufferSize >= 0 ? B_OK : B_BUFFER_OVERFLOW;
 }
 
