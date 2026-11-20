@@ -3,26 +3,28 @@
 #
 # app_server's KMS display backend (drawing/interface/linux/kms).
 #
-# kms_core       the device, its outputs, layouts, scan-out buffers, page
-#                flips and the GPU pass; no app_server code, so the tests
-#                and the hardware harness link it alone
-# app_server_kms KmsHWInterface, air/OS's HWInterface on kms_core; linked
-#                into app_server (it needs app_server's objects)
+# This is an include file: src/servers/app/CMakeLists.txt include()s it
+# and compiles APP_SERVER_KMS_SRCS (relative to src/servers/app) into
+# app_server, linked with APP_SERVER_KMS_LIBS, with APP_SERVER_KMS_INCLUDES;
+# app_server then defines VOS_HAVE_KMS_BACKEND and calls
+#	HWInterface* create_kms_hw_interface();
 #
-# Everything is optional: without libdrm nothing here is built and
-# VOS_HAVE_KMS_BACKEND stays undefined; without gbm/egl/glesv2 the backend
-# has no GPU pass (VOS_HAVE_KMS_EGL undefined) and resamples on the CPU.
+# Everything is optional: without libdrm APP_SERVER_KMS_SRCS stays empty;
+# without gbm/egl/glesv2 there is no GPU pass (the CPU resamples), without
+# libudev no hot plug events and no backlight, without libseat only
+# janus_session's descriptor or a directly opened card.
 #
-# Standalone (cmake -S this directory) it builds kms_core, the tests and the
-# harness against the tree's headers, for testing without the whole tree.
+# The tests (kms/tests: kms_core, kms_unit_test, kms_harness) are added
+# from here in Debug builds or with VOS_BUILD_TESTS. Standalone
+# (cmake -S <this directory>) it builds just those, against the tree's
+# headers, for testing without the rest of the tree.
 
-cmake_minimum_required(VERSION 3.25)
-
-if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
+if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_LIST_DIR)
+	cmake_minimum_required(VERSION 3.25)
 	project(vos_kms_backend C CXX)
 	set(KMS_STANDALONE ON)
-	get_filename_component(VOS_ROOT
-		"${CMAKE_CURRENT_SOURCE_DIR}/../../../../../../.." ABSOLUTE)
+	get_filename_component(VOS_ROOT "${CMAKE_CURRENT_LIST_DIR}/../../../../../../.."
+		ABSOLUTE)
 	set(CMAKE_C_STANDARD 11)
 	set(CMAKE_CXX_STANDARD 11)
 	add_compile_definitions(__VOS__=1)
@@ -49,6 +51,8 @@ else()
 	endif()
 endif()
 
+set(KMS_DIR "${CMAKE_CURRENT_LIST_DIR}")
+
 find_package(PkgConfig)
 if(PkgConfig_FOUND)
 	pkg_check_modules(KMS_LIBDRM IMPORTED_TARGET libdrm)
@@ -64,47 +68,57 @@ option(VOS_KMS_EGL "Give the KMS backend its GPU pass (EGL, GBM, GLES2)" ON)
 
 if(NOT VOS_KMS_BACKEND OR NOT KMS_LIBDRM_FOUND)
 	message(STATUS "KMS display backend: OFF (libdrm not found or disabled)")
-	if(NOT KMS_STANDALONE)
-		set(VOS_HAVE_KMS_BACKEND OFF PARENT_SCOPE)
-	endif()
 	return()
 endif()
 
-set(VOS_HAVE_KMS_BACKEND ON)
-if(VOS_KMS_EGL AND KMS_GBM_FOUND AND KMS_EGL_FOUND AND KMS_GLESV2_FOUND)
-	set(VOS_HAVE_KMS_EGL ON)
-else()
-	set(VOS_HAVE_KMS_EGL OFF)
+set(KMS_DEFINITIONS VOS_HAVE_KMS_BACKEND=1)
+set(KMS_LIBS PkgConfig::KMS_LIBDRM)
+set(VOS_HAVE_KMS_EGL OFF)
+if(KMS_GBM_FOUND)
+	list(APPEND KMS_DEFINITIONS VOS_HAVE_KMS_GBM=1)
+	list(APPEND KMS_LIBS PkgConfig::KMS_GBM)
+	if(VOS_KMS_EGL AND KMS_EGL_FOUND AND KMS_GLESV2_FOUND)
+		set(VOS_HAVE_KMS_EGL ON)
+		list(APPEND KMS_DEFINITIONS VOS_HAVE_KMS_EGL=1)
+		list(APPEND KMS_LIBS PkgConfig::KMS_EGL PkgConfig::KMS_GLESV2)
+	endif()
+endif()
+if(KMS_UDEV_FOUND)
+	list(APPEND KMS_DEFINITIONS VOS_HAVE_KMS_UDEV=1)
+	list(APPEND KMS_LIBS PkgConfig::KMS_UDEV)
+endif()
+if(KMS_LIBSEAT_FOUND)
+	list(APPEND KMS_DEFINITIONS VOS_HAVE_KMS_LIBSEAT=1)
+	list(APPEND KMS_LIBS PkgConfig::KMS_LIBSEAT)
 endif()
 message(STATUS "KMS display backend: ON (GPU pass: ${VOS_HAVE_KMS_EGL}, "
 	"GBM: ${KMS_GBM_FOUND}, udev: ${KMS_UDEV_FOUND}, "
 	"libseat: ${KMS_LIBSEAT_FOUND})")
 
-set(KMS_CORE_SOURCES
-	KmsBlit.cpp
-	KmsEdid.cpp
-	KmsLayout.cpp
-	"${VOS_ROOT}/src/add-ons/accelerants/common/decode_edid.c"
-)
+# the device, its outputs and buffers: no app_server code
+set(KMS_CORE_NAMES KmsBlit KmsBuffer KmsDevice KmsEdid KmsLayout KmsSession)
+if(VOS_HAVE_KMS_EGL)
+	list(APPEND KMS_CORE_NAMES KmsGles)
+endif()
+set(KMS_CORE_SOURCES "")
+foreach(_name ${KMS_CORE_NAMES})
+	list(APPEND KMS_CORE_SOURCES "${KMS_DIR}/${_name}.cpp")
+endforeach()
 
-add_library(kms_core STATIC ${KMS_CORE_SOURCES})
-target_include_directories(kms_core PUBLIC
-	"${CMAKE_CURRENT_SOURCE_DIR}"
-	"${VOS_ROOT}/headers/private/graphics/common"
-	"${VOS_ROOT}/headers/os/add-ons/graphics")
-target_compile_definitions(kms_core PUBLIC VOS_HAVE_KMS_BACKEND=1)
-target_link_libraries(kms_core PUBLIC PkgConfig::KMS_LIBDRM pthread)
-set_property(TARGET kms_core PROPERTY POSITION_INDEPENDENT_CODE ON)
-# decode_edid.c is C: the compatibility header is for C++ and C alike
-target_compile_options(kms_core PRIVATE
-	-include "${VOS_ROOT}/headers/build/LinuxBuildCompatibility.h")
-
-if(KMS_BUILD_TESTS)
-	add_subdirectory(tests)
+if(NOT KMS_STANDALONE)
+	set(APP_SERVER_KMS_SRCS "")
+	foreach(_name ${KMS_CORE_NAMES} KmsHWInterface)
+		list(APPEND APP_SERVER_KMS_SRCS
+			"drawing/interface/linux/kms/${_name}.cpp")
+		set_source_files_properties("${KMS_DIR}/${_name}.cpp" PROPERTIES
+			COMPILE_DEFINITIONS "${KMS_DEFINITIONS}")
+	endforeach()
+	# app_server compiles decode_edid.c and SplashHandoff.cpp itself
+	set(APP_SERVER_KMS_LIBS ${KMS_LIBS})
+	set(APP_SERVER_KMS_INCLUDES "${KMS_DIR}"
+		"${VOS_ROOT}/headers/private/graphics/common")
 endif()
 
-# for app_server's CMakeLists
-if(NOT KMS_STANDALONE)
-	set(VOS_HAVE_KMS_BACKEND ${VOS_HAVE_KMS_BACKEND} PARENT_SCOPE)
-	set(VOS_HAVE_KMS_EGL ${VOS_HAVE_KMS_EGL} PARENT_SCOPE)
+if(KMS_BUILD_TESTS)
+	add_subdirectory("${KMS_DIR}/tests" "${CMAKE_CURRENT_BINARY_DIR}/kms_tests")
 endif()
