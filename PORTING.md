@@ -486,6 +486,28 @@ Waves (each on its own `port/*` branch, merged here when green):
       - Integrated (`7e3d6143e8` + root CTest fix): full `ninja -k 0` exit 0; 11 server
             binaries and 25 libraries, all 0 undefined symbols; ctest 8/8 passed
             (`VOS_BUILD_TESTS=ON`). Jamfiles: 698
+      - [x] W3-D merged `b59b7785d9`: all 20 air/OS servers on CMake, none deleted.
+            media_server + media_addon_server (classic Media Kit) with a new PipeWire
+            node add-on (`src/add-ons/media/media-add-ons/pipewire`: default and
+            per-device sinks/sources as BBufferConsumer/Producer over `pw_stream`; not
+            a time source yet; CTest `pipewire_graph`, skips without PipeWire; smoke
+            test on the host played 24000 frames through a null sink). bluetooth_server
+            = BlueZ `org.bluez.Agent1` pairing agent (HCI/SDP/HID host built, not
+            started); net_server keeps saved networks/auto-join/services on
+            NetworkManager (configure-interface/resolver/service-order
+            B_NOT_SUPPORTED); power_daemon on UPower + logind inhibitor locks +
+            power-profiles-daemon; print_server on CUPS (queues as spool folders);
+            syslog_daemon reads the journal; debug_server shows crash dialogs from
+            systemd-coredump; location_server asks GeoClue first; mdns_server binds
+            5353 with SO_REUSEPORT beside Avahi; accessibility_server stays resident;
+            index, mail, mcp, osd, quick_look, print_addon, media_controls ported;
+            midi_server and package_daemon build, unused. TODO(linux backend): AT-SPI,
+            MPRIS, ptrace debugging, RTC wake-ups. Must run: media, media_addon,
+            bluetooth, syslog, debug, print servers (systemd/janus_session start still
+            to wire). Runtime deps: pipewire, wireplumber; optional coredump, UPower,
+            power-profiles-daemon, GeoClue. Not yet checked in the container: the last
+            accessibility_server edit and `ldd -r` (host podman broke, see below).
+            `src/servers/Jamfile` retired. Jamfiles: 677
       - [x] W3-C merged `3a9c5062bf`: registrar merged (VitruvianOS logind/sleep,
             legacy-signature alias, X/Qt roster + air/OS quit-user-apps, sync per
             phase); input_server merged (VitruvianOS seat/udev, orientation, no reply
@@ -583,3 +605,4 @@ counterparts and Mesa:
 | 2026-11-17 | `7c67bf5ea3` | Nexus forked (`carlos20260001/Nexus` `koan`), timed thread wait; `wait_for_thread_etc` in libroot2; libneural links |
 | 2026-11-20 | `3a9c5062bf` | M9 W3-C: registrar, input_server, mount, notification, keystore, janus; launch_daemon links |
 | 2026-11-20 | `7e3d6143e8` | M9 W3-A: app_server merged on interim DRM/fbdev; full tree builds, ctest 8/8 |
+| 2026-11-20 | `b59b7785d9` | M9 W3-D: the other 20 servers on Linux backends, PipeWire media add-on; integrated build pending (host podman) |
