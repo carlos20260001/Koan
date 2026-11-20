@@ -257,7 +257,8 @@ Merged in `b92bdc0170` (`port/splash`).
       `b407da8963`: files, drop-ins and install rules (`build/profiles/splash.cmake`)
       in place; `systemd-analyze verify` and `sh -n` clean; not yet run under real
       `mkinitramfs` and systemd
-- [ ] Handoff: shown in QEMU (`SET_MASTER` EBUSY before stage 7, succeeds after,
+- [ ] Handoff: app_server side done in W3-A (`quit` to the FIFO after the first CRTC
+      set); not yet run end to end. Shown in QEMU (`SET_MASTER` EBUSY before stage 7, succeeds after,
       picture kept). The daemon keeps running across the root switch like plymouthd
       (directory fds for `/dev` and `/run`), reopens when efifb/simpledrm is
       replaced by the GPU driver, and a `vos-splash.service --lit 2` fallback covers
@@ -465,6 +466,26 @@ Waves (each on its own `port/*` branch, merged here when green):
             `B_CAN_INTERRUPT`, timed pidfd fallback for other teams)
 - [ ] W3: `src/servers/app` on a new Linux display backend (design below),
       registrar, input_server, the other servers
+      - [x] W3-A merged `7e3d6143e8`: app_server merged (251 shared files: 162
+            identical, 19 VitruvianOS, 38 air/OS, 32 by hand; bases capped at ~hrev59405).
+            air/OS kept: ScreenManager/VirtualScreen/DisplayLayout/MultiLocker (on
+            libshared's BRWLocker), render scale, `display_output` API, per-output retrace
+            and flush threads, ScaledReadback, colour glyphs, ligatures, fractional/grey-AA
+            text, Painter exact-pixel, decorators, DirectWindow device pixels. VitruvianOS
+            on top: DRM/fbdev/evdev backends, DisplayChangeTracker, VirtualOutput,
+            OutputAddonManager, PowerManager, rotation/reflection/temperature/connector,
+            grabs. ScreenRelayout runs inside air/OS's `_MoveWindowsWithDisplays`. No reply
+            to AS_WINDOW_MOVE/RESIZE; `"display_frames"` sent to input_server. Interim
+            DRM/fbdev got Koan's `rework/scaling` render-scale commits (one output, id 0).
+            Backend choice `ScreenManager::_CreateLinuxHWInterface()`: kms → drm → fbdev,
+            `VOS_DISPLAY_BACKEND` overrides; KMS plugs in via `create_kms_hw_interface()`
+            and `kms/CMakeLists.txt` (`APP_SERVER_KMS_SRCS`). Splash handoff: `quit` to
+            `/run/vos-splash.fifo` after the first CRTC set (M7). TODO(air/OS merge):
+            in-place growth of client memory (a8b31c4d09). Accelerant/remote interfaces not
+            built (sources kept). Not run on a display yet
+      - Integrated (`7e3d6143e8` + root CTest fix): full `ninja -k 0` exit 0; 11 server
+            binaries and 25 libraries, all 0 undefined symbols; ctest 8/8 passed
+            (`VOS_BUILD_TESTS=ON`). Jamfiles: 698
       - [x] W3-C merged `3a9c5062bf`: registrar merged (VitruvianOS logind/sleep,
             legacy-signature alias, X/Qt roster + air/OS quit-user-apps, sync per
             phase); input_server merged (VitruvianOS seat/udev, orientation, no reply
@@ -561,3 +582,4 @@ counterparts and Mesa:
 | 2026-11-17 | `333350f20b` | M9 W2-D merged; W2 complete: all kits on CMake, 24 libraries link |
 | 2026-11-17 | `7c67bf5ea3` | Nexus forked (`carlos20260001/Nexus` `koan`), timed thread wait; `wait_for_thread_etc` in libroot2; libneural links |
 | 2026-11-20 | `3a9c5062bf` | M9 W3-C: registrar, input_server, mount, notification, keystore, janus; launch_daemon links |
+| 2026-11-20 | `7e3d6143e8` | M9 W3-A: app_server merged on interim DRM/fbdev; full tree builds, ctest 8/8 |
