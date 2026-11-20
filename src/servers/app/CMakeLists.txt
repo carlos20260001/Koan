@@ -50,6 +50,22 @@ if(HAVE_DRM_ADDFB2_MODS)
 endif()
 
 
+# Display backends. DRM and fbdev are always built; the multi-output
+# KMS/GBM/Mesa backend in drawing/interface/linux/kms/ is added when its
+# CMakeLists.txt exists. That file is expected to set APP_SERVER_KMS_SRCS
+# (sources relative to this directory) and optionally APP_SERVER_KMS_LIBS
+# and APP_SERVER_KMS_INCLUDES, and to provide
+#	HWInterface* create_kms_hw_interface();
+# which returns NULL (or an interface whose InitCheck() fails) when no
+# KMS device can be used. ScreenManager picks the backend at run time
+# through VOS_DISPLAY_BACKEND=kms|drm|fbdev (default: kms, drm, fbdev).
+set(APP_SERVER_KMS_SRCS "")
+set(APP_SERVER_KMS_LIBS "")
+set(APP_SERVER_KMS_INCLUDES "")
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/drawing/interface/linux/kms/CMakeLists.txt")
+	include("${CMAKE_CURRENT_SOURCE_DIR}/drawing/interface/linux/kms/CMakeLists.txt")
+endif()
+
 Server(
 	app_server
 
@@ -68,6 +84,7 @@ Server(
 		DesktopSettings.cpp
 		DirectWindowInfo.cpp
 		DisplayChangeTracker.cpp
+		DisplayLayout.cpp
 		DrawState.cpp
 		EventDispatcher.cpp
 		PowerManager.cpp
@@ -77,6 +94,7 @@ Server(
 		IntRect.cpp
 		Layer.cpp
 		MessageLooper.cpp
+		MultiLocker.cpp
 		OffscreenServerWindow.cpp
 		OffscreenWindow.cpp
 		OutputAddonManager.cpp
@@ -113,6 +131,7 @@ Server(
 		decorator/WindowBehaviour.cpp
 
 		font/AppFontManager.cpp
+		font/ColorGlyphRenderer.cpp
 		font/FontCache.cpp
 		font/FontCacheEntry.cpp
 		font/FontEngine.cpp
@@ -120,6 +139,7 @@ Server(
 		font/FontManager.cpp
 		font/FontStyle.cpp
 		font/GlobalFontManager.cpp
+		font/OpenTypeLigatures.cpp
 
 		# TODO this should be
 		#libasdrawing.a
@@ -132,6 +152,7 @@ Server(
 		drawing/MallocBuffer.cpp
 		drawing/PatternHandler.cpp
 		drawing/Overlay.cpp
+		drawing/ScaledReadback.cpp
 		drawing/BitmapHWInterface.cpp
 		drawing/BBitmapBuffer.cpp
 		drawing/HWInterface.cpp
@@ -163,6 +184,9 @@ Server(
 
 		drawing/interface/linux/fbdev/FBDevHWInterface.cpp
 		drawing/interface/linux/fbdev/FBDevBuffer.cpp
+
+		# the multi-output KMS/GBM backend (M9-W3 design), when present
+		${APP_SERVER_KMS_SRCS}
 		#drawing/interface/linux/fbdev/TTy.cpp
 
 		#drawing/interface/linux/LibInputEventStream.cpp
@@ -179,9 +203,13 @@ Server(
 		stackandtile/Stacking.cpp
 		stackandtile/Tiling.cpp
 
+		# EDID decoder shared with Haiku's accelerants (DisplayLayout)
+		${PROJECT_SOURCE_DIR}/src/add-ons/accelerants/common/decode_edid.c
+
 	LIBS localestub shared agg icon linprog systemd ${FREETYPE_LIBRARY}
 		${UDEV_LIBRARIES} ${DRM_LIBRARIES} ${SEAT_LIBRARIES}
 		${LIBEVDEV_LIBRARIES} ${GBM_LIBRARIES} backlight
+		${APP_SERVER_KMS_LIBS}
 
 	RDEF app_server.rdef
 
@@ -202,7 +230,12 @@ Server(
 	"./decorator"
 	"./drawing/Painter"
 	"./drawing/Painter/drawing_modes"
+	${APP_SERVER_KMS_INCLUDES}
 )
+
+if(APP_SERVER_KMS_SRCS)
+	target_compile_definitions(app_server PRIVATE VOS_HAVE_KMS_BACKEND)
+endif()
 
 UsePrivateHeaders(app_server app interface graphics graphics/common input kernel support system)
 
