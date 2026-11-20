@@ -725,7 +725,8 @@ AuthenticationManager::~AuthenticationManager()
 {
 	// Quit the request thread and wait for it to finish
 	write_port(fRequestPort, 'quit', NULL, 0);
-	wait_for_thread(fRequestThread, NULL);
+	if (fRequestThread >= 0)
+		wait_for_thread(fRequestThread, NULL);
 
 	delete fUserDB;
 	delete fGroupDB;
@@ -748,9 +749,12 @@ AuthenticationManager::Init()
 			|| fGroupDBReply == NULL || fShadowPwdDBReply == NULL) {
 		return B_NO_MEMORY;
 	}
-
+	#ifndef __VOS__
 	fRequestPort = BLaunchRoster().GetPort(
 		B_REGISTRAR_AUTHENTICATION_PORT_NAME);
+	#else
+		fRequestPort = create_port(100, B_REGISTRAR_AUTHENTICATION_PORT_NAME);
+	#endif
 	if (fRequestPort < 0)
 		return fRequestPort;
 

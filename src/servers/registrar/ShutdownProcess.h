@@ -44,6 +44,7 @@ private:
 
 			void				_PrepareShutdownMessage(BMessage& message) const;
 			status_t			_ShutDown();
+			status_t			_LogOut();
 
 			status_t			_PushEvent(uint32 eventType, team_id team,
 									int32 phase);
@@ -119,6 +120,7 @@ private:
 			status_t			fShutdownError;
 			bool				fHasGUI;
 			bool				fReboot;
+			bool				fLogOut;
 			bool				fQuitAppsOnly;
 				// B_REG_QUIT_USER_APPS: the user apps but the sender's
 			team_id				fRequestTeam;

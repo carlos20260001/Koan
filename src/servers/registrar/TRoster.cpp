@@ -1,4 +1,5 @@
 /*
+ * Copyright 2026, Dario Casalinuovo. All rights reserved.
  * Copyright 2001-2008, Ingo Weinhold, bonefish@users.sf.net.
  * Distributed under the terms of the MIT License.
  */
@@ -37,6 +38,7 @@
 #include "Debug.h"
 #include "EventMaskWatcher.h"
 #include "MessageDeliverer.h"
+#include "PidWatcher.h"
 #include "RegistrarDefs.h"
 #include "RosterAppInfo.h"
 #include "RosterSettingsCharStream.h"
@@ -136,7 +138,8 @@ TRoster::TRoster()
 	fRecentDocuments(),
 	fRecentFolders(),
 	fLastToken(0),
-	fShuttingDown(false)
+	fShuttingDown(false),
+	fPidWatcher(NULL)
 {
 	find_directory(B_SYSTEM_DIRECTORY, &fSystemAppPath);
 	find_directory(B_SYSTEM_SERVERS_DIRECTORY, &fSystemServerPath);
@@ -147,6 +150,7 @@ TRoster::TRoster()
 */
 TRoster::~TRoster()
 {
+	delete fPidWatcher;
 }
 
 
@@ -205,14 +209,14 @@ TRoster::HandleAddApplication(BMessage* request)
 	// entry_ref
 	if (error == B_OK) {
 		PRINT("flags: %" B_PRIx32 "\n", flags);
-		PRINT("ref: %" B_PRId32 ", %" B_PRId64 ", %s\n", ref.device,
-			ref.directory, ref.name);
+		PRINT("ref: %" B_PRIdDEV ", %" B_PRIdINO ", %s\n", ref.vdevice(),
+			ref.vdirectory(), ref.name);
 		// check single/exclusive launchers
 		RosterAppInfo* info = NULL;
 		if ((launchFlags == B_SINGLE_LAUNCH
 			 || launchFlags ==  B_EXCLUSIVE_LAUNCH)
 			&& ((info = fRegisteredApps.InfoFor(&ref)) != NULL
-				|| (info = fEarlyPreRegisteredApps.InfoFor(&ref)) != NULL)) {
+				|| (info = _EarlyPreRegInfoFor(&ref)) != NULL)) {
 			SET_ERROR(error, B_ALREADY_RUNNING);
 			otherTeam = info->team;
 			token = info->token;
@@ -225,7 +229,7 @@ TRoster::HandleAddApplication(BMessage* request)
 		RosterAppInfo* info = NULL;
 		if (launchFlags == B_EXCLUSIVE_LAUNCH
 			&& (((info = fRegisteredApps.InfoFor(signature)))
-				|| ((info = fEarlyPreRegisteredApps.InfoFor(signature))))) {
+				|| ((info = _EarlyPreRegInfoFor(signature))))) {
 			SET_ERROR(error, B_ALREADY_RUNNING);
 			otherTeam = info->team;
 			token = info->token;
@@ -256,13 +260,17 @@ TRoster::HandleAddApplication(BMessage* request)
 			bool addingSuccess = false;
 			if (team >= 0) {
 				PRINT("added ref: %" B_PRId32 ", %" B_PRId64 ", %s\n",
-					info->ref.device, info->ref.directory, info->ref.name);
+					info->ref.vdevice(), info->ref.vdirectory(), info->ref.name);
 				addingSuccess = (AddApp(info) == B_OK);
 				if (addingSuccess && fullReg)
 					_AppAdded(info);
 			} else {
 				token = info->token = _NextToken();
+				// Track launcher so orphaned pre-regs can be withdrawn.
+				info->launcher = request->ReturnAddress().Team();
 				addingSuccess = fEarlyPreRegisteredApps.AddInfo(info);
+				if (addingSuccess && fPidWatcher != NULL && info->launcher >= 0)
+					fPidWatcher->Add(info->launcher);
 				PRINT("added to early pre-regs, token: %" B_PRIu32 "\n", token);
 			}
 			if (!addingSuccess)
@@ -388,7 +396,7 @@ TRoster::HandleIsAppRegistered(BMessage* request)
 		token = 0;
 
 	PRINT("team: %" B_PRId32 ", token: %" B_PRIu32 "\n", team, token);
-	PRINT("ref: %" B_PRId32 ", %" B_PRId64 ", %s\n", ref.device, ref.directory,
+	PRINT("ref: %" B_PRIdDEV ", %" B_PRIdINO ", %s\n", ref.vdevice(), ref.vdirectory(),
 		ref.name);
 
 	// check the parameters
@@ -416,9 +424,10 @@ TRoster::HandleIsAppRegistered(BMessage* request)
 			&& (info = fEarlyPreRegisteredApps.InfoFor(&ref)) != NULL) {
 			PRINT("found ref in fEarlyRegisteredApps (by ref)\n");
 			// pre-registered and has no team ID assigned yet -- queue the
-			// request
+			// request under the info's token: every cleanup path
+			// drains fIARRequestsByToken, not fIARRequestsByID.
 			be_app->DetachCurrentMessage();
-			_AddIARRequest(fIARRequestsByID, team, request);
+			_AddIARRequest(fIARRequestsByToken, (int32)info->token, request);
 		} else {
 			PRINT("didn't find team or ref\n");
 			// team not registered, ref/token not early pre-registered
@@ -455,6 +464,7 @@ TRoster::HandleRemovePreRegApp(BMessage* request)
 		RosterAppInfo* info = fEarlyPreRegisteredApps.InfoForToken(token);
 		if (info) {
 			fEarlyPreRegisteredApps.RemoveInfo(info);
+			_FlushIARRequests(fIARRequestsByToken, (int32)token, NULL);
 			delete info;
 		} else
 			SET_ERROR(error, B_REG_APP_NOT_PRE_REGISTERED);
@@ -496,6 +506,10 @@ TRoster::HandleRemoveApp(BMessage* request)
 			delete info;
 		} else
 			SET_ERROR(error, B_REG_APP_NOT_REGISTERED);
+
+		// Team is gone; flush pending requests.
+		_FlushIARRequests(fIARRequestsByID, team, NULL);
+		_WithdrawPreRegistrationsOf(team);
 	}
 	// reply to the request
 	if (error == B_OK) {
@@ -571,24 +585,9 @@ TRoster::HandleSetThreadAndTeam(BMessage* request)
 				delete info;
 				info = NULL;
 			}
-			// handle pending IsAppRegistered() requests
-			IARRequestMap::iterator it = fIARRequestsByID.find(team);
-			if (it != fIARRequestsByID.end()) {
-				BMessageQueue* requests = it->second;
-				if (error == B_OK)
-					_ReplyToIARRequests(requests, info);
-				delete requests;
-				fIARRequestsByID.erase(it);
-			}
-
-			it = fIARRequestsByToken.find((int32)token);
-			if (it != fIARRequestsByToken.end()) {
-				BMessageQueue* requests = it->second;
-				if (error == B_OK)
-					_ReplyToIARRequests(requests, info);
-				delete requests;
-				fIARRequestsByToken.erase(it);
-			}
+			// Handle pending IsAppRegistered() requests (NULL info if failed).
+			_FlushIARRequests(fIARRequestsByID, team, info);
+			_FlushIARRequests(fIARRequestsByToken, (int32)token, info);
 		} else
 			SET_ERROR(error, B_REG_APP_NOT_PRE_REGISTERED);
 	}
@@ -623,13 +622,19 @@ TRoster::HandleSetSignature(BMessage* request)
 	const char* signature;
 	if (request->FindInt32("team", &team) != B_OK)
 		error = B_BAD_VALUE;
-	if (request->FindString("signature", &signature) != B_OK)
+	bool hasSignature = request->FindString("signature", &signature) == B_OK;
+	uint32 flags;
+	bool hasFlags = request->FindInt32("flags", (int32*)&flags) == B_OK;
+	if (!hasSignature && !hasFlags)
 		error = B_BAD_VALUE;
-	// find the app and set the signature
+	// find the app and set the signature and flags
 	if (error == B_OK) {
-		if (RosterAppInfo* info = fRegisteredApps.InfoFor(team))
-			strcpy(info->signature, signature);
-		else
+		if (RosterAppInfo* info = fRegisteredApps.InfoFor(team)) {
+			if (hasSignature)
+				strcpy(info->signature, signature);
+			if (hasFlags)
+				info->flags = flags;
+		} else
 			SET_ERROR(error, B_REG_APP_NOT_REGISTERED);
 	}
 	// reply to the request
@@ -673,8 +678,8 @@ TRoster::HandleGetAppInfo(BMessage* request)
 	if (hasTeam)
 		PRINT("team: %" B_PRId32 "\n", team);
 	if (hasRef) {
-		PRINT("ref: %" B_PRId32 ", %" B_PRId64 ", %s\n", ref.device,
-			ref.directory, ref.name);
+		PRINT("ref: %" B_PRIdDEV ", %" B_PRIdINO ", %s\n", ref.vdevice(),
+			ref.vdirectory(), ref.name);
 	}
 	if (hasSignature)
 		PRINT("signature: %s\n", signature);
@@ -797,6 +802,26 @@ TRoster::HandleUpdateActiveApp(BMessage* request)
 /*!	\brief Handles a Broadcast() request.
 	\param request The request message
 */
+/*!	\brief Messengers of all registered apps except the registrar, for a
+	broadcast that waits for each app (synchronous sends).
+*/
+void
+TRoster::GetAppMessengers(std::vector<BMessenger>& messengers)
+{
+	BAutolock _(fLock);
+
+	for (AppInfoList::Iterator it = fRegisteredApps.It(); it.IsValid(); ++it) {
+		RosterAppInfo* info = *it;
+		if (info->team == be_app->Team())
+			continue;
+		BMessenger messenger;
+		BMessenger::Private(messenger).SetTo(info->team, info->port,
+			B_PREFERRED_TOKEN);
+		messengers.push_back(messenger);
+	}
+}
+
+
 void
 TRoster::HandleBroadcast(BMessage* request)
 {
@@ -1204,6 +1229,13 @@ TRoster::Init()
 	if (fLock.InitCheck() < 0)
 		return fLock.InitCheck();
 
+	// Per-team exit watching via pidfd; falls back to __start_watching_system.
+	fPidWatcher = new(nothrow) PidWatcher(BMessenger(be_app));
+	if (fPidWatcher != NULL && fPidWatcher->Start() != B_OK) {
+		delete fPidWatcher;
+		fPidWatcher = NULL;
+	}
+
 	// create the info
 	RosterAppInfo* info = new(nothrow) RosterAppInfo;
 	if (info == NULL)
@@ -1247,6 +1279,8 @@ TRoster::AddApp(RosterAppInfo* info)
 	if (info) {
 		if (!fRegisteredApps.AddInfo(info))
 			error = B_NO_MEMORY;
+		else if (fPidWatcher != NULL)
+			fPidWatcher->Add(info->team);
 	}
 	return error;
 }
@@ -1264,6 +1298,8 @@ TRoster::RemoveApp(RosterAppInfo* info)
 
 	if (info) {
 		if (fRegisteredApps.RemoveInfo(info)) {
+			if (fPidWatcher != NULL)
+				fPidWatcher->Remove(info->team);
 			if (info->state == APP_STATE_REGISTERED) {
 				info->state = APP_STATE_UNREGISTERED;
 				_AppRemoved(info);
@@ -1338,6 +1374,7 @@ TRoster::CheckSanity()
 	// remove the apps
 	for (AppInfoList::Iterator it = obsoleteApps.It(); it.IsValid(); ++it) {
 		fEarlyPreRegisteredApps.RemoveInfo(*it);
+		_FlushIARRequests(fIARRequestsByToken, (int32)(*it)->token, NULL);
 		delete *it;
 	}
 	obsoleteApps.MakeEmpty(false);
@@ -1399,7 +1436,7 @@ TRoster::GetShutdownApps(AppInfoList& userApps, AppInfoList& systemApps,
 	if (get_team_info(B_SYSTEM_TEAM, &teamInfo) == B_OK)
 		vitalSystemApps.Add(teamInfo.team);
 
-	// app server
+	// app server (signature uses capital H: x-vnd.vos-app_server)
 	RosterAppInfo* info
 		= fRegisteredApps.InfoFor("application/x-vnd.vos-app_server");
 	if (info != NULL)
@@ -1407,6 +1444,11 @@ TRoster::GetShutdownApps(AppInfoList& userApps, AppInfoList& systemApps,
 
 	// debug server
 	info = fRegisteredApps.InfoFor("application/x-vnd.vos-debug_server");
+	if (info != NULL)
+		vitalSystemApps.Add(info->team);
+
+	// janus session manager — must outlive all apps to control seat teardown
+	info = fRegisteredApps.InfoFor("application/x-vnd.vos-janus");
 	if (info != NULL)
 		vitalSystemApps.Add(info->team);
 
@@ -1581,37 +1623,30 @@ TRoster::_AppDeactivated(RosterAppInfo* info)
 }
 
 
-/*!	\brief Adds an app_info to a message.
+/*!	\brief Adds an app_info to a message as discrete typed fields.
 
-	The info is added as a flat_app_info to a field "app_info" with the type
-	\c B_REG_APP_INFO_TYPE.
+	Scalar fields (thread/team/port/flags/signature) go via the typed
+	Add accessors; the entry_ref goes via AddRef so its vref_id rides
+	the standard cap-transport / OWNS_VREFS lifecycle.
 
-	\param message The message
+	\param message The message.
 	\param info The app_info.
 	\return \c B_OK if everything went fine, an error code otherwise.
 */
 status_t
 TRoster::_AddMessageAppInfo(BMessage* message, const app_info* info)
 {
-	// An app_info is not completely flat. The entry_ref contains a string
-	// pointer. Therefore we flatten the info.
-	flat_app_info flatInfo;
-	flatInfo.thread = info->thread;
-	flatInfo.team = info->team;
-	flatInfo.port = info->port;
-	flatInfo.flags = info->flags;
-	flatInfo.ref_device = info->ref.device;
-	flatInfo.ref_directory = info->ref.directory;
-	memcpy(flatInfo.signature, info->signature, B_MIME_TYPE_LENGTH);
-
-	// set the ref name to NULL and copy it into the flat structure
-	flatInfo.ref_name[0] = '\0';
-	if (info->ref.name)
-		strcpy(flatInfo.ref_name, info->ref.name);
-
-	// add the flat info
-	return message->AddData("app_info", B_REG_APP_INFO_TYPE, &flatInfo,
-		sizeof(flat_app_info));
+	// Ship each app_info field through the standard typed accessors.
+	// The entry_ref travels via AddRef, so its vref_id participates in
+	// the BMessage cap-transport / OWNS_VREFS lifecycle just like any
+	// other ref in user-built messages.
+	status_t err = message->AddInt32("thread", info->thread);
+	if (err == B_OK) err = message->AddInt32("team",   info->team);
+	if (err == B_OK) err = message->AddInt32("port",   info->port);
+	if (err == B_OK) err = message->AddInt32("flags",  (int32)info->flags);
+	if (err == B_OK) err = message->AddString("signature", info->signature);
+	if (err == B_OK) err = message->AddRef("app_ref", &info->ref);
+	return err;
 }
 
 
@@ -1683,6 +1718,102 @@ TRoster::_AddIARRequest(IARRequestMap& map, int32 key, BMessage* request)
 	\param info The RosterAppInfo of the application in question
 		   (may be \c NULL)
 */
+/*!	\brief Drops the early pre-registrations \a team still owed.
+
+	An early pre-registration is only ever completed by the launcher that
+	asked for it. Once that team is gone the entry can never be completed,
+	yet it keeps answering B_ALREADY_RUNNING to every later launch of the
+	same app, which then waits on a reply that will never come.
+*/
+/*!	\brief Looks up an early pre-registration, discarding it first if stale.
+
+	An early pre-registration whose launcher is still alive can only be
+	reaped by age (there is no team to watch yet), and only CheckSanity()
+	does that, at most once per kSanityCheckInterval. A launch attempt
+	arriving in between must not be blocked by an entry that has already
+	outlived kMaximalEarlyPreRegistrationPeriod -- honouring it as
+	B_ALREADY_RUNNING would poison the launch with a team of -1 forever.
+*/
+RosterAppInfo*
+TRoster::_EarlyPreRegInfoFor(const entry_ref* ref)
+{
+	RosterAppInfo* info = fEarlyPreRegisteredApps.InfoFor(ref);
+	return _DiscardIfStale(info);
+}
+
+
+RosterAppInfo*
+TRoster::_EarlyPreRegInfoFor(const char* signature)
+{
+	RosterAppInfo* info = fEarlyPreRegisteredApps.InfoFor(signature);
+	return _DiscardIfStale(info);
+}
+
+
+RosterAppInfo*
+TRoster::_DiscardIfStale(RosterAppInfo* info)
+{
+	if (info == NULL)
+		return NULL;
+
+	bigtime_t age = system_time() - info->registration_time;
+	if (age < kMaximalEarlyPreRegistrationPeriod)
+		return info;
+
+	fEarlyPreRegisteredApps.RemoveInfo(info);
+	_FlushIARRequests(fIARRequestsByToken, (int32)info->token, NULL);
+	delete info;
+	return NULL;
+}
+
+
+void
+TRoster::_WithdrawPreRegistrationsOf(team_id team)
+{
+	if (team < 0)
+		return;
+
+	AppInfoList orphans;
+	for (AppInfoList::Iterator it = fEarlyPreRegisteredApps.It();
+		 it.IsValid();
+		 ++it) {
+		if ((*it)->launcher == team)
+			orphans.AddInfo(*it);
+	}
+
+	for (AppInfoList::Iterator it = orphans.It(); it.IsValid(); ++it) {
+		fEarlyPreRegisteredApps.RemoveInfo(*it);
+		_FlushIARRequests(fIARRequestsByToken, (int32)(*it)->token, NULL);
+		delete *it;
+	}
+	orphans.MakeEmpty(false);
+		// don't delete infos a second time
+}
+
+
+/*!	\brief Answers and drops every request queued under \a key.
+
+	A queued IsAppRegistered() request is a promise to reply once the app
+	finishes registering. Whenever that can no longer happen, the promise must
+	still be kept -- a \c NULL \a info is the honest "not registered" answer.
+	Dropping the queue instead parks the caller forever, since the request was
+	sent with an infinite reply timeout.
+*/
+void
+TRoster::_FlushIARRequests(IARRequestMap& map, int32 key,
+	const RosterAppInfo* info)
+{
+	IARRequestMap::iterator it = map.find(key);
+	if (it == map.end())
+		return;
+
+	BMessageQueue* requests = it->second;
+	map.erase(it);
+	_ReplyToIARRequests(requests, info);
+	delete requests;
+}
+
+
 void
 TRoster::_ReplyToIARRequests(BMessageQueue* requests, const RosterAppInfo* info)
 {

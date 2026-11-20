@@ -4,6 +4,7 @@
  * Copyright 2006-2008, Stephan Aßmus.
  * Copyright 2006, Ryan Leavengood.
  * Copyright 2021, Jacob Secunda.
+ * Copyright 2026, Dario Casalinuovo.
  *
  * Distributed under the terms of the MIT License.
  */
@@ -36,7 +37,9 @@
 
 #include <TokenSpace.h>
 #include <util/DoublyLinkedList.h>
+#include <util/KMessage.h>
 
+#include <LaunchDaemonDefs.h>
 #include <syscalls.h>
 
 #include "AppInfoListMessagingTargetSet.h"
@@ -257,7 +260,10 @@ public:
 	~ShutdownWindow()
 	{
 		atomic_set(&fAnimationActive, false);
-		wait_for_thread(fAnimationWorker, NULL);
+		if (fAnimationWorker >= 0) {
+			wait_for_thread(fAnimationWorker, NULL);
+			fAnimationWorker = -1;
+		}
 
 		delete fNormalIconBitmap;
 		delete fTintedIconBitmap;
@@ -574,6 +580,7 @@ private:
 		} else {
 			atomic_set(&fAnimationActive, false);
 			wait_for_thread(fAnimationWorker, NULL);
+			fAnimationWorker = -1;
 
 			fCurrentAnimationRow = -1;
 			fAnimationLightenPhase = true;
@@ -662,6 +669,7 @@ ShutdownProcess::ShutdownProcess(TRoster* roster, EventQueue* eventQueue)
 	fShutdownError(B_ERROR),
 	fHasGUI(false),
 	fReboot(false),
+	fLogOut(false),
 	fQuitAppsOnly(false),
 	fRequestTeam(-1),
 	fRequestReplySent(false),
@@ -750,8 +758,8 @@ ShutdownProcess::Init(BMessage* request)
 	if (fInternalEventSemaphore < 0)
 		RETURN_ERROR(fInternalEventSemaphore);
 
-	// init the app server connection
-	fHasGUI = Registrar::App()->InitGUIContext() == B_OK;
+	// NOTE: Originally we called InitGUIContext() here, but it's better
+	// to do so in the worked thread, so we moved it there.
 
 	// start watching application quits
 	status_t error = fRoster->AddWatcher(this);
@@ -773,6 +781,10 @@ ShutdownProcess::Init(BMessage* request)
 	fRequest = request;
 
 	if (fRequest->FindBool("reboot", &fReboot) != B_OK)
+		fReboot = false;
+	if (fRequest->FindBool("logout", &fLogOut) != B_OK)
+		fLogOut = false;
+	if (fLogOut)
 		fReboot = false;
 	fQuitAppsOnly = fRequest->what == B_REG_QUIT_USER_APPS;
 	fRequestTeam = fRequest->ReturnAddress().Team();
@@ -1202,6 +1214,10 @@ ShutdownProcess::_PrepareShutdownMessage(BMessage& message) const
 {
 	message.what = B_QUIT_REQUESTED;
 	message.AddBool("_shutdown_", true);
+	if (fLogOut)
+		message.AddBool(B_LOGOUT_FIELD, true);
+	else if (fReboot)
+		message.AddBool(B_REBOOT_FIELD, true);
 
 	BMessage::Private(message).SetReply(BMessenger(fQuitRequestReplyHandler));
 }
@@ -1210,8 +1226,46 @@ ShutdownProcess::_PrepareShutdownMessage(BMessage& message) const
 status_t
 ShutdownProcess::_ShutDown()
 {
-	PRINT("Invoking _kern_shutdown(%d)\n", fReboot);
+	PRINT("ShutdownProcess::_ShutDown(): handing off to janus, reboot=%d\n",
+		fReboot);
+
+	port_id janusPort = find_port(B_LAUNCH_DAEMON_PORT_NAME);
+	if (janusPort >= 0) {
+		BMessage msg(BPrivate::B_REG_SHUTDOWN_FINISHED);
+		msg.AddBool("reboot", fReboot);
+		ssize_t size = msg.FlattenedSize();
+		char* buf = new char[size];
+		status_t flatErr = msg.Flatten(buf, size);
+		status_t writeErr = B_BAD_PORT_ID;
+		if (flatErr == B_OK)
+			writeErr = write_port(janusPort, 0, buf, size);
+		delete[] buf;
+		if (flatErr == B_OK && writeErr == B_OK)
+			return B_OK;
+	}
+
+	PRINT("janus unreachable, invoking _kern_shutdown(%d) directly\n", fReboot);
 	RETURN_ERROR(_kern_shutdown(fReboot));
+}
+
+
+status_t
+ShutdownProcess::_LogOut()
+{
+	PRINT("ShutdownProcess::_LogOut(): handing off to janus\n");
+
+	port_id janusPort = find_port(B_LAUNCH_DAEMON_PORT_NAME);
+	if (janusPort < 0)
+		RETURN_ERROR(janusPort);
+
+	// janus replies before it tears the session (and us) down
+	BPrivate::KMessage request(BPrivate::B_JANUS_LOGOUT);
+	BPrivate::KMessage reply;
+	status_t error = request.SendTo(janusPort, -1, &reply, 2000000LL,
+		2000000LL);
+	if (error == B_OK)
+		error = reply.What();
+	RETURN_ERROR(error);
 }
 
 
@@ -1325,9 +1379,23 @@ ShutdownProcess::_WorkerDoShutdown()
 	if (fRequest->FindBool("synchronous", &synchronous) == B_OK && !synchronous)
 		_SendReply(B_OK);
 
+	fHasGUI = Registrar::App()->InitGUIContext() == B_OK;
+
 	// ask the user to confirm the shutdown, if desired
 	bool askUser;
-	if (fHasGUI && fRequest->FindBool("confirm", &askUser) == B_OK && askUser) {
+	if (fHasGUI && fLogOut && fRequest->FindBool("confirm", &askUser) == B_OK
+		&& askUser) {
+		BAlert* alert = new BAlert(B_TRANSLATE("Log out?"),
+			B_TRANSLATE("Do you really want to log out?"),
+			B_TRANSLATE("Cancel"), B_TRANSLATE("Log out"), NULL,
+			B_WIDTH_AS_USUAL, B_WARNING_ALERT);
+		alert->SetFeel(B_NORMAL_WINDOW_FEEL);
+		alert->SetFlags(alert->Flags() | B_NOT_MINIMIZABLE | B_CLOSE_ON_ESCAPE);
+		alert->SetWorkspaces(B_ALL_WORKSPACES);
+		if (alert->Go() != 1)
+			throw_error(B_SHUTDOWN_CANCELLED);
+	} else if (fHasGUI && fRequest->FindBool("confirm", &askUser) == B_OK
+		&& askUser) {
 		const char* restart = B_TRANSLATE("Restart");
 		const char* shutdown = B_TRANSLATE("Shut down");
 		BString title = B_TRANSLATE("%action%?");
@@ -1419,6 +1487,20 @@ ShutdownProcess::_WorkerDoShutdown()
 	_QuitApps(fSystemApps, true);
 	_WaitForDebuggedTeams();
 	sync();
+
+	if (fLogOut) {
+		// background apps and other processes belong to the session;
+		// janus tears them down with it
+		_SetPhase(DONE_PHASE);
+		_SetShutdownWindowText(B_TRANSLATE("Logging out" B_UTF8_ELLIPSIS));
+		status_t error = _LogOut();
+		if (error != B_OK)
+			throw_error(error);
+
+		// wait for janus to end the session
+		snooze(30000000);
+		throw_error(B_TIMED_OUT);
+	}
 
 	// phase 3: terminate the background apps
 	_SetPhase(BACKGROUND_APP_TERMINATION_PHASE);
@@ -1753,6 +1835,16 @@ ShutdownProcess::_QuitNonApps()
 	PRINT("ShutdownProcess::_QuitNonApps()\n");
 
 	_SetShutdownWindowText(B_TRANSLATE("Asking other processes to quit."));
+
+	// janus owns B_LAUNCH_DAEMON_PORT_NAME and must outlive every other
+	// non-vital team so _ShutDown() can hand off the final
+	// B_REG_SHUTDOWN_FINISHED message.
+	port_id launchPort = find_port(B_LAUNCH_DAEMON_PORT_NAME);
+	if (launchPort >= 0) {
+		port_info launchInfo;
+		if (get_port_info(launchPort, &launchInfo) == B_OK)
+			fVitalSystemApps.Add(launchInfo.team);
+	}
 
 	// iterate through the remaining teams and send them the TERM signal
 	int32 cookie = 0;
