@@ -1,5 +1,6 @@
 /*
  * Copyright 2001-2013 Haiku, Inc. All rights reserved.
+ * Copyright 2026, Dario Casalinuovo.
  * Distributed under the terms of the MIT License.
  */
 #ifndef INPUT_SERVER_APP_H
@@ -238,6 +239,11 @@ class InputServer : public BApplication {
 
 		BScreen			fScreen;
 		BRect			fFrame;
+		int32			fScreenOrientation;
+		int32			fScreenReflection;
+		// True once app_server has sent IS_SCREEN_BOUNDS_UPDATED;
+		// late-registered pointing devices need the same orientation.
+		bool			fScreenBoundsValid;
 		BRegion			fDisplays;		// the parts of fFrame that are shown
 		BRect			fLastDisplay;	// the display the mouse was last on
 
@@ -252,10 +258,11 @@ class InputServer : public BApplication {
 		BottomlineWindow*	fInputMethodWindow;
 		bool				fInputMethodAware;
 
-		sem_id 			fCursorSem;
+		BSharedEvent		fCursorEvent;
 		port_id			fAppServerPort;
 		team_id			fAppServerTeam;
 		area_id			fCursorArea;
+		bool			fRegistrationPending;
 		shared_cursor*	fCursorBuffer;
 };
 

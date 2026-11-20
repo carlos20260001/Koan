@@ -1,5 +1,6 @@
 /*
  * Copyright 2002-2013 Haiku, Inc. All rights reserved.
+ * Copyright 2026, Dario Casalinuovo.
  * Distributed under the terms of the MIT License.
  */
 
@@ -29,11 +30,14 @@
 #include <Message.h>
 #include <OS.h>
 #include <Path.h>
+#include <PanelOrientationTransform.h>
 #include <Roster.h>
 #include <String.h>
 
 #include <stdio.h>
 #include <strings.h>
+
+#include <Keymap.h>
 
 #include "SystemKeymap.h"
 	// this is an automatically generated file
@@ -148,14 +152,18 @@ InputServer::InputServer()
 	fMouseSettings(),
 	fChars(NULL),
 	fScreen(B_MAIN_SCREEN_ID),
+	fScreenOrientation(0),
+	fScreenReflection(0),
+	fScreenBoundsValid(false),
 	fEventQueueLock("input server event queue"),
 	fReplicantMessenger(NULL),
 	fInputMethodWindow(NULL),
 	fInputMethodAware(false),
-	fCursorSem(-1),
+	fCursorEvent(),
 	fAppServerPort(-1),
 	fAppServerTeam(-1),
-	fCursorArea(-1)
+	fCursorArea(-1),
+	fRegistrationPending(false)
 {
 	CALLED();
 	gInputServer = this;
@@ -278,13 +286,26 @@ status_t
 InputServer::_LoadSystemKeymap()
 {
 	delete[] fChars;
-	fKeys = kSystemKeymap;
-	fCharsSize = kSystemKeyCharsSize;
-	fChars = new (nothrow) char[fCharsSize];
-	if (fChars == NULL)
-		return B_NO_MEMORY;
+	fChars = NULL;
 
-	memcpy(fChars, kSystemKeyChars, fCharsSize);
+	// Prefer a keymap derived live from xkbcommon over kSystemKeymap, the
+	// frozen build-time US fallback.
+	BKeymap keymap;
+	if (keymap.PopulateFromXkbNames(NULL, NULL, NULL, NULL, NULL) == B_OK) {
+		fKeys = keymap.Map();
+		fCharsSize = keymap.CharsSize();
+		fChars = new (nothrow) char[fCharsSize];
+		if (fChars == NULL)
+			return B_NO_MEMORY;
+		memcpy(fChars, keymap.Chars(), fCharsSize);
+	} else {
+		fKeys = kSystemKeymap;
+		fCharsSize = kSystemKeyCharsSize;
+		fChars = new (nothrow) char[fCharsSize];
+		if (fChars == NULL)
+			return B_NO_MEMORY;
+		memcpy(fChars, kSystemKeyChars, fCharsSize);
+	}
 
 	// TODO: why are we doing this?
 	return _SaveKeymap(true);
@@ -371,7 +392,7 @@ InputServer::ReadyToRun()
 	CALLED();
 
 	// say hello to the app_server
-
+	fRegistrationPending = true;
 	BPrivate::AppServerLink link;
 	link.StartMessage(AS_REGISTER_INPUT_SERVER);
 	link.Flush();
@@ -387,12 +408,18 @@ InputServer::_AcquireInput(BMessage& message, BMessage& reply)
 		// try to clone the area
 		fCursorBuffer = NULL;
 
-		fCursorSem = create_sem(0, "cursor semaphore");
-		if (fCursorSem >= B_OK) {
-			fCursorArea = clone_area("input server cursor", (void**)&fCursorBuffer,
-				B_ANY_ADDRESS, B_READ_AREA | B_WRITE_AREA, area);
-		}
+		fCursorArea = clone_area("input server cursor", (void**)&fCursorBuffer,
+			B_ANY_ADDRESS, B_READ_AREA | B_WRITE_AREA, area);
+		if (fCursorArea >= B_OK) {
+			// The wake word lives in the shared area.
+			fCursorEvent.SetTo(&fCursorBuffer->event);
+			// The app_server's cursor wait watches this team.
+			shared_liveness_hold(&fCursorBuffer->liveness);
+		} else
+			fCursorBuffer = NULL;
 	}
+
+	fRegistrationPending = false;
 
 	if (message.FindInt32("remote team", &fAppServerTeam) != B_OK)
 		fAppServerTeam = -1;
@@ -408,8 +435,8 @@ InputServer::_AcquireInput(BMessage& message, BMessage& reply)
 	reply.AddInt32("event port", fAppServerPort);
 
 	if (fCursorBuffer != NULL) {
-		// cursor shared buffer is supported
-		reply.AddInt32("cursor semaphore", fCursorSem);
+		// Tell the app_server the shared cursor buffer is available.
+		reply.AddBool("cursor area", true);
 	}
 
 	return B_OK;
@@ -420,11 +447,11 @@ void
 InputServer::_ReleaseInput(BMessage* /*message*/)
 {
 	if (fCursorBuffer != NULL) {
+		shared_liveness_release(&fCursorBuffer->liveness);
 		fCursorBuffer = NULL;
-		delete_sem(fCursorSem);
+		fCursorEvent.SetTo(NULL);
 		delete_area(fCursorArea);
 
-		fCursorSem = -1;
 		fCursorArea = -1;
 	}
 
@@ -489,6 +516,12 @@ InputServer::MessageReceived(BMessage* message)
 		case IS_SET_MOUSE_POSITION:
 			status = HandleSetMousePosition(message, &reply);
 			break;
+		case IS_SET_POINTER_CONSTRAINT:
+			// Confinement and relative mode live in the pointing
+			// add-ons; the grab owner is app_server's business only.
+			ControlDevices(NULL, B_POINTING_DEVICE,
+				B_POINTER_CONSTRAINT_CHANGED, message);
+			break;
 		case IS_GET_MOUSE_MAP:
 			status = HandleGetSetMouseMap(message, &reply);
 			break;
@@ -536,11 +569,22 @@ InputServer::MessageReceived(BMessage* message)
 		case IS_SCREEN_BOUNDS_UPDATED:
 		{
 			// This is what the R5 app_server sends us when the screen
-			// configuration changes
+			// configuration changes. Never reply: app_server would take the
+			// reply for AS_GET_DESKTOP, which is code 0.
 			BRect frame;
 			if (message->FindRect("screen_bounds", &frame) != B_OK)
 				frame = fScreen.Frame();
 
+			int32 orientation;
+			if (message->FindInt32("screen_orientation", &orientation) != B_OK)
+				orientation = 0;
+
+			int32 reflection;
+			if (message->FindInt32("screen_reflection", &reflection) != B_OK)
+				reflection = 0;
+
+			// air/OS: the monitors inside the screen bounds; the parts of
+			// the bounds no monitor shows are kept free of the cursor
 			BRegion displays;
 			BRect displayFrame;
 			for (int32 i = 0; message->FindRect("display_frames", i,
@@ -555,7 +599,8 @@ InputServer::MessageReceived(BMessage* message)
 			}
 			fDisplays = displays;
 
-			if (frame == fFrame) {
+			if (frame == fFrame && orientation == fScreenOrientation
+				&& reflection == fScreenReflection) {
 				if (displaysChanged) {
 					BPoint pos = fMousePos;
 					_ConstrainToDisplays(pos);
@@ -565,17 +610,52 @@ InputServer::MessageReceived(BMessage* message)
 						HandleSetMousePosition(&set, NULL);
 					}
 				}
-				break;
+				return;
 			}
 
-			BPoint pos(fMousePos.x * frame.Width() / fFrame.Width(),
-				fMousePos.y * frame.Height() / fFrame.Height());
+			// The pointer lives in logical space, so it only rescales, also
+			// across a rotation, as on other desktops.
+			BPoint pos = fMousePos;
+			if (fFrame.Width() > 0 && fFrame.Height() > 0) {
+				pos.x = fMousePos.x * frame.Width() / fFrame.Width();
+				pos.y = fMousePos.y * frame.Height() / fFrame.Height();
+			}
 			fFrame = frame;
+			fScreenOrientation = orientation;
+			fScreenReflection = reflection;
+			fScreenBoundsValid = true;
+
+			// Devices place the cursor against their own copy of screen size.
+			BMessage bounds;
+			bounds.AddRect("screen_bounds", frame);
+			bounds.AddInt32("screen_orientation", orientation);
+			bounds.AddInt32("screen_reflection", reflection);
+			ControlDevices(NULL, B_POINTING_DEVICE,
+				B_SCREEN_BOUNDS_CHANGED, &bounds);
+
 			_ConstrainToDisplays(pos);
 
 			BMessage set;
 			set.AddPoint("where", pos);
 			HandleSetMousePosition(&set, NULL);
+			return;
+		}
+
+		case B_SEAT_DISABLED:
+		case B_SEAT_ENABLED:
+		case B_SYSTEM_RESUMED:
+		{
+			// janus_session sends these around a VT switch or resume; forward them to every device add-on
+			// so keyboards drop held keys and pointing devices resync their buttons.
+			ControlDevices(NULL, B_KEYBOARD_DEVICE, message->what, NULL);
+			ControlDevices(NULL, B_POINTING_DEVICE, message->what, NULL);
+			// Also deliver at add-on level with a NULL cookie: a pointing
+			// add-on whose devices all died still needs a resume rescan.
+			{
+				BMessage control(IS_DEVICE_ADDON_CONTROL);
+				control.AddInt32("code", message->what);
+				fAddOnManager->PostMessage(&control);
+			}
 			break;
 		}
 
@@ -611,9 +691,20 @@ InputServer::MessageReceived(BMessage* message)
 		{
 			BApplication::MessageReceived(message);
 
-			BPrivate::AppServerLink link;
-			link.StartMessage(AS_REGISTER_INPUT_SERVER);
-			link.Flush();
+			// Only register if neither a registration is already in flight
+			// (fRegistrationPending) nor a port is already established
+			// (fAppServerPort >= 0). The race: ReadyToRun sends
+			// AS_REGISTER_INPUT_SERVER and sets fRegistrationPending, but
+			// _ASt can arrive before IS_ACQUIRE_INPUT comes back — if we
+			// re-send here, we get two IS_ACQUIRE_INPUT -> two ports -> the
+			// EventDispatcher blocks on the first port while input_server
+			// writes to the second.
+			if (!fRegistrationPending && fAppServerPort < 0) {
+				fRegistrationPending = true;
+				BPrivate::AppServerLink link;
+				link.StartMessage(AS_REGISTER_INPUT_SERVER);
+				link.Flush();
+			}
 			return;
 		}
 
@@ -1423,6 +1514,15 @@ debug_printf("InputServer::RegisterDevices() device_ref already exists: %s\n", d
 			if (item != NULL && fInputDeviceList.AddItem(item)) {
 				item->Start();
 				_DeviceStarted(*item);
+				// A device registered after the last bounds notice
+				// would keep normal orientation while the picture rotates.
+				if (fScreenBoundsValid && item->Type() == B_POINTING_DEVICE) {
+					BMessage bounds;
+					bounds.AddRect("screen_bounds", fFrame);
+					bounds.AddInt32("screen_orientation", fScreenOrientation);
+					bounds.AddInt32("screen_reflection", fScreenReflection);
+					item->Control(B_SCREEN_BOUNDS_CHANGED, &bounds);
+				}
 				BMessage message(IS_NOTIFY_DEVICE);
 				message.AddBool("added", true);
 				message.AddString("name", item->Name());
@@ -1714,8 +1814,9 @@ InputServer::_UpdateMouseAndKeys(EventList& events)
 				// If there is only one input method, SetNextMethod will return
 				// B_BAD_INDEX and the event will be forwarded to the user.
 
+				// key_states is Haiku-indexed; KEY_Spacebar was an evdev code.
 				PRINT(("SanitizeEvents: %" B_PRIx32 ", %x\n", fKeyInfo.modifiers,
-					fKeyInfo.key_states[KEY_Spacebar >> 3]));
+					fKeyInfo.key_states[B_SPACE_BAR_KEY >> 3]));
 
 				uint8 byte;
 				if (event->FindInt8("byte", (int8*)&byte) < B_OK)
@@ -1776,10 +1877,9 @@ InputServer::_SanitizeEvents(EventList& events)
 						"\n", where.x, where.y, x, y));
 				} else if (event->FindFloat("x", &absX) == B_OK
 					&& event->FindFloat("y", &absY) == B_OK) {
-					// The device gives us absolute screen coords in range 0..1;
-					// convert them to absolute screen position
-					// (the message is supposed to contain the original
-					// absolute coordinates as "be:tablet_x/y").
+					// Tablet add-ons are external pen tablets, which keep
+					// their own orientation; panel digitizers come through
+					// the mouse add-on, which applies the panel transform.
 					where.x = absX * fFrame.Width();
 					where.y = absY * fFrame.Height();
 
@@ -2006,11 +2106,11 @@ InputServer::_DispatchEvent(BMessage* event)
 		case B_MOUSE_MOVED:
 		case B_MOUSE_DOWN:
 		case B_MOUSE_UP:
-			if (fCursorBuffer) {
-				atomic_set((int32*)&fCursorBuffer->pos, (uint32)fMousePos.x << 16UL
-					| ((uint32)fMousePos.y & 0xffff));
-				if (atomic_or(&fCursorBuffer->read, 1) == 0)
-					release_sem(fCursorSem);
+		if (fCursorBuffer) {
+			atomic_set((int32*)&fCursorBuffer->pos, (uint32)fMousePos.x << 16UL
+				| ((uint32)fMousePos.y & 0xffff));
+			if (atomic_or(&fCursorBuffer->read, 1) == 0)
+				fCursorEvent.Post();
         	}
         	break;
 
