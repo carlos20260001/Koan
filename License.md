@@ -39,12 +39,20 @@ notice for third-party code included in this tree.
 
 Parts of this tree are derived from VitruvianOS
 (https://github.com/VitruvianOS/Vitruvian) and from Koan
-(https://github.com/carlos20260001/Koan), a VitruvianOS derivative. That
-code is distributed under the GNU General Public License, version 2
-(`data/system/data/licenses/GNU GPL v2`), or where a file says so under the
-GNU Lesser General Public License (`data/system/data/licenses/GNU LGPL v2.1`).
-The Nexus kernel modules in `src/system/kernel/nexus` are GPL-2.0,
-Copyright (C) 2022-2026 Dario Casalinuovo.
+(https://github.com/carlos20260001/Koan), a VitruvianOS derivative.
+VitruvianOS as a whole is distributed under the GNU General Public License,
+version 2 (its `LICENSE`; the same text is in
+`data/system/data/licenses/GNU GPL v2`). Each of its files keeps the license
+stated in its own header, which is most often the MIT License (code that
+comes from Haiku), and otherwise the GNU LGPL ("Distributed under the terms
+of the LGPL License", `data/system/data/licenses/GNU LGPL v2.1`), the GNU
+GPL, the NewOS License or the Be Sample Code License; the texts of all of
+them are in `data/system/data/licenses`. The Nexus kernel modules in
+`src/system/kernel/nexus` are GPL-2.0 (`SPDX-License-Identifier: GPL-2.0`),
+Copyright (C) 2022-2026 Dario Casalinuovo; Koan's patches to Nexus are under
+the same license. Code written for Koan that is not in VitruvianOS says
+"Copyright 2026, Koan contributors" and is under the MIT License unless its
+header says otherwise.
 
 Each derived file keeps its original copyright header (for example
 "Copyright 2019-2026, Dario Casalinuovo"), and each ported commit keeps its
