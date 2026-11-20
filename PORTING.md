@@ -611,3 +611,4 @@ counterparts and Mesa:
 | 2026-11-20 | `3a9c5062bf` | M9 W3-C: registrar, input_server, mount, notification, keystore, janus; launch_daemon links |
 | 2026-11-20 | `7e3d6143e8` | M9 W3-A: app_server merged on interim DRM/fbdev; full tree builds, ctest 8/8 |
 | 2026-11-20 | `b59b7785d9` | M9 W3-D: the other 20 servers on Linux backends, PipeWire media add-on; integrated build green (31 servers, 26 libs, ctest 8+1 skipped) |
+| 2026-11-20 | `72f99e7e6b` | License audit of the 1183 VitruvianOS-derived files: all license/copyright headers kept; license texts now installed; License.md appendix corrected |
