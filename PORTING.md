@@ -465,6 +465,23 @@ Waves (each on its own `port/*` branch, merged here when green):
             `B_CAN_INTERRUPT`, timed pidfd fallback for other teams)
 - [ ] W3: `src/servers/app` on a new Linux display backend (design below),
       registrar, input_server, the other servers
+      - [x] W3-C merged `3a9c5062bf`: registrar merged (VitruvianOS logind/sleep,
+            legacy-signature alias, X/Qt roster + air/OS quit-user-apps, sync per
+            phase); input_server merged (VitruvianOS seat/udev, orientation, no reply
+            to `IS_SCREEN_BOUNDS_UPDATED` + air/OS `_ConstrainToDisplays`, which needs
+            app_server's `"display_frames"`); mount_server merged (udev/libmount +
+            air/OS NetworkShares, SMB through `mount.cifs`, password via `$PASSWD`; not
+            run against a server); notification merged (D-Bus bridge + air/OS views);
+            keystore VitruvianOS's; janus/janus_session imported; air/OS launch_daemon
+            builds but is not installed (janus answers its port). janus_session starts
+            air/OS's media_controls, osd, quick_look, accessibility, location, mdns,
+            power and mcp servers at login (no on-demand start). systemd units for
+            janus and the core servers in `data/systemd`, installed by a
+            `packages.cmake` fallback (`data.cmake` still names 78 missing files).
+            All 8 server binaries link with 0 undefined symbols (after libroot2's
+            `get_driver_settings_string` signature fix `967edb6e52`); they stop at
+            "Can't open Nexus IPC" without the module. Registrar test programs built,
+            not run. Runtime deps to add: cifs-utils (Recommends)
 - [ ] W4: `src/apps`, `src/preferences`, `src/add-ons`, `src/bin`, `src/libs`,
       `src/data`, `data/`, remaining tests
 - [ ] W5: `Jamrules`, `Jamfile`, `build/jam`, Haiku `configure`, Haiku-only
@@ -543,3 +560,4 @@ counterparts and Mesa:
 | 2026-11-17 | `159105bf61` | M9 W2-B: shared, Tracker, translation, textencoding, screensaver merged |
 | 2026-11-17 | `333350f20b` | M9 W2-D merged; W2 complete: all kits on CMake, 24 libraries link |
 | 2026-11-17 | `7c67bf5ea3` | Nexus forked (`carlos20260001/Nexus` `koan`), timed thread wait; `wait_for_thread_etc` in libroot2; libneural links |
+| 2026-11-20 | `3a9c5062bf` | M9 W3-C: registrar, input_server, mount, notification, keystore, janus; launch_daemon links |
