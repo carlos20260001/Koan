@@ -87,11 +87,11 @@ if(CMAKE_BUILD_TYPE STREQUAL "Debug")
 include(build/profiles/debug.cmake)
 endif()
 
-# ported subset: VitruvianOS's data/ (systemd units, libexec helpers,
-# polkit, pam, boot scripts) is not in this tree yet. data/systemd holds
-# only vos-polkit-agent.service so far, so test for a unit data.cmake
-# needs rather than for the directory.
-if(EXISTS "${CMAKE_SOURCE_DIR}/data/systemd/janus.service")
+# ported subset: VitruvianOS's data/ (libexec helpers, polkit, pam, boot
+# scripts, most systemd units) is not in this tree yet. data/systemd has
+# the units of the servers W3 ported, so test for a file data.cmake
+# installs unconditionally and only W4 brings, rather than for a unit.
+if(EXISTS "${CMAKE_SOURCE_DIR}/data/tmpfiles.d/vos.conf")
 include(build/profiles/data.cmake)
 else()
 # ported subset: installer backend. The rules data.cmake has for the
@@ -125,6 +125,16 @@ install(FILES data/polkit-1/actions/org.vitruvian.drivesetup-query.policy
   DESTINATION /usr/share/polkit-1/actions/ COMPONENT data)
 install(FILES data/systemd/vos-polkit-agent.service
   DESTINATION /usr/share/vos/systemd/ COMPONENT data)
+# ported subset: the units of janus and the core session servers, as
+# data.cmake installs them (its SYSTEMD_SERVICES).
+install(FILES
+  data/systemd/janus.service
+  data/systemd/registrar.service
+  data/systemd/mount_server.service
+  data/systemd/input_server.service
+  data/systemd/notification_server.service
+  data/systemd/vos-login.target
+  DESTINATION /etc/systemd/system/ COMPONENT data)
 endif()
 
 string(REPLACE ";" "," RESULT "${RUN_LIST}")
