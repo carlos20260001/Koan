@@ -1,4 +1,5 @@
 /*
+ * Copyright 2026, Dario Casalinuovo. All rights reserved.
  * Copyright 2007-2018, Haiku, Inc. All rights reserved.
  * Distributed under the terms of the MIT License.
  *
@@ -12,8 +13,17 @@
 
 #include <new>
 
+#include <ctype.h>
+#include <dirent.h>
+#include <fcntl.h>
+#include <limits.h>
+#include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+
+#include <syscalls.h>
+#include <driver_settings.h>
 
 #include <Alert.h>
 #include <AutoLocker.h>
@@ -33,6 +43,7 @@
 #include <Message.h>
 #include <Node.h>
 #include <NodeMonitor.h>
+#include <Notification.h>
 #include <Path.h>
 #include <PropertyInfo.h>
 #include <String.h>
@@ -53,7 +64,29 @@
 static const char* kMountServerSettings = "mount_server";
 static const char* kMountFlagsKeyExtension = " mount flags";
 
+#ifndef __VOS__
 static const char* kInitialMountEvent = "initial_volumes_mounted";
+#endif
+
+
+static uid_t
+session_owner()
+{
+	static uid_t sOwner = (uid_t)-2;
+	if (sOwner != (uid_t)-2)
+		return sOwner;
+
+	sOwner = (uid_t)-1;
+	const char* sudoUid = getenv("SUDO_UID");
+	if (sudoUid != NULL && isdigit((unsigned char)*sudoUid)) {
+		char* end;
+		unsigned long value = strtoul(sudoUid, &end, 10);
+		if (*end == '\0' && value != (unsigned long)(uid_t)-1)
+			sOwner = (uid_t)value;
+	}
+
+	return sOwner;
+}
 
 
 class MountVisitor : public BDiskDeviceVisitor {
@@ -113,8 +146,10 @@ private:
 static bool
 BootedInSafeMode()
 {
-	const char* safeMode = getenv("SAFEMODE");
-	return safeMode != NULL && strcmp(safeMode, "yes") == 0;
+	char buffer[32];
+	size_t size = sizeof(buffer);
+	return _kern_get_safemode_option(B_SAFEMODE_SAFE_MODE, buffer, &size)
+		== B_OK;
 }
 
 
@@ -192,6 +227,13 @@ MountVisitor::Visit(BPartition* partition, int32 level)
 			return false;
 	}
 
+	// Before _SuggestMountFlags() below, which can put up an alert.
+	uid_t owner = session_owner();
+	if (owner == (uid_t)-1) {
+		// Would be root-owned; Tracker's Mount menu still works.
+		return false;
+	}
+
 	uint32 mountFlags;
 	if (!fInitialRescan) {
 		// Ask the user about mount flags if this is not the
@@ -207,7 +249,7 @@ MountVisitor::Visit(BPartition* partition, int32 level)
 		}
 	}
 
-	if (partition->Mount(NULL, mountFlags) != B_OK) {
+	if (partition->Mount(NULL, mountFlags, NULL, owner) != B_OK) {
 		// TODO: Error to syslog
 	}
 	return false;
@@ -253,10 +295,14 @@ MountArchivedVisitor::~MountArchivedVisitor()
 	if ((fBestScore & ~requiredMatches) == 0)
 		return;
 
+	uid_t owner = session_owner();
+	if (owner == (uid_t)-1)
+		return;
+
 	uint32 mountFlags = fArchived.GetUInt32("mountFlags", 0);
 	BPartition* partition = fDevices.PartitionWithID(fBestID);
 	if (partition != NULL)
-		partition->Mount(NULL, mountFlags);
+		partition->Mount(NULL, mountFlags, NULL, owner);
 }
 
 
@@ -398,13 +444,17 @@ AutoMounter::AutoMounter()
 
 	BDiskDeviceRoster().StartWatching(this,
 		B_DEVICE_REQUEST_DEVICE | B_DEVICE_REQUEST_DEVICE_LIST);
+#ifndef __VOS__
 	BLaunchRoster().RegisterEvent(this, kInitialMountEvent, B_STICKY_EVENT);
+#endif
 }
 
 
 AutoMounter::~AutoMounter()
 {
+#ifndef __VOS__
 	BLaunchRoster().UnregisterEvent(this, kInitialMountEvent);
+#endif
 	BDiskDeviceRoster().StopWatching(this);
 	stop_watching_network(this);
 
@@ -417,7 +467,9 @@ AutoMounter::ReadyToRun()
 {
 	// Do initial scan
 	_MountVolumes(fNormalMode, fRemovableMode, true);
+#ifndef __VOS__
 	BLaunchRoster().NotifyEvent(this, kInitialMountEvent);
+#endif
 
 	// The shares do not hold up anyone: they are mounted when they can be,
 	// which is not before there is a network.
@@ -476,6 +528,7 @@ AutoMounter::MessageReceived(BMessage* message)
 			break;
 
 		case B_DEVICE_UPDATE:
+		{
 			int32 event;
 			if (message->FindInt32("event", &event) != B_OK
 				|| (event != B_DEVICE_MEDIA_CHANGED
@@ -483,11 +536,12 @@ AutoMounter::MessageReceived(BMessage* message)
 				break;
 
 			partition_id deviceID;
-			if (message->FindInt32("id", &deviceID) != B_OK)
+			if (message->FindUInt64("id", (uint64*)&deviceID) != B_OK)
 				break;
 
 			_MountVolumes(kNoVolumes, fRemovableMode, false, deviceID);
 			break;
+		}
 
 #if 0
 		case B_NODE_MONITOR:
@@ -501,44 +555,33 @@ AutoMounter::MessageReceived(BMessage* message)
 				case B_ENTRY_MOVED: {
 					WRITELOG(("*** Received Mount Point Renamed Notification"));
 
-					const char *newName;
-					if (message->FindString("name", &newName) != B_OK) {
-						WRITELOG(("ERROR: Couldn't find name field in update "
-							"message"));
-						PRINT_OBJECT(*message);
-						break ;
-					}
-
-					//
-					// When the node monitor reports a move, it gives the
-					// parent device and inode that moved.  The problem is
-					// that  the inode is the inode of root *in* the filesystem,
-					// which is generally always the same number for every
-					// filesystem of a type.
-					//
-					// What we'd really like is the device that the moved
-					// volume is mounted on.  Find this by using the
-					// *new* name and directory, and then stat()ing that to
-					// find the device.
-					//
-					dev_t parentDevice;
-					if (message->FindInt32("device", &parentDevice) != B_OK) {
-						WRITELOG(("ERROR: Couldn't find 'device' field in "
-							"update message"));
-						PRINT_OBJECT(*message);
+					const char* newName;
+					if (message->FindString("name", &newName) != B_OK
+						|| newName == NULL || newName[0] == '\0') {
+						WRITELOG(("ERROR: Missing or empty 'name' field "
+							"in update message"));
 						break;
 					}
 
-					ino_t toDirectory;
-					if (message->FindInt64("to directory", &toDirectory)
+					entry_ref toDirectory;
+					if (message->FindRef("virtual:to directory", &toDirectory)
 						!= B_OK) {
 						WRITELOG(("ERROR: Couldn't find 'to directory' field "
 							"in update message"));
-						PRINT_OBJECT(*message);
 						break;
 					}
 
-					entry_ref root_entry(parentDevice, toDirectory, newName);
+					entry_ref fromDirectory;
+					if (message->FindRef("virtual:from directory",
+							&fromDirectory) != B_OK
+						|| !(fromDirectory == toDirectory)) {
+						WRITELOG(("ERROR: cross-directory move ignored; "
+							"mount-point rename must stay in place"));
+						break;
+					}
+
+					entry_ref root_entry(toDirectory.vdevice(), toDirectory.vdirectory(),
+						newName);
 
 					BNode entryNode(&root_entry);
 					if (entryNode.InitCheck() != B_OK) {
@@ -555,9 +598,9 @@ AutoMounter::MessageReceived(BMessage* message)
 					}
 
 					WRITELOG(("Attempt to rename device %li to %s",
-						mountPointNode.device, newName));
+						mountPointNode.device(), newName));
 
-					Partition *partition = FindPartition(mountPointNode.device);
+					Partition *partition = FindPartition(mountPointNode.device());
 					if (partition != NULL) {
 						WRITELOG(("Found device, changing name."));
 
@@ -571,7 +614,7 @@ AutoMounter::MessageReceived(BMessage* message)
 						break;
 					} else {
 						WRITELOG(("ERROR: Device %li does not appear to be "
-							"present", mountPointNode.device));
+							"present", mountPointNode.device()));
 					}
 				}
 			}
@@ -632,111 +675,232 @@ AutoMounter::_MountVolumes(mount_mode normal, mount_mode removable,
 void
 AutoMounter::_MountVolume(const BMessage* message)
 {
-	int32 id;
-	if (message->FindInt32("id", &id) != B_OK)
+	// Kernel-attested uid, stamped by nexus on the originally-delivered
+	// message. (uid_t)-1 means it never crossed a port, so reject rather
+	// than mount as unowned/root-owned.
+	uid_t owner = message->SenderUid();
+	if (owner == (uid_t)-1) {
+		_NotifyMountError(B_TRANSLATE("volume"), B_PERMISSION_DENIED);
 		return;
+	}
+
+	// partition_id is dev_t (8 bytes); read via a local int64 to match
+	// FindInt64's exact-type requirement, then narrow.
+	int64 rawId;
+	if (message->FindInt64("id", &rawId) != B_OK)
+		return;
+	partition_id id = (partition_id)rawId;
 
 	BDiskDeviceRoster roster;
 	BPartition *partition;
 	BDiskDevice device;
-	if (roster.GetPartitionWithID(id, &device, &partition) != B_OK)
+	status_t lookupStatus = roster.GetPartitionWithID(id, &device, &partition);
+	if (lookupStatus != B_OK) {
+		// Report the actual status, not a hardcoded B_DEVICE_NOT_FOUND.
+		_NotifyMountError(B_TRANSLATE("volume"), lookupStatus);
 		return;
+	}
 
 	uint32 mountFlags;
-	if (!_SuggestMountFlags(partition, &mountFlags))
+	if (!_SuggestMountFlags(partition, &mountFlags)) {
+		_NotifyMountError(B_TRANSLATE("volume"), B_ERROR);
 		return;
-
-	status_t status = partition->Mount(NULL, mountFlags);
-	if (status < B_OK && InitGUIContext() == B_OK) {
-		char text[512];
-		snprintf(text, sizeof(text),
-			B_TRANSLATE("Error mounting volume:\n\n%s"), strerror(status));
-		BAlert* alert = new BAlert(B_TRANSLATE("Mount error"), text,
-			B_TRANSLATE("OK"));
-		alert->SetFlags(alert->Flags() | B_CLOSE_ON_ESCAPE);
-		alert->Go(NULL);
 	}
+
+	// Grab a human-readable name before the partition object potentially
+	// becomes unavailable on mount failure.
+	BString volumeName = partition->ContentName();
+	if (volumeName.IsEmpty())
+		volumeName = partition->Name();
+	if (volumeName.IsEmpty()) {
+		BPath path;
+		if (partition->GetPath(&path) == B_OK)
+			volumeName = path.Path();
+	}
+	if (volumeName.IsEmpty())
+		volumeName = B_TRANSLATE("volume");
+
+	status_t status = partition->Mount(NULL, mountFlags, NULL, owner);
+	if (status < B_OK)
+		_NotifyMountError(volumeName.String(), status);
 }
 
 
-bool
-AutoMounter::_SuggestForceUnmount(const char* name, status_t error)
+/*static*/ void
+AutoMounter::_NotifyMountError(const char* volumeName, status_t status)
 {
-	if (InitGUIContext() != B_OK)
-		return false;
-
-	char text[1024];
-	snprintf(text, sizeof(text),
-		B_TRANSLATE("Could not unmount disk \"%s\":\n\t%s\n\n"
-			"Should unmounting be forced?\n\n"
-			"Note: If an application is currently writing to the volume, "
-			"unmounting it now might result in loss of data.\n"),
-		name, strerror(error));
-
-	BAlert* alert = new BAlert(B_TRANSLATE("Force unmount"), text,
-		B_TRANSLATE("Cancel"), B_TRANSLATE("Force unmount"), NULL,
-		B_WIDTH_AS_USUAL, B_WARNING_ALERT);
-	alert->SetShortcut(0, B_ESCAPE);
-	int32 choice = alert->Go();
-
-	return choice == 1;
-}
-
-
-void
-AutoMounter::_ReportUnmountError(const char* name, status_t error)
-{
-	if (InitGUIContext() != B_OK)
-		return;
+	// mount_server has no app_server connection, so route failures through
+	// notification_server instead of a BAlert.
+	BNotification notification(B_ERROR_NOTIFICATION);
+	notification.SetGroup(B_TRANSLATE("Disk & Volumes"));
+	notification.SetTitle(B_TRANSLATE("Mount failed"));
 
 	char text[512];
-	snprintf(text, sizeof(text), B_TRANSLATE("Could not unmount disk "
-		"\"%s\":\n\t%s"), name, strerror(error));
+	snprintf(text, sizeof(text),
+		B_TRANSLATE("Could not mount \"%s\": %s"), volumeName,
+		strerror(status));
+	notification.SetContent(text);
 
-	BAlert* alert = new BAlert(B_TRANSLATE("Unmount error"), text,
-		B_TRANSLATE("OK"), NULL, NULL, B_WIDTH_AS_USUAL, B_WARNING_ALERT);
-	alert->SetFlags(alert->Flags() | B_CLOSE_ON_ESCAPE);
-	alert->Go(NULL);
+	notification.Send();
 }
 
 
 void
-AutoMounter::_UnmountAndEjectVolume(BPartition* partition, BPath& mountPoint,
-	const char* name)
+AutoMounter::_SendUnmountReply(BMessage* request, status_t error,
+	const char* name, const char* mountPoint)
 {
-	BDiskDevice deviceStorage;
-	BDiskDevice* device;
-	if (partition == NULL) {
-		// Try to retrieve partition
-		BDiskDeviceRoster().FindPartitionByMountPoint(mountPoint.Path(),
-			&deviceStorage, &partition);
-			device = &deviceStorage;
-	} else {
-		device = partition->Device();
+	// mount_server has no app_server connection, so the requester
+	// (Tracker, DriveSetup) asks the user about a busy volume.
+	BMessage reply(kUnmountVolumeReply);
+	reply.AddInt32("error", error);
+	if (name != NULL && name[0] != '\0')
+		reply.AddString("name", name);
+	if (mountPoint != NULL && mountPoint[0] != '\0')
+		reply.AddString("mountPoint", mountPoint);
+
+	// echo the correlation fields so the requester can retry with force
+	int64 rawId;
+	if (request->FindInt64("id", &rawId) == B_OK)
+		reply.AddInt64("id", rawId);
+	int64 rawDevice;
+	if (request->FindInt64("device_id", &rawDevice) == B_OK)
+		reply.AddInt64("device_id", rawDevice);
+
+	if (error == B_BUSY)
+		_AppendBusyProcesses(mountPoint, &reply);
+
+	request->SendReply(&reply);
+}
+
+
+static bool
+_PathUnderMount(const char* path, const char* mountPoint)
+{
+	if (path == NULL || mountPoint == NULL || mountPoint[0] == '\0')
+		return false;
+
+	size_t length = strlen(mountPoint);
+	while (length > 1 && mountPoint[length - 1] == '/')
+		length--;
+
+	if (strncmp(path, mountPoint, length) != 0)
+		return false;
+
+	return path[length] == '\0' || path[length] == '/';
+}
+
+
+void
+AutoMounter::_AppendBusyProcesses(const char* mountPoint, BMessage* reply)
+{
+	// cheap scan: cwd, root and open fds. Runs as root, so every
+	// process is readable; maps are skipped to keep this bounded.
+	if (mountPoint == NULL || mountPoint[0] == '\0')
+		return;
+
+	DIR* dir = opendir("/proc");
+	if (dir == NULL)
+		return;
+
+	char path[PATH_MAX];
+	char target[PATH_MAX];
+
+	struct dirent* entry;
+	while ((entry = readdir(dir)) != NULL) {
+		if (entry->d_name[0] < '1' || entry->d_name[0] > '9')
+			continue;
+
+		pid_t pid = (pid_t)atoi(entry->d_name);
+		bool busy = false;
+
+		snprintf(path, sizeof(path), "/proc/%d/cwd", pid);
+		ssize_t length = readlink(path, target, sizeof(target) - 1);
+		if (length > 0) {
+			target[length] = '\0';
+			if (_PathUnderMount(target, mountPoint))
+				busy = true;
+		}
+
+		if (!busy) {
+			snprintf(path, sizeof(path), "/proc/%d/root", pid);
+			length = readlink(path, target, sizeof(target) - 1);
+			if (length > 0) {
+				target[length] = '\0';
+				if (_PathUnderMount(target, mountPoint))
+					busy = true;
+			}
+		}
+
+		if (!busy) {
+			snprintf(path, sizeof(path), "/proc/%d/fd", pid);
+			DIR* fdDir = opendir(path);
+			if (fdDir != NULL) {
+				struct dirent* fdEntry;
+				while (!busy
+					&& (fdEntry = readdir(fdDir)) != NULL) {
+					if (fdEntry->d_name[0] < '0'
+						|| fdEntry->d_name[0] > '9')
+						continue;
+
+					snprintf(path, sizeof(path),
+						"/proc/%d/fd/%s", pid, fdEntry->d_name);
+					length = readlink(path, target,
+						sizeof(target) - 1);
+					if (length > 0) {
+						target[length] = '\0';
+						if (_PathUnderMount(target,
+								mountPoint))
+							busy = true;
+					}
+				}
+				closedir(fdDir);
+			}
+		}
+
+		if (!busy)
+			continue;
+
+		char name[64];
+		name[0] = '\0';
+		snprintf(path, sizeof(path), "/proc/%d/comm", pid);
+		int fd = open(path, O_RDONLY);
+		if (fd >= 0) {
+			ssize_t readLength = read(fd, name, sizeof(name) - 1);
+			close(fd);
+			if (readLength > 0) {
+				name[readLength] = '\0';
+				char* newline = strchr(name, '\n');
+				if (newline != NULL)
+					*newline = '\0';
+			}
+		}
+		if (name[0] == '\0')
+			snprintf(name, sizeof(name), "pid %d", pid);
+
+		BString line;
+		line.SetToFormat("%d: %s", pid, name);
+		reply->AddString("busyProcesses", line.String());
 	}
 
+	closedir(dir);
+}
+
+
+status_t
+AutoMounter::_UnmountAndEjectVolume(BPartition* partition, BPath& mountPoint,
+	uint32 unmountFlags)
+{
 	status_t status;
 	if (partition != NULL)
-		status = partition->Unmount();
+		status = partition->Unmount(unmountFlags);
 	else
-		status = fs_unmount_volume(mountPoint.Path(), 0);
+		status = fs_unmount_volume(mountPoint.Path(), unmountFlags);
 
-	if (status != B_OK) {
-		if (!_SuggestForceUnmount(name, status))
-			return;
+	if (status != B_OK)
+		return status;
 
-		if (partition != NULL)
-			status = partition->Unmount(B_FORCE_UNMOUNT);
-		else
-			status = fs_unmount_volume(mountPoint.Path(), B_FORCE_UNMOUNT);
-	}
-
-	if (status != B_OK) {
-		_ReportUnmountError(name, status);
-		return;
-	}
-
-	if (fEjectWhenUnmounting && partition != NULL) {
+	BDiskDevice* device = partition != NULL ? partition->Device() : NULL;
+	if (fEjectWhenUnmounting && device != NULL) {
 		// eject device if it doesn't have any mounted partitions left
 		class IsMountedVisitor : public BDiskDeviceVisitor {
 		public:
@@ -779,53 +943,77 @@ AutoMounter::_UnmountAndEjectVolume(BPartition* partition, BPath& mountPoint,
 	// remove the directory if it's a directory in rootfs
 	if (dev_for_path(mountPoint.Path()) == dev_for_path("/"))
 		rmdir(mountPoint.Path());
+
+	return B_OK;
 }
 
 
 void
 AutoMounter::_UnmountAndEjectVolume(BMessage* message)
 {
-	int32 id;
-	if (message->FindInt32("id", &id) == B_OK) {
+	// See _MountVolume(): "id" is an Int64 partition_id; FindInt64()
+	// needs an exact int64*, so read into a local then narrow.
+	BDiskDevice deviceStorage;
+	BPartition* partition = NULL;
+	BPath path;
+	BString name;
+	status_t status = B_BAD_VALUE;
+
+	int64 rawId;
+	if (message->FindInt64("id", &rawId) == B_OK) {
+		partition_id id = (partition_id)rawId;
 		BDiskDeviceRoster roster;
-		BPartition *partition;
-		BDiskDevice device;
-		if (roster.GetPartitionWithID(id, &device, &partition) != B_OK)
-			return;
-
-		BPath path;
-		if (partition->GetMountPoint(&path) == B_OK)
-			_UnmountAndEjectVolume(partition, path, partition->ContentName());
-	} else {
-		// see if we got a dev_t
-
-		dev_t device;
-		if (message->FindInt32("device_id", &device) != B_OK)
-			return;
-
-		if (fNetworkShares != NULL)
-			fNetworkShares->VolumeUnmounted(device);
-
-		BVolume volume(device);
-		status_t status = volume.InitCheck();
-
-		char name[B_FILE_NAME_LENGTH];
+		status = roster.GetPartitionWithID(id, &deviceStorage, &partition);
 		if (status == B_OK)
-			status = volume.GetName(name);
-		if (status < B_OK)
-			snprintf(name, sizeof(name), "device:%" B_PRIdDEV, device);
-
-		BPath path;
+			status = partition->GetMountPoint(&path);
 		if (status == B_OK) {
-			BDirectory mountPoint;
-			status = volume.GetRootDirectory(&mountPoint);
-			if (status == B_OK)
-				status = path.SetTo(&mountPoint, ".");
+			name = partition->ContentName();
+			if (name.IsEmpty())
+				name = partition->Name();
 		}
+	} else {
+		// see if we got a dev_t; Tracker posts device_id as Int64
+		int64 rawDevice;
+		if (message->FindInt64("device_id", &rawDevice) == B_OK) {
+			dev_t device = (dev_t)rawDevice;
+			if (fNetworkShares != NULL)
+				fNetworkShares->VolumeUnmounted(device);
 
-		if (status == B_OK)
-			_UnmountAndEjectVolume(NULL, path, name);
+			BVolume volume(device);
+			status = volume.InitCheck();
+
+			char volumeName[B_FILE_NAME_LENGTH];
+			if (status == B_OK)
+				status = volume.GetName(volumeName);
+			if (status == B_OK)
+				name = volumeName;
+			else
+				name.SetToFormat("device:%lld", (long long)device);
+
+			if (status == B_OK) {
+				BDirectory mountPoint;
+				status = volume.GetRootDirectory(&mountPoint);
+				if (status == B_OK)
+					status = path.SetTo(&mountPoint, ".");
+			}
+		}
 	}
+
+	if (status != B_OK) {
+		_SendUnmountReply(message, status, name.String(), "");
+		return;
+	}
+
+	if (name.IsEmpty())
+		name = B_TRANSLATE("volume");
+
+	// Force only on requester's say-so: mount_server cannot ask.
+	bool force = false;
+	message->FindBool("force", &force);
+
+	status = _UnmountAndEjectVolume(partition, path,
+		force ? B_FORCE_UNMOUNT : 0);
+	_SendUnmountReply(message, status, name.String(), path.Path());
 }
 
 
