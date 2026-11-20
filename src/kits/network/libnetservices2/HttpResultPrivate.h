@@ -18,6 +18,7 @@
 #include <ExclusiveBorrow.h>
 #include <OS.h>
 #include <String.h>
+#include <utility>
 
 
 namespace BPrivate {

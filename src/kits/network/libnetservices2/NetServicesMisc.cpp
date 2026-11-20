@@ -7,6 +7,7 @@
  */
 
 #include <NetServicesDefs.h>
+#include <utility>
 
 
 namespace BPrivate {

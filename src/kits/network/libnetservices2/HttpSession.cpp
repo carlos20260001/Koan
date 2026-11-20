@@ -37,6 +37,7 @@
 #include "HttpResultPrivate.h"
 #include "HttpSerializer.h"
 #include "NetServicesPrivate.h"
+#include <utility>
 
 using namespace std::literals;
 using namespace BPrivate::Network;

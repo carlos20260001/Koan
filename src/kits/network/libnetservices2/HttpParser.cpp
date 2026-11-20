@@ -14,6 +14,7 @@
 #include <HttpFields.h>
 #include <NetServicesDefs.h>
 #include <ZlibCompressionAlgorithm.h>
+#include <utility>
 
 using namespace std::literals;
 using namespace BPrivate::Network;
