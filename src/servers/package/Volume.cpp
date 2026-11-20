@@ -286,8 +286,7 @@ Volume::Init(const node_ref& rootDirectoryRef, node_ref& _packageRootRef)
 			i == 0);
 	}
 
-	_packageRootRef.device = info->rootDeviceID;
-	_packageRootRef.node = info->rootDirectoryID;
+	_packageRootRef.set_to(info->rootDeviceID, info->rootDirectoryID);
 
 	return B_OK;
 }
@@ -549,9 +548,9 @@ Volume::HandleGetLocationInfoRequest(BMessage* message)
 	fLocationInfoReply.MakeEmpty();
 
 	if (fLocationInfoReply.AddInt32("base directory device",
-			fRootDirectoryRef.device) != B_OK
+			fRootDirectoryRef.device()) != B_OK
 		|| fLocationInfoReply.AddInt64("base directory node",
-			fRootDirectoryRef.node) != B_OK
+			fRootDirectoryRef.node()) != B_OK
 		|| fLocationInfoReply.AddInt32("packages directory device",
 			PackagesDeviceID()) != B_OK
 		|| fLocationInfoReply.AddInt64("packages directory node",

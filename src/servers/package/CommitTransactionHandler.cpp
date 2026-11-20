@@ -10,6 +10,7 @@
 #include "CommitTransactionHandler.h"
 
 #include <errno.h>
+#include <stddef.h>
 #include <grp.h>
 #include <pwd.h>
 
@@ -1950,8 +1951,8 @@ CommitTransactionHandler::_FillInActivationChangeItem(
 	Package* package, char*& nameBuffer)
 {
 	item->type = type;
-	item->packageDeviceID = package->NodeRef().device;
-	item->packageNodeID = package->NodeRef().node;
+	item->packageDeviceID = package->NodeRef().device();
+	item->packageNodeID = package->NodeRef().node();
 	item->nameLength = package->FileName().Length();
 	item->parentDeviceID = fVolume->PackagesDeviceID();
 	item->parentDirectoryID = fVolume->PackagesDirectoryID();

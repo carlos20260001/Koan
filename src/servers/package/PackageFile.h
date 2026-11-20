@@ -95,8 +95,8 @@ struct PackageFileEntryRefHashDefinition {
 	size_t HashKey(const entry_ref& key) const
 	{
 		size_t hash = BString::HashValue(key.name);
-		hash ^= (size_t)key.device;
-		hash ^= (size_t)key.directory;
+		hash ^= (size_t)key.device();
+		hash ^= (size_t)key.directory();
 		return hash;
 	}
 

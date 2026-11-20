@@ -33,8 +33,8 @@ public:
 									bool isSystemRoot);
 
 			const node_ref&		NodeRef() const		{ return fNodeRef; }
-			dev_t				DeviceID() const	{ return fNodeRef.device; }
-			ino_t				NodeID() const		{ return fNodeRef.node; }
+			dev_t				DeviceID() const	{ return fNodeRef.device(); }
+			ino_t				NodeID() const		{ return fNodeRef.node(); }
 			const BString&		Path() const		{ return fPath; }
 
 			bool				IsSystemRoot() const
