@@ -13,6 +13,9 @@
 #include "Util.h"
 
 
+// TODO(linux backend): on Linux the log is the systemd journal; this file
+// is written only by syslog_daemon (which reads the journal) where it may
+// write /var/log. Querying the journal itself (sd_journal) would not need it.
 static const char* kSyslogPath = "/var/log/syslog";
 static const char* kOldSyslogPath = "/var/log/syslog.1";
 // The kernel writes this first thing on every boot.
