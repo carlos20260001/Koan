@@ -18,7 +18,6 @@
 #include <Message.h>
 #include <TimeZone.h>
 
-#include <syscalls.h>
 
 
 using BSupportKit::BJob;
@@ -63,7 +62,9 @@ InitRealTimeClockJob::_SetRealTimeClockIsGMT(BPath path) const
 	}
 	bool isGMT = strncmp(buffer, "local", 5) != 0;
 
-	_kern_set_real_time_clock_is_gmt(isGMT);
+	// TODO(linux backend): Linux keeps this in /etc/adjtime, which
+	// systemd-timedated's SetLocalRTC (D-Bus, polkit) changes; Haiku's
+	// _kern_set_real_time_clock_is_gmt() has no counterpart in libroot2.
 	printf("RTC stores %s time.\n", isGMT ? "GMT" : "local" );
 }
 
@@ -92,8 +93,9 @@ InitRealTimeClockJob::_SetTimeZoneOffset(BPath path) const
 	}
 	int32 timeZoneOffset = BTimeZone(timeZoneID.String()).OffsetFromGMT();
 
-	_kern_set_timezone(timeZoneOffset, timeZoneID.String(),
-		timeZoneID.Length());
+	// TODO(linux backend): the system time zone is /etc/localtime, set
+	// through systemd-timedated's SetTimezone (D-Bus, polkit); processes
+	// read it themselves, there is no _kern_set_timezone() on Linux.
 	printf("timezone is %s, offset is %" B_PRId32 " seconds from GMT.\n",
 		timeZoneID.String(), timeZoneOffset);
 }
