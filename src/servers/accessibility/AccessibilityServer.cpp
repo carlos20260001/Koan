@@ -163,10 +163,15 @@ AccessibilityServer::MessageReceived(BMessage* message)
 		case kMsgIdleCheck:
 			delete fIdleRunner;
 			fIdleRunner = NULL;
+#ifndef __VOS__
+			// On Linux nothing starts the server on demand (there is no
+			// launch_daemon), so it stays resident: janus_session starts
+			// it at login and an idle server costs only a port.
 			if (fClients.IsEmpty()) {
 				syslog(LOG_INFO, "accessibility_server: no clients, quitting");
 				PostMessage(B_QUIT_REQUESTED);
 			}
+#endif
 			break;
 
 		default:
