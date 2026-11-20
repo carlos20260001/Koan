@@ -239,8 +239,12 @@ kernel's `boot_splash.cpp` (light one icon per stage); headers in
 `headers/private/kernel/` (`boot_splash.h`, `boot/platform/generic/video_splash.h`,
 `video_blitter.h`); image headers from `src/tools/generate_boot_screen.cpp`.
 
-**Trademarks:** only the air/OS artwork (`data/artwork/boot_splash/airos_splash_*.png`,
-`headers/private/kernel/boot/images-airos.h`). The Haiku logo images
+**Artwork** (2026-11-20): the Koan wordmark (`data/artwork/boot_splash/koan_splash_logo.svg`)
+above air/OS's stage icons, `headers/private/kernel/boot/images-koan.h`, the default
+`VOS_SPLASH_IMAGES` (`cff8afefe1`); regenerate with
+`src/system/boot_splash/tools/make-koan-images.sh` (rsvg-convert + the opt-in
+`generate_boot_screen` target). air/OS's `images-airos.h` still builds.
+**Trademarks:** only Koan and air/OS artwork. The Haiku logo images
 (`splash_logo*`, `images-tm*.h`) are Haiku trademarks and must never ship.
 
 Merged in `b92bdc0170` (`port/splash`).
@@ -632,3 +636,4 @@ counterparts and Mesa:
 | 2026-11-20 | `b59b7785d9` | M9 W3-D: the other 20 servers on Linux backends, PipeWire media add-on; integrated build green (31 servers, 26 libs, ctest 8+1 skipped) |
 | 2026-11-20 | `72f99e7e6b` | License audit of the 1183 VitruvianOS-derived files: all license/copyright headers kept; license texts now installed; License.md appendix corrected |
 | 2026-11-20 | `15f4ad3df0` | M9 W3-B: KMS/GBM/Mesa display backend merged; wave 3 code complete, integrated build green, ctest 9+1 skipped |
+| 2026-11-20 | `cff8afefe1` | Splash shows the Koan wordmark (images-koan.h, generator on CMake) |
