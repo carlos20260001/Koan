@@ -30,13 +30,22 @@ the initramfs hook copies one file.
 
 ## Artwork
 
-Only the air/OS images may be compiled in:
-`headers/private/kernel/boot/images-airos.h`, made by
-`src/tools/generate_boot_screen.cpp` from
-`data/artwork/boot_splash/airos_splash_{logo,icons}.png`. CMake reads the
-header from `VOS_SPLASH_IMAGES` and stops if it names `images.h`,
-`images-tm*.h` or `images-sans-tm.h`: the Haiku logo images are Haiku
-trademarks and must not ship.
+The default is the Koan wordmark above air/OS's stage icons:
+`headers/private/kernel/boot/images-koan.h`, made by
+`tools/make-koan-images.sh` from `data/artwork/boot_splash/koan_splash_logo.svg`
+(rendered onto black at 420 px wide, `koan_splash_logo.png`) and
+`data/artwork/boot_splash/airos_splash_icons.png`. The script builds
+`src/tools/generate_boot_screen.cpp` (CMake target `generate_boot_screen`,
+not built by default) and needs `rsvg-convert` and `libpng-dev`. air/OS's own
+`images-airos.h` also works:
+
+    VOS_CMAKE_EXTRA_OPTS="-DVOS_SPLASH_IMAGES=$PWD/headers/private/kernel/boot/images-airos.h"
+
+CMake reads the header from `VOS_SPLASH_IMAGES` and stops if it names
+`images.h`, `images-tm*.h` or `images-sans-tm.h`: the Haiku logo images are
+Haiku trademarks and must not ship. Set `VOS_SPLASH_TEST_DUMP=<prefix>` when
+running `vos_splash_test` to get the rendered frame as `<prefix>-boot.ppm`
+and `<prefix>-stages.ppm`.
 
 ## Stages
 

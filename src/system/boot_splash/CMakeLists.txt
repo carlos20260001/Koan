@@ -2,18 +2,21 @@
 # boot_splash.cpp) on a DRM dumb buffer or fbdev. It runs from the initramfs,
 # so it links statically against libc and zlib only: no libbe, no libroot.
 
-# Trademarks: only the air/OS artwork may be compiled in. The Haiku logo
-# headers (images-tm*.h, images-sans-tm.h, and images.h, which selects them
-# for official builds) must never reach this target.
+# Artwork: the Koan wordmark with air/OS's stage icons (images-koan.h, made
+# by tools/make-koan-images.sh) by default; air/OS's own images-airos.h also
+# works. Trademarks: the Haiku logo headers (images-tm*.h, images-sans-tm.h,
+# and images.h, which selects them for official builds) must never reach this
+# target.
 set(VOS_SPLASH_IMAGES
-	"${PROJECT_SOURCE_DIR}/headers/private/kernel/boot/images-airos.h"
+	"${PROJECT_SOURCE_DIR}/headers/private/kernel/boot/images-koan.h"
 	CACHE FILEPATH "Boot splash image header made by generate_boot_screen")
 get_filename_component(_vos_splash_images_name "${VOS_SPLASH_IMAGES}" NAME)
 if(_vos_splash_images_name MATCHES "^images(-tm.*|-sans-tm.*)?\\.h$")
 	message(FATAL_ERROR
 		"VOS_SPLASH_IMAGES=${VOS_SPLASH_IMAGES}: the Haiku boot splash images "
 		"are Haiku trademarks and must not ship. Use "
-		"headers/private/kernel/boot/images-airos.h or other artwork you may "
+		"headers/private/kernel/boot/images-koan.h (the default), images-airos.h "
+		"or other artwork you may "
 		"distribute.")
 endif()
 if(NOT EXISTS "${VOS_SPLASH_IMAGES}")

@@ -67,9 +67,11 @@ test_image_decoding()
 {
 	uint16 width, height;
 
-	// The air/OS artwork, data/artwork/boot_splash/airos_splash_*.png.
+	// Whatever artwork VOS_SPLASH_IMAGES selects (images-koan.h by default):
+	// the sizes the decoder reports are the header's.
 	video_splash_logo_size(&width, &height);
-	CHECK(width == 240 && height == 263);
+	CHECK(width == kSplashLogoWidth && height == kSplashLogoHeight);
+	CHECK(width > 0 && height > 0);
 	size_t size = (size_t)width * height * 3;
 	uint8* logo = (uint8*)malloc(size);
 	CHECK(video_splash_decode_logo(logo, size) == B_OK);
@@ -79,15 +81,61 @@ test_image_decoding()
 	free(logo);
 
 	video_splash_icons_size(&width, &height);
-	CHECK(width == 308 && height == 80);
+	CHECK(width == kSplashIconsWidth && height == kSplashIconsHeight);
+	CHECK(width > 0 && height > 0);
 	size = (size_t)width * height * 3;
 	uint8* icons = (uint8*)malloc(size);
 	CHECK(video_splash_decode_icons(icons, size) == B_OK);
 	CHECK(video_splash_decode_icons(icons, (size_t)width * height) == B_OK);
 	free(icons);
 
-	CHECK(kSplashLogoWidth == 240 && kSplashLogoHeight == 263);
-	CHECK(kSplashIconsWidth == 308 && kSplashIconsHeight == 80);
+	// One icon per boot stage, the lit row above the unlit one.
+	CHECK(kSplashIconsHeight % 2 == 0);
+}
+
+
+// True when any pixel of the rectangle differs from the black background.
+static bool
+any_drawn32(const splash_frame_buffer& fb, int left, int top, int width,
+	int height)
+{
+	for (int row = top; row < top + height; row++) {
+		const uint32* line = (const uint32*)(fb.frame_buffer
+			+ (size_t)row * fb.bytes_per_row) + left;
+		for (int column = 0; column < width; column++) {
+			if (line[column] != 0)
+				return true;
+		}
+	}
+	return false;
+}
+
+
+// VOS_SPLASH_TEST_DUMP=<file.ppm> writes the 32-bit frame buffer as a binary
+// PPM, to look at the artwork without a display.
+static void
+dump_ppm(const splash_frame_buffer& fb, const char* stage)
+{
+	const char* path = getenv("VOS_SPLASH_TEST_DUMP");
+	if (path == NULL || path[0] == '\0')
+		return;
+	char name[1024];
+	snprintf(name, sizeof(name), "%s-%s.ppm", path, stage);
+	FILE* file = fopen(name, "wb");
+	if (file == NULL)
+		return;
+	fprintf(file, "P6\n%u %u\n255\n", (unsigned)fb.width,
+		(unsigned)fb.height);
+	for (uint32 row = 0; row < fb.height; row++) {
+		const uint32* line = (const uint32*)(fb.frame_buffer
+			+ (size_t)row * fb.bytes_per_row);
+		for (uint32 column = 0; column < fb.width; column++) {
+			uint8 rgb[3] = { (uint8)(line[column] >> 16),
+				(uint8)(line[column] >> 8), (uint8)line[column] };
+			fwrite(rgb, 1, 3, file);
+		}
+	}
+	fclose(file);
 }
 
 
@@ -150,9 +198,10 @@ test_render_32()
 	// The logo is centred as on Haiku, and its centre is not background.
 	int width, height, x, y;
 	compute_splash_logo_placement(fb.width, fb.height, width, height, x, y);
-	CHECK(x == (1024 - 240) / 2);
-	CHECK(pixel32(fb, x + width / 2, y + height / 2) != 0);
+	CHECK(x == (1024 - kSplashLogoWidth) / 2);
+	CHECK(any_drawn32(fb, x, y, width, height));
 	CHECK(pixel32(fb, x - 1, y + height / 2) == 0);
+	dump_ppm(fb, "boot");
 
 	// Before any stage every icon is the grayed out lower half.
 	uint64 dim[BOOT_SPLASH_STAGE_MAX];
@@ -192,6 +241,7 @@ test_render_32()
 
 	boot_splash_set_stage(vos_splash_stage_icon(VOS_SPLASH_STAGE_APP_SERVER));
 	CHECK(icon_brightness(fb, 6) > dim[6]);
+	dump_ppm(fb, "stages");
 
 	boot_splash_uninit();
 	free(icons);
@@ -215,8 +265,17 @@ test_render_16_and_small()
 	CHECK(video_display_splash(fb, &icons) == B_OK);
 	int width, height, x, y;
 	compute_splash_logo_placement(fb.width, fb.height, width, height, x, y);
-	CHECK(*(uint16*)(fb.frame_buffer + (size_t)(y + height / 2)
-		* fb.bytes_per_row + (size_t)(x + width / 2) * 2) != 0);
+	bool drawn = false;
+	for (int row = y; row < y + height && !drawn; row++) {
+		for (int column = x; column < x + width; column++) {
+			if (*(uint16*)(fb.frame_buffer + (size_t)row * fb.bytes_per_row
+					+ (size_t)column * 2) != 0) {
+				drawn = true;
+				break;
+			}
+		}
+	}
+	CHECK(drawn);
 	free(icons);
 	free(fb.frame_buffer);
 
