@@ -506,8 +506,13 @@ Waves (each on its own `port/*` branch, merged here when green):
             bluetooth, syslog, debug, print servers (systemd/janus_session start still
             to wire). Runtime deps: pipewire, wireplumber; optional coredump, UPower,
             power-profiles-daemon, GeoClue. Not yet checked in the container: the last
-            accessibility_server edit and `ldd -r` (host podman broke, see below).
+            accessibility_server edit and `ldd -r` (host podman broke 20:22-~21:00 after a
+            system update's AppArmor reload; fixed by reloading the podman profile).
             `src/servers/Jamfile` retired. Jamfiles: 677
+      - Integrated after A+C+D (`16c4e9f0e4`, container, `VOS_BUILD_TESTS=ON`): full
+            `ninja -k 0` exit 0; 31 server binaries and 26 shared objects (incl. the
+            PipeWire add-on) all 0 undefined symbols; ctest 8 passed, 1 skipped
+            (`pipewire_graph`: no PipeWire in the build container; passed on the host)
       - [x] W3-C merged `3a9c5062bf`: registrar merged (VitruvianOS logind/sleep,
             legacy-signature alias, X/Qt roster + air/OS quit-user-apps, sync per
             phase); input_server merged (VitruvianOS seat/udev, orientation, no reply
@@ -605,4 +610,4 @@ counterparts and Mesa:
 | 2026-11-17 | `7c67bf5ea3` | Nexus forked (`carlos20260001/Nexus` `koan`), timed thread wait; `wait_for_thread_etc` in libroot2; libneural links |
 | 2026-11-20 | `3a9c5062bf` | M9 W3-C: registrar, input_server, mount, notification, keystore, janus; launch_daemon links |
 | 2026-11-20 | `7e3d6143e8` | M9 W3-A: app_server merged on interim DRM/fbdev; full tree builds, ctest 8/8 |
-| 2026-11-20 | `b59b7785d9` | M9 W3-D: the other 20 servers on Linux backends, PipeWire media add-on; integrated build pending (host podman) |
+| 2026-11-20 | `b59b7785d9` | M9 W3-D: the other 20 servers on Linux backends, PipeWire media add-on; integrated build green (31 servers, 26 libs, ctest 8+1 skipped) |
