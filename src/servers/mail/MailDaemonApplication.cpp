@@ -387,8 +387,11 @@ MailDaemonApplication::MessageReceived(BMessage* msg)
 				case B_ENTRY_REMOVED:
 				{
 					entry_ref ref;
-					msg->FindInt32("device", &ref.device);
-					msg->FindInt64("directory", &ref.directory);
+					int32 device = -1;
+					int64 directory = -1;
+					msg->FindInt32("device", &device);
+					msg->FindInt64("directory", &directory);
+					ref.set_to(device, directory);
 					BEntry entry(&ref);
 
 					if (!_IsEntryInTrash(entry)) {
@@ -904,7 +907,7 @@ MailDaemonApplication::_IsEntryInTrash(BEntry& entry)
 	entry_ref ref;
 	entry.GetRef(&ref);
 
-	BVolume volume(ref.device);
+	BVolume volume(ref.device());
 	BPath path;
 	if (volume.InitCheck() != B_OK
 		|| find_directory(B_TRASH_DIRECTORY, &path, false, &volume) != B_OK)
