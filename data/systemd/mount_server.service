@@ -1,0 +1,16 @@
+[Unit]
+Description=Vitruvian mount_server
+ConditionPathExists=!/var/lib/vos/greeter-enabled
+After=janus.service registrar.service
+Requires=janus.service registrar.service
+
+[Service]
+Type=forking
+PIDFile=/run/vos/mount_server.pid
+ExecStart=/system/servers/janus_launch mount_server
+StandardOutput=append:/var/log/mount_server.log
+StandardError=append:/var/log/mount_server.log
+Restart=no
+
+[Install]
+WantedBy=graphical.target
