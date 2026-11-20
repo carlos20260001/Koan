@@ -94,6 +94,10 @@ endif()
 if(EXISTS "${CMAKE_SOURCE_DIR}/data/tmpfiles.d/vos.conf")
 include(build/profiles/data.cmake)
 else()
+# ported subset: the license texts. data.cmake installs them with the rest
+# of data/; until it is active they must still ship, since the image carries
+# MIT, LGPL, GPL, NewOS and Be Sample Code licensed files.
+ImageIncludeDir("data/system/data/licenses" "/system/data/")
 # ported subset: installer backend. The rules data.cmake has for the
 # DriveSetup/Installer root helpers, their polkit files and GRUB files,
 # verbatim, until data.cmake itself is active.
