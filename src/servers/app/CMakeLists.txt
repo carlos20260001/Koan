@@ -195,6 +195,7 @@ Server(
 		# sets APP_SERVER_EMBED_INPUT=1 at spawn time — the default
 		# input path is input_server, run pre-auth via janus.
 		drawing/interface/linux/LibEvdevEventStream.cpp
+		drawing/interface/linux/SplashHandoff.cpp
 
 		stackandtile/SATDecorator.cpp
 		stackandtile/SATGroup.cpp

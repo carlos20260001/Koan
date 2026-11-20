@@ -59,6 +59,12 @@ public:
 	virtual	RenderingBuffer*	BackBuffer() const;
 	virtual	bool				IsDoubleBuffered() const;
 
+	// Scaled drawing goes straight into the mode-sized buffers at the
+	// render scale; the software scale (a logical-sized back buffer
+	// enlarged on every copy) is refused, as on DRM.
+	virtual	status_t			SetSoftwareScale(uint16 percent);
+	virtual	status_t			SetRenderScale(uint16 percent);
+
 	virtual	void				OnSeatEnabled();
 	virtual	void				OnSeatDisabled();
 

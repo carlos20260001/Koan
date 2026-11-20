@@ -885,6 +885,36 @@ FBDevHWInterface::IsDoubleBuffered() const
 }
 
 
+status_t
+FBDevHWInterface::SetSoftwareScale(uint16 percent)
+{
+	if (percent != 100)
+		return B_UNSUPPORTED;
+
+	return HWInterface::SetSoftwareScale(percent);
+}
+
+
+/*!	As DrmHWInterface::SetRenderScale(): the drawing engines take the new
+	density from FrameBufferChanged(), under the exclusive lock.
+*/
+status_t
+FBDevHWInterface::SetRenderScale(uint16 percent)
+{
+	if (percent == RenderScale())
+		return B_OK;
+	if (!LockExclusiveAccess())
+		return B_ERROR;
+
+	status_t status = HWInterface::SetRenderScale(percent);
+	if (status == B_OK)
+		_NotifyFrameBufferChanged();
+
+	UnlockExclusiveAccess();
+	return status;
+}
+
+
 void
 FBDevHWInterface::OnSeatEnabled()
 {

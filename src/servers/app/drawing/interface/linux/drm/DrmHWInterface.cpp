@@ -10,6 +10,7 @@
 #include "DrmFlipPolicy.h"
 #include "LibEvdevEventStream.h"
 #include "PanelOrientationTransform.h"
+#include "SplashHandoff.h"
 
 #include <algorithm>
 #include <new>
@@ -389,6 +390,7 @@ DrmHWInterface::_OnSessionEnable()
 			"(flip+cursor+damage) enabled\n");
 
 	// Configure crtc
+	bool anyModeSet = false;
 	for (iter = get_dev(); iter; iter = iter->next) {
 		bool modesetOk = false;
 		if (fAtomicSupported && fPrimaryPlaneId) {
@@ -406,11 +408,20 @@ DrmHWInterface::_OnSessionEnable()
 			if (ret)
 				fprintf(stderr, "cannot set CRTC for connector %u (%d): %m\n",
 					iter->conn, errno);
-			else if (fAtomicSupported && fPrimaryPlaneId)
-				fprintf(stderr, "fell back to legacy CRTC for connector %u\n",
-					iter->conn);
+			else {
+				modesetOk = true;
+				if (fAtomicSupported && fPrimaryPlaneId)
+					fprintf(stderr, "fell back to legacy CRTC for connector "
+						"%u\n", iter->conn);
+			}
 		}
+		if (modesetOk)
+			anyModeSet = true;
 	}
+
+	// The screen is app_server's now: the boot splash can go.
+	if (anyModeSet)
+		vos_splash_handoff();
 
 	modeset_create_cursor_fb(fFd, get_dev());
 
@@ -1486,6 +1497,8 @@ DrmHWInterface::SetMode(const display_mode& mode)
 		return B_ERROR;
 	}
 
+	vos_splash_handoff();
+
 	_FillModeInfo(fDisplayMode, dev->mode);
 	fDisplayMode.virtual_width  = logW;
 	fDisplayMode.virtual_height = logH;
@@ -1511,15 +1524,22 @@ DrmHWInterface::SetMode(const display_mode& mode)
 	// now decides hardware vs. software, so it must always run to flip
 	// the sprite back on after a return from a rotated orientation.
 	if (fCursor.IsSet()) {
-		if (fCursorLocation.x > fDisplayMode.virtual_width - 1)
-			fCursorLocation.x = fDisplayMode.virtual_width - 1;
-		if (fCursorLocation.y > fDisplayMode.virtual_height - 1)
-			fCursorLocation.y = fDisplayMode.virtual_height - 1;
+		const int32 logicalWidth = LogicalWidth() > 0
+			? LogicalWidth() : fDisplayMode.virtual_width;
+		const int32 logicalHeight = LogicalHeight() > 0
+			? LogicalHeight() : fDisplayMode.virtual_height;
+		if (fCursorLocation.x > logicalWidth - 1)
+			fCursorLocation.x = logicalWidth - 1;
+		if (fCursorLocation.y > logicalHeight - 1)
+			fCursorLocation.y = logicalHeight - 1;
 		if (fCursorLocation.x < 0)
 			fCursorLocation.x = 0;
 		if (fCursorLocation.y < 0)
 			fCursorLocation.y = 0;
-		SetCursor(fCursor);
+		// Re-arm from the cursor as programs set it; fCursor is the copy
+		// at the render scale.
+		SetCursor(fSourceCursor.IsSet() ? fSourceCursor.Get()
+			: fCursor.Get());
 	}
 
 	_SetupDirectRender();
@@ -2368,6 +2388,103 @@ DrmHWInterface::IsDoubleBuffered() const
 }
 
 
+/*!	The base class's software scale needs a back buffer at the logical
+	size, enlarged on every copy to the front. The render buffer and the
+	page flipped scanout buffers here are all at the mode's size, so only
+	100 percent is accepted; scaled drawing comes with the render scale.
+*/
+status_t
+DrmHWInterface::SetSoftwareScale(uint16 percent)
+{
+	if (percent != 100)
+		return B_UNSUPPORTED;
+
+	return HWInterface::SetSoftwareScale(percent);
+}
+
+
+/*!	Draws at \a percent of the logical size into the unchanged buffers.
+	The drawing engines take the new density from FrameBufferChanged(), as
+	after a mode change; the caller (Desktop) then redraws everything.
+	Exclusive lock first, then the overlays lock in the base class, as in
+	SetMode().
+*/
+status_t
+DrmHWInterface::SetRenderScale(uint16 percent)
+{
+	if (percent == RenderScale())
+		return B_OK;
+	if (!LockExclusiveAccess())
+		return B_ERROR;
+
+	status_t status = HWInterface::SetRenderScale(percent);
+	if (status == B_OK)
+		_NotifyFrameBufferChanged();
+
+	UnlockExclusiveAccess();
+	return status;
+}
+
+
+/*!	The single output of this interface, in the form air/OS's display
+	layout reads (see HWInterface::GetDisplayOutputs()). The array is
+	malloc()ed. The multi-output KMS backend reports one per connector.
+*/
+status_t
+DrmHWInterface::GetDisplayOutputs(display_output** _outputs, uint32* _count)
+{
+	if (_outputs == NULL || _count == NULL)
+		return B_BAD_VALUE;
+
+	display_output* output
+		= (display_output*)calloc(1, sizeof(display_output));
+	if (output == NULL)
+		return B_NO_MEMORY;
+
+	display_mode mode;
+	GetMode(&mode);
+
+	output->version = B_DISPLAY_OUTPUT_VERSION;
+	output->id = 0;
+	BString name;
+	if (GetConnectorName(name) == B_OK)
+		strlcpy(output->name, name.String(), sizeof(output->name));
+	output->flags = B_DISPLAY_OUTPUT_CONNECTED | B_DISPLAY_OUTPUT_ENABLED;
+	output->x = 0;
+	output->y = 0;
+	output->width = mode.timing.h_display;
+	output->height = mode.timing.v_display;
+	output->scale = RenderScale();
+	output->render_scale = RenderScale();
+	output->timing = mode.timing;
+	display_mode preferred;
+	if (GetPreferredMode(&preferred) == B_OK)
+		output->native_timing = preferred.timing;
+	else
+		output->native_timing = mode.timing;
+	output->edid_length = 0;
+
+	*_outputs = output;
+	*_count = 1;
+	return B_OK;
+}
+
+
+/*!	Where the cursor plane goes for a pointer at the logical \a location:
+	the location in buffer pixels (render scale), as _CursorFrame() puts
+	the software cursor, less the hot spot of the sprite, which is already
+	at the buffer's density.
+*/
+void
+DrmHWInterface::_CursorPlanePosition(BPoint location, BPoint hot,
+	int32& px, int32& py) const
+{
+	const float factor = RenderScaleFactor();
+	px = (int32)floorf(location.x * factor) - (int32)hot.x;
+	py = (int32)floorf(location.y * factor) - (int32)hot.y;
+}
+
+
 // The rotation convention lives in PanelOrientationTransform.h.
 
 
@@ -2780,6 +2897,11 @@ DrmHWInterface::SetCursor(ServerCursor* cursor)
 
 	HWInterface::SetCursor(cursor);
 
+	// The base class keeps fCursor at the buffer's density (render scale);
+	// that copy is what the sprite shows.
+	if (cursor != NULL && fCursor.IsSet())
+		cursor = fCursor.Get();
+
 	// The node can be freed by a concurrent udev rescan. Taken after the
 	// base call so the lock order stays modeset-before-overlays everywhere.
 	ModesetGuard modesetGuard(&fModesetMutex);
@@ -2855,9 +2977,9 @@ DrmHWInterface::SetCursor(ServerCursor* cursor)
 			cw * 4);
 	}
 
+	int32 px, py;
+	_CursorPlanePosition(fCursorLocation, cursor->GetHotSpot(), px, py);
 	const BPoint hot = cursor->GetHotSpot();
-	const int32  px  = (int32)fCursorLocation.x - (int32)hot.x;
-	const int32  py  = (int32)fCursorLocation.y - (int32)hot.y;
 
 	int ret;
 	if (fCursorUsesAtomic) {
@@ -2903,8 +3025,8 @@ DrmHWInterface::SetCursorVisible(bool visible)
 		BPoint hot(0, 0);
 		if (fCursor.IsSet())
 			hot = fCursor->GetHotSpot();
-		const int32 px = (int32)fCursorLocation.x - (int32)hot.x;
-		const int32 py = (int32)fCursorLocation.y - (int32)hot.y;
+		int32 px, py;
+		_CursorPlanePosition(fCursorLocation, hot, px, py);
 
 		// fHardwareCursorEnabled must track the actual result, or
 		// _DrawCursor() and the hardware plane both draw at once.
@@ -2985,8 +3107,8 @@ DrmHWInterface::MoveCursorTo(float x, float y)
 	if (!dev || !dev->cursor_ok)
 		return;
 
-	const int32 px = (int32)floorf(x - hot.x);
-	const int32 py = (int32)floorf(y - hot.y);
+	int32 px, py;
+	_CursorPlanePosition(BPoint(x, y), hot, px, py);
 
 	if (fCursorUsesAtomic) {
 		if (fAtomicBatch && fPageFlipPending) {

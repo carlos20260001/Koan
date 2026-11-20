@@ -139,6 +139,19 @@ public:
 	virtual	RenderingBuffer*	BackBuffer() const;
 	virtual	bool				IsDoubleBuffered() const;
 
+	// No software scaling: the render buffer stays at the mode's size.
+	virtual	status_t			SetSoftwareScale(uint16 percent);
+	virtual	status_t			SetRenderScale(uint16 percent);
+
+	// One output: the connector this interface drives, the whole frame
+	// buffer at the render scale. Its id is 0, the screen's own, so the
+	// flush keeps the screen's retrace instead of a per-output one.
+	virtual	status_t			GetDisplayOutputs(display_output** _outputs,
+									uint32* _count);
+
+			void				_CursorPlanePosition(BPoint location,
+									BPoint hot, int32& px, int32& py) const;
+
 	virtual	status_t			CopyBackToFront(const BRect& frame);
 	virtual	status_t			CopyBackToFront(const BRegion& region);
 
