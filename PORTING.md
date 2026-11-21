@@ -552,6 +552,20 @@ Waves (each on its own `port/*` branch, merged here when green):
       **Exception (user, 2026-11-20): Deskbar and the Tracker app/add-ons use no
       VitruvianOS source** — air/OS's code ported to Linux by hand (VitruvianOS read
       only as a reference for mechanisms), committed under our authorship.
+      - [x] Tracker app + 8 add-ons (`bd442cd7d5`), Deskbar + menu data
+            (`f01071d9b2`), all 26 preference panels (P1 `port/w4-prefs-ui`, P2
+            `port/w4-prefs-sys`, `17be2fda96`), air/OS sources only; VitruvianOS-only
+            panels (accounts, camera, hardware, location, user) left out (user,
+            2026-11-21). Integrated: full build exit 0, apps and panels 0 undefined
+            symbols, ctest 10/10, 26 panels in `/system/preferences`, 25 Deskbar
+            Preferences links, none broken. Linux back ends: Time → timedated,
+            VirtualMemory → `/proc/swaps`, WiFi → wireless-extension ioctls, Network →
+            primary interface by UDP-socket source address, Joysticks → evdev nodes,
+            E-mail → `/etc/resolv.conf`, ScreenSaver → libxcrypt. Open:
+            `BNetworkDevice::GetNetworks()/GetNetwork()` still stubs in libnetapi (WiFi
+            list empty); VirtualMemory `Apply()` needs a polkit root helper; nl80211
+            details (MCS, width); Joysticks links named after `eventN` (not stable);
+            nothing run on a display yet
       `src/data`, `data/`, remaining tests
 - [ ] W5: `Jamrules`, `Jamfile`, `build/jam`, Haiku `configure`, Haiku-only
       `build/scripts` deleted; `git ls-files | grep -c Jamfile` = 0; full `ninja`,
@@ -674,3 +688,4 @@ this tree builds, so its folders fill as ports land.
 | 2026-11-21 | `1c42a01c50` | Release ISO: chroot-only compile fixes (`<utility>` in netservices2, `std::isnan`/`isfinite` in app_server); postinst skips missing data |
 | 2026-11-21 | `bd442cd7d5` | W4: Tracker app + 8 add-ons from air/OS sources (no VitruvianOS code) |
 | 2026-11-21 | `f01071d9b2` | W4: Deskbar + its menu data from air/OS sources; logind suspend/hibernate, lock, log out |
+| 2026-11-21 | `17be2fda96` | W4: all 26 preference panels from air/OS sources; src/preferences Jamfile-free |

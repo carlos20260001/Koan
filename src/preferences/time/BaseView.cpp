@@ -13,6 +13,7 @@
 #include <DateTime.h>
 #include <OS.h>
 
+#include "TimeBackend.h"
 #include "TimeMessages.h"
 
 
@@ -89,7 +90,7 @@ TTimeBaseView::ChangeTime(BMessage* message)
 		dateTime.SetDate(date);
 	}
 
-	set_real_time_clock(dateTime.Time_t());
+	TimeBackend::SetSystemTime(dateTime.Time_t());
 }
 
 

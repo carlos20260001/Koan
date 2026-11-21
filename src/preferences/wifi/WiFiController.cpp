@@ -23,14 +23,13 @@
 
 extern "C" {
 #	include <freebsd_network/compat/sys/cdefs.h>
-#	include <freebsd_network/compat/sys/ioccom.h>
-#	include <net80211/ieee80211_ioctl.h>
 #	include <freebsd_network/compat/net/if_media.h>
 }
 
 #include <new>
 
 #include "../../shared/net/WirelessNetworkList.h"
+#include "LinuxWireless.h"
 
 
 #undef B_TRANSLATION_CONTEXT
@@ -248,71 +247,30 @@ SecurityName(const wireless_network& network)
 }
 
 
-/*!	Asks the driver for the rate it last transmitted at (a Haiku extension
-	that not every driver implements).
+/*!	Asks the driver for the rate it last transmitted at. Linux's wireless
+	extensions report the rate only; the HT/VHT/HE MCS details Haiku's
+	driver extension gave stay empty.
 */
 static void
 ReadTxRate(BNetworkDevice& device, WiFiLinkDetails& link)
 {
-	struct ieee80211_haiku_tx_rate rate;
-	memset(&rate, 0, sizeof(rate));
-	struct ieee80211req request;
-	memset(&request, 0, sizeof(request));
-	request.i_type = IEEE80211_IOC_HAIKU_TX_RATE;
-	request.i_data = &rate;
-	request.i_len = sizeof(rate);
-	if (device.Control(SIOCG80211, &request) != B_OK || rate.i_kbps == 0)
-		return;
-
-	link.txKbps = rate.i_kbps;
-	static const char* kModes[] = { NULL, NULL, "HT", "VHT", "HE" };
-	if (rate.i_mode >= 2 && rate.i_mode <= 4) {
-		BString details;
-		details << kModes[rate.i_mode] << " MCS " << (int32)rate.i_mcs;
-		if (rate.i_nss > 1)
-			details << ", " << (int32)rate.i_nss << " streams";
-		if (rate.i_width != 0)
-			details << ", " << (int32)rate.i_width << " MHz";
-		link.txDetails = details;
-	}
+	// TODO(linux backend): the MCS, stream and channel-width details
+	// (nl80211 NL80211_STA_INFO_TX_BITRATE) for link.txDetails.
+	uint32 kbps = linux_wireless_get_tx_rate(device.Name());
+	if (kbps != 0)
+		link.txKbps = kbps;
 }
 
 
-/*!	Reads the channel of \a bssid from the driver's raw scan results, which
-	carry the frequency that the network kit's wireless_network drops.
+/*!	Returns the channel frequency of \a bssid. Linux's wireless
+	extensions report the frequency of the current association, which is
+	the one asked for here.
 */
 static int32
 FrequencyForBSSID(BNetworkDevice& device, const BNetworkAddress& bssid)
 {
-	const int32 kBufferSize = 32768;
-	uint8* buffer = new(std::nothrow) uint8[kBufferSize];
-	if (buffer == NULL)
-		return 0;
-	struct ieee80211req request;
-	memset(&request, 0, sizeof(request));
-	request.i_type = IEEE80211_IOC_SCAN_RESULTS;
-	request.i_data = buffer;
-	request.i_len = kBufferSize;
-	int32 frequency = 0;
-	if (device.Control(SIOCG80211, &request) == B_OK) {
-		int32 left = request.i_len;
-		uint8* entry = buffer;
-		while (left >= (int32)sizeof(struct ieee80211req_scan_result)) {
-			ieee80211req_scan_result* result
-				= (ieee80211req_scan_result*)entry;
-			if (result->isr_len == 0 || result->isr_len > left)
-				break;
-			if (memcmp(result->isr_bssid, bssid.LinkLevelAddress(),
-					IEEE80211_ADDR_LEN) == 0) {
-				frequency = result->isr_freq;
-				break;
-			}
-			entry += result->isr_len;
-			left -= result->isr_len;
-		}
-	}
-	delete[] buffer;
-	return frequency;
+	(void)bssid;
+	return linux_wireless_get_frequency(device.Name());
 }
 
 
@@ -383,18 +341,11 @@ GetWiFiLinkDetails(const char* deviceName, WiFiLinkDetails& link,
 		}
 		link.security = SecurityName(*secured);
 	} else {
-		char ssid[IEEE80211_NWID_LEN + 1];
-		memset(ssid, 0, sizeof(ssid));
-		struct ieee80211req request;
-		memset(&request, 0, sizeof(request));
-		request.i_type = IEEE80211_IOC_SSID;
-		request.i_data = ssid;
-		request.i_len = IEEE80211_NWID_LEN;
-		if (device.Control(SIOCG80211, &request) == B_OK
-			&& request.i_len > 0) {
-			networkName.SetTo(ssid,
-				std::min((int)request.i_len, IEEE80211_NWID_LEN));
-		}
+		char ssid[32];
+		ssize_t length = linux_wireless_get_ssid(deviceName, ssid,
+			sizeof(ssid));
+		if (length > 0)
+			networkName.SetTo(ssid, length);
 	}
 	delete[] networks;
 
@@ -764,18 +715,11 @@ WiFiController::_Update(bool scanCompleted)
 		}
 		if (associated == NULL) {
 			// Not in the scan results, ask for the SSID
-			char ssid[IEEE80211_NWID_LEN + 1];
-			memset(ssid, 0, sizeof(ssid));
-			struct ieee80211req request;
-			memset(&request, 0, sizeof(request));
-			request.i_type = IEEE80211_IOC_SSID;
-			request.i_data = ssid;
-			request.i_len = IEEE80211_NWID_LEN;
-			if (device.Control(SIOCG80211, &request) == B_OK
-				&& request.i_len > 0) {
-				associatedName.SetTo(ssid,
-					std::min((int)request.i_len, IEEE80211_NWID_LEN));
-			}
+			char ssid[32];
+			ssize_t length = linux_wireless_get_ssid(device.Name(), ssid,
+				sizeof(ssid));
+			if (length > 0)
+				associatedName.SetTo(ssid, length);
 		}
 	}
 	bool link = device.HasLink();

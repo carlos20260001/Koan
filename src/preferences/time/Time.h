@@ -7,8 +7,8 @@
  *		Mike Berg <mike@berg-net.us>
  *		Julun <host.haiku@gmx.de>
  */
-#ifndef _TIME_H
-#define _TIME_H
+#ifndef TIME_PREFERENCES_H
+#define TIME_PREFERENCES_H
 
 
 #include <Application.h>
@@ -33,5 +33,5 @@ private:
 };
 
 
-#endif	// _TIME_H
+#endif	// TIME_PREFERENCES_H
 

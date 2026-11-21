@@ -19,12 +19,15 @@ set(SYSTEM_PREFERENCES_TARGETS
 	Notifications
 	Power
 	Printers
+	Repositories
 	Screen
 	ScreenSaver
 	Shortcuts
 	Sounds
 	Time
 	Tracker_prefs
+	VirtualMemory
+	WiFi
 )
 
 # Installed binary names (OUTPUT_NAME where it differs): used for symlinks and staging
@@ -46,12 +49,15 @@ set(SYSTEM_PREFERENCES
 	Notifications
 	Power
 	Printers
+	Repositories
 	Screen
 	ScreenSaver
 	Shortcuts
 	Sounds
 	Time
 	Tracker
+	VirtualMemory
+	WiFi
 )
 
 VosKeepTargets(SYSTEM_PREFERENCES_TARGETS PARALLEL SYSTEM_PREFERENCES)
