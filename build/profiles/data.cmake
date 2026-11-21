@@ -7,8 +7,8 @@ set(SYSTEMD_SERVICES
   data/systemd/app_server.service
   data/systemd/input_server.service
   data/systemd/notification_server.service
-  data/systemd/deskbar.service
-  data/systemd/tracker.service
+  # No deskbar.service or tracker.service: janus_session starts Deskbar
+  # and Tracker at login.
   data/systemd/userbootscript@.service
   data/systemd/vos-login.target
   data/systemd/vos-pdf-printer.service
@@ -144,8 +144,6 @@ ImageIncludeFile("data/pam.d/vitruvian-greeter" "/etc/pam.d")
 install(FILES data/pam.d/vitruvian-auth DESTINATION /usr/share/vos/pam.d/ COMPONENT data)
 
 install(FILES ${SYSTEMD_SERVICES} DESTINATION /etc/systemd/system/ COMPONENT data)
-install(FILES data/dbus-1/services/org.freedesktop.Notifications.service
-  DESTINATION /usr/share/dbus-1/services/ COMPONENT data)
 
 # Inert unless vitruvian.safemode is on the kernel cmdline.
 install(FILES data/systemd/vos-safemode-logging.service DESTINATION /etc/systemd/system/ COMPONENT data)
@@ -196,6 +194,10 @@ install(DIRECTORY "data/system/data/netplus/extensions"
 	COMPONENT netplus-extensions)
 
 install(FILES "data/artwork/V_OS logo.png" DESTINATION "/system/data/artwork" COMPONENT data)
+# air/OS's desktop picture, Tracker's default background.
+install(FILES "data/artwork/airos/airos-desktop.tga" DESTINATION "/system/data/artwork" COMPONENT data)
+# air/OS's joystick descriptions.
+ImageIncludeDir("data/system/data/joysticks" "/system/data/")
 
 # Profile, inputrc, and profile.d scripts for Terminal
 ImageIncludeFile("data/etc/profile" "/system/settings/etc")
@@ -226,11 +228,13 @@ ImageIncludeFile("data/bin/welcome" "/bin")
 install(FILES data/develop/makefile-engine DESTINATION /system/develop/etc COMPONENT dev)
 install(FILES data/develop/makefile-engine DESTINATION /etc COMPONENT dev)
 install(FILES data/develop/vos.specs DESTINATION /etc COMPONENT dev)
-install(FILES
-	data/develop/linkcompat/libbnetapi.so
-	data/develop/linkcompat/libcolumnlistview.so
-	data/develop/linkcompat/libdebug.so
-	data/develop/linkcompat/libmedia.so
-	data/develop/linkcompat/libnetservices.so
-	data/develop/linkcompat/libnetwork.so
-	DESTINATION /usr/lib COMPONENT dev)
+# Link scripts for Haiku library names VitruvianOS folds into others.
+# This tree builds some of them for real (the classic libmedia, the debug
+# kit when enabled); a script would then take the library's place in
+# /usr/lib, so it is installed only for names no target builds.
+foreach(_vos_compat bnetapi columnlistview debug media netservices network)
+	if(NOT TARGET ${_vos_compat})
+		install(FILES data/develop/linkcompat/lib${_vos_compat}.so
+			DESTINATION /usr/lib COMPONENT dev)
+	endif()
+endforeach()
