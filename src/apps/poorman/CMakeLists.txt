@@ -59,9 +59,11 @@ target_include_directories(PoorMan PRIVATE
 target_compile_definitions(PoorMan PRIVATE
 	HAVE__PROGNAME=1 HAVE_FCNTL_H=1 HAVE_GRP_H=1 HAVE_MEMORY_H=1 HAVE_POLL_H=1
 	HAVE_SYS_POLL_H=1 TIME_WITH_SYS_TIME=1 HAVE_DIRENT_H=1 HAVE_STRERROR=1
-	HAVE_WAITPID=1 HAVE_VSNPRINTF=1 HAVE_SETSID=1 HAVE_SIGSET=1 HAVE_ATOLL=1
+	HAVE_WAITPID=1 HAVE_VSNPRINTF=1 HAVE_SETSID=1 HAVE_ATOLL=1
 	HAVE_UNISTD_H=1 HAVE_GETPAGESIZE=1 HAVE_MMAP=1 HAVE_SELECT=1 HAVE_POLL=1
 	HAVE_TM_GMTOFF=1 HAVE_SOCKLENT=1 HAVE_INT64T=1)
+# HAVE_SIGSET is left out: glibc declares the obsolete sigset() only for
+# X/Open builds; libhttpd then uses signal().
 # air/OS's Jamfile turned -Werror off for this directory (thttpd code).
 target_compile_options(PoorMan PRIVATE -Wno-error)
 UsePrivateHeaders(PoorMan shared)
