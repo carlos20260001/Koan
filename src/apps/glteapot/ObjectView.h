@@ -12,7 +12,7 @@
 #ifndef OBJECT_VIEW_H
 #define OBJECT_VIEW_H
 
-#include <GL/glu.h>
+#include <GL/gl.h>
 #include <GLView.h>
 
 #define kMsgFPS			'fps '

@@ -17,7 +17,6 @@ HaikuSubInclude diskprobe ;
 HaikuSubInclude diskusage ;
 HaikuSubInclude expander ;
 HaikuSubInclude firstbootprompt ;
-HaikuSubInclude glteapot ;
 HaikuSubInclude gradients ;
 HaikuSubInclude haikudepot ;
 HaikuSubInclude icon-o-matic ;
