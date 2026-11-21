@@ -24,6 +24,7 @@
 
 #include "Constants.h"
 #include "Release.h"
+#include <stdlib.h>
 
 
 using namespace BPackageKit;

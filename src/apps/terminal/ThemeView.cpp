@@ -28,6 +28,7 @@
 #include "Colors.h"
 #include "TermConst.h"
 #include "PrefHandler.h"
+#include <stdlib.h>
 
 
 #undef B_TRANSLATION_CONTEXT

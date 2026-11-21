@@ -20,6 +20,7 @@
 
 #include "FileReadWrite.h"
 #include "Playlist.h"
+#include <stdlib.h>
 
 using std::isdigit;
 using std::nothrow;

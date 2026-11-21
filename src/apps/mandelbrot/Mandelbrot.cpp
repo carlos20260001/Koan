@@ -32,6 +32,7 @@
 #include <algorithm>
 
 #include "FractalEngine.h"
+#include <cmath>
 
 #undef B_TRANSLATION_CONTEXT
 #define B_TRANSLATION_CONTEXT "MandelbrotWindow"
