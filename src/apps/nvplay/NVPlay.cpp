@@ -510,6 +510,11 @@ PlayerWindow::_SoundThread(void* data)
 void
 PlayerWindow::_FeedSound()
 {
+	// The first sound reads are traced to stderr when NVPLAY_TRACE is set;
+	// the committed source used these two without declaring them.
+	const bool trace = getenv("NVPLAY_TRACE") != NULL;
+	int rounds = 0;
+
 	while (fRunning) {
 		if (fAudio == NULL || fRing == NULL || !fPlaying || fSeekWanted
 			|| fSoundEnded) {
