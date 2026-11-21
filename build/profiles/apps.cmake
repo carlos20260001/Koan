@@ -22,6 +22,18 @@ if(TARGET vitruvian-login) # ported subset: not in this tree yet
 ImageInclude("/system/servers" vitruvian-login)
 endif()
 
+# air/OS's Login is janus's greeter and screen-lock app (apps-sys1 port).
+# janus and janus_session start it as "vitruvian-login" from
+# /system/servers (then /system/apps, /system), so install it as Login and
+# link that name to it: no janus change, and BApplication still finds its
+# resources through the real executable.
+if(TARGET Login)
+	ImageInclude("/system/apps" Login)
+	install(CODE "file(MAKE_DIRECTORY \"\$ENV{DESTDIR}/system/servers\")
+		file(CREATE_LINK \"../apps/Login\" \"\$ENV{DESTDIR}/system/servers/vitruvian-login\" SYMBOLIC)"
+		COMPONENT runtime)
+endif()
+
 # Polkit authentication agent (auto-started with the graphical session).
 if(TARGET vos-polkit-agent) # ported subset: not in this tree yet
 ImageInclude("/system/servers" vos-polkit-agent)
@@ -55,16 +67,17 @@ set(SYSTEM_APPS
 	People
 	Passwords
 	PrintOMatic
+	RemoteDesktop
 	ResEdit
 	ScreenReader
 	SerialConnect
-	#Screenshot
+	Screenshot
 	ShowImage
 	SoundRecorder
 	StyledEdit
 	Switcher
 	Terminal
-	#TextSearch
+	TextSearch
 	TV
 	WebMail
 	WebPositive
@@ -141,3 +154,8 @@ set(CORTEX_MEDIA_ADDONS
 )
 VosKeepTargets(CORTEX_MEDIA_ADDONS)
 ImageInclude("/system/add-ons/media" ${CORTEX_MEDIA_ADDONS})
+
+# Command-line screenshot tool (apps-sys1 port).
+set(SCREENSHOT_CLI screenshot)
+VosKeepTargets(SCREENSHOT_CLI)
+ImageInclude("/system/bin" ${SCREENSHOT_CLI})
