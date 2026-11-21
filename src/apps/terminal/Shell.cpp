@@ -27,6 +27,7 @@
 #include <stdio.h>
 #include <sys/param.h>
 #include <sys/stat.h>
+#include <sys/ioctl.h>
 #include <sys/wait.h>
 #include <termios.h>
 #include <time.h>
@@ -227,13 +228,27 @@ Shell::GetActiveProcessInfo(ActiveProcessInfo& _info) const
 
 	// fetch the name and the current directory from the info
 	const char* name;
-	int32 cwdDevice;
-	int64 cwdDirectory = 0;
-	if (info.FindString("name", &name) != B_OK
-		|| info.FindInt32("cwd device", &cwdDevice) != B_OK
-		|| info.FindInt64("cwd directory", &cwdDirectory) != B_OK) {
+	if (info.FindString("name", &name) != B_OK)
 		return false;
+
+	// libroot2 reads the team's /proc/<pid>/cwd link and gives the path
+	// itself; its device number is a 64-bit dev_t, not an int32
+	const char* cwd;
+	if (info.FindString("cwd path", &cwd) == B_OK) {
+		_info.SetTo(process, name, cwd);
+		return true;
 	}
+
+	int64 cwdDevice = 0;
+	int64 cwdDirectory = 0;
+	if (info.FindInt64("cwd device", &cwdDevice) != B_OK) {
+		int32 device32;
+		if (info.FindInt32("cwd device", &device32) != B_OK)
+			return false;
+		cwdDevice = device32;
+	}
+	if (info.FindInt64("cwd directory", &cwdDirectory) != B_OK)
+		return false;
 
 	// convert the node ref into a path
 	entry_ref cwdRef(cwdDevice, cwdDirectory, ".");
@@ -311,7 +326,11 @@ initialize_termios(struct termios &tio)
 	tio.c_cc[VMIN]   = 4;
 	tio.c_cc[VTIME]  = 0;
 	tio.c_cc[VEOL2]  = CEOL;		/* '^@' */
+#if defined(VSWTCH)
 	tio.c_cc[VSWTCH] = CSWTCH;		/* '^@' */
+#elif defined(VSWTC)
+	tio.c_cc[VSWTC] = CSWTCH;		/* '^@', Linux's name */
+#endif
 	tio.c_cc[VSTART] = CSTART;		/* '^S' */
 	tio.c_cc[VSTOP]  = CSTOP;		/* '^Q' */
 	tio.c_cc[VSUSP]  = CSUSP;		/* '^Z' */
@@ -329,7 +348,9 @@ Shell::_Spawn(int row, int col, const ShellParameters& parameters)
 	const char* defaultArgs[3] = {kDefaultShell, "-l", NULL};
 	struct passwd passwdStruct;
 	struct passwd *passwdResult;
-	char stringBuffer[256];
+	char stringBuffer[4096];
+		// the passwd entry may come from NSS (systemd-homed, LDAP), which
+		// needs more than a short buffer
 
 	if (argv == NULL || argc == 0) {
 		if (getpwuid_r(getuid(), &passwdStruct, stringBuffer,
@@ -414,6 +435,12 @@ Shell::_Spawn(int row, int col, const ShellParameters& parameters)
 			send_handshake_message(terminalThread, handshake);
 			_exit(1);
 		}
+
+#ifdef TIOCSCTTY
+		// Linux gives a session leader its controlling terminal when it
+		// opens one, but say so anyway
+		ioctl(slave, TIOCSCTTY, 0);
+#endif
 
 		/* set signal default */
 		signal(SIGCHLD, SIG_DFL);
