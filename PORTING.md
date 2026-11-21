@@ -570,6 +570,22 @@ Waves (each on its own `port/*` branch, merged here when green):
       - **Apps (user, 2026-11-21): the 63 remaining apps use air/OS sources only**, like
             Deskbar/Tracker/preferences; `src/apps/CMakeLists.txt` adds every app
             directory with a CMakeLists
+      - [x] **All 63 remaining apps on CMake** (air/OS sources only, six parallel ports,
+            merged 2026-11-21): applets (10), menu programs (22), demos (10, + Cortex's
+            add-ons), system apps (19). Integrated: 96 app/preference binaries, 0
+            undefined symbols; ctest 10/10; 60 apps in `/system/apps`, 67 Deskbar menu
+            links, none broken; `src/apps` Jamfile-free. Skipped behind guards:
+            Debugger/DebugAnalyzer (ptrace back end), WebPositive (HaikuWebKit). Login is
+            janus's `vitruvian-login` through a `/system/servers` link; FirstBootPrompt
+            is janus's first-boot frontend. Back ends: PowerStatus → UPower, Devices →
+            sysfs/libudev, Terminal → Linux ptys, ProcessController power saving →
+            power-profiles-daemon, MediaConverter → FFmpeg + VA-API/MPP. Open
+            TODO(linux backend): BootManager install (GRUB helper), Devices "disable
+            driver" (modprobe blacklist helper), Pulse CPU toggle (root helper),
+            package install/update (libsolv add-on + package_daemon), Mail live queries
+            (libroot2 B_QUERY_UPDATE), camera input (V4L2 media add-on), Iris/Cedar/NVENC
+            encoders, `debug_thread()`; WebPositive bookmarks first-login unpack;
+            branding strings "Welcome to Haiku"/"Quit Haiku" in Login/FirstBootPrompt
       - [x] Tracker app + 8 add-ons (`bd442cd7d5`), Deskbar + menu data
             (`f01071d9b2`), all 26 preference panels (P1 `port/w4-prefs-ui`, P2
             `port/w4-prefs-sys`, `17be2fda96`), air/OS sources only; VitruvianOS-only
@@ -707,4 +723,5 @@ this tree builds, so its folders fill as ports land.
 | 2026-11-21 | `bd442cd7d5` | W4: Tracker app + 8 add-ons from air/OS sources (no VitruvianOS code) |
 | 2026-11-21 | `f01071d9b2` | W4: Deskbar + its menu data from air/OS sources; logind suspend/hibernate, lock, log out |
 | 2026-11-21 | `17be2fda96` | W4: all 26 preference panels from air/OS sources; src/preferences Jamfile-free |
+| 2026-11-21 | `84a0729c50` | W4: all 63 remaining apps on CMake from air/OS sources; 96 binaries 0 undefined; src/apps Jamfile-free |
 | 2026-11-21 | `594475e1b6` | W4: data/ and src/data ported, data.cmake active; **Release ISO builds** (vos-uefi.iso, 1.3 GB) |
