@@ -72,7 +72,10 @@ CopyFileData(BFile& dst, BFile& src)
 	dst.SetOwner(src_stat.st_uid);
 	dst.SetGroup(src_stat.st_gid);
 	dst.SetModificationTime(src_stat.st_mtime);
-	dst.SetCreationTime(src_stat.st_crtime);
+	// Linux's struct stat has no creation time; BStatable reads it (statx)
+	time_t creationTime;
+	if (src.GetCreationTime(&creationTime) == B_OK)
+		dst.SetCreationTime(creationTime);
 
 	return B_OK;
 }
