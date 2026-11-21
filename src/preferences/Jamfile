@@ -1,12 +1,1 @@
 SubDir HAIKU_TOP src preferences ;
-
-SubInclude HAIKU_TOP src preferences bluetooth ;
-SubInclude HAIKU_TOP src preferences media ;
-SubInclude HAIKU_TOP src preferences network ;
-SubInclude HAIKU_TOP src preferences power ;
-SubInclude HAIKU_TOP src preferences printers ;
-SubInclude HAIKU_TOP src preferences repositories ;
-SubInclude HAIKU_TOP src preferences screen ;
-SubInclude HAIKU_TOP src preferences time ;
-SubInclude HAIKU_TOP src preferences virtualmemory ;
-SubInclude HAIKU_TOP src preferences wifi ;

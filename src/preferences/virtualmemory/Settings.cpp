@@ -26,6 +26,8 @@
 
 #include <driver_settings.h>
 
+#include "LinuxSwap.h"
+
 
 static const char* const kWindowSettingsFile = "virtualmemory_preferences";
 static const char* const kVirtualMemorySettings = "virtual_memory";
@@ -48,7 +50,7 @@ Settings::Settings()
 		fDefaultSettings.size *= 2;
 	}
 
-	fDefaultSettings.volume = dev_for_path("/boot");
+	fDefaultSettings.volume = dev_for_path(LinuxSwap::DefaultSwapVolumePath());
 }
 
 
@@ -139,8 +141,20 @@ Settings::ReadSwapSettings()
 {
 	DriverSettingsUnloader settings(
 		load_driver_settings(kVirtualMemorySettings));
-	if (!settings.IsSet())
+	if (!settings.IsSet()) {
+		// Nothing saved yet: start from the swap Linux has active.
+		bool enabled;
+		off_t size;
+		dev_t volume;
+		if (LinuxSwap::GetActiveSwap(enabled, size, volume) == B_OK) {
+			fDefaultSettings.enabled = enabled;
+			if (enabled && size > 0)
+				fDefaultSettings.size = size;
+			if (volume >= 0)
+				fDefaultSettings.volume = volume;
+		}
 		return kErrorSettingsNotFound;
+	}
 
 	const char* enabled = get_driver_parameter(settings.Get(),
 		"vm", NULL, NULL);
@@ -234,6 +248,8 @@ Settings::WriteSwapSettings()
 		info.total_blocks * info.block_size);
 
 	file.Write(buffer, strlen(buffer));
+
+	LinuxSwap::Apply(SwapEnabled(), SwapSize(), SwapVolume());
 	return B_OK;
 }
 

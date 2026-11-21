@@ -36,6 +36,7 @@
 #include <Volume.h>
 #include <VolumeRoster.h>
 
+#include "LinuxSwap.h"
 #include "Settings.h"
 
 
@@ -131,7 +132,7 @@ SettingsWindow::SettingsWindow()
 	fSwapUsageBar(NULL),
 	fSetupComplete(false)
 {
-	gBootDev = dev_for_path("/boot");
+	gBootDev = dev_for_path(LinuxSwap::DefaultSwapVolumePath());
 	BAlignment align(B_ALIGN_LEFT, B_ALIGN_MIDDLE);
 
 	if (fSettings.ReadWindowSettings() != B_OK)
@@ -373,9 +374,7 @@ SettingsWindow::_AddVolumeMenuItem(dev_t device)
 
 	fs_info info;
 	if (fs_stat_dev(device, &info) == 0) {
-		node_ref node;
-		node.device = info.dev;
-		node.node = info.root;
+		node_ref node(info.dev, info.root);
 		AddHandler(item);
 		watch_node(&node, B_WATCH_NAME, item);
 	}
@@ -436,7 +435,7 @@ SettingsWindow::_Update()
 		item->SetMarked(true);
 		BEntry swapFile;
 		if (gBootDev == item->Volume().Device())
-			swapFile.SetTo("/var/swap");
+			swapFile.SetTo(LinuxSwap::DefaultSwapFilePath());
 		else {
 			BDirectory root;
 			item->Volume().GetRootDirectory(&root);

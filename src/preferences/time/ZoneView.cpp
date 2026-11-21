@@ -17,7 +17,6 @@
 #include "ZoneView.h"
 
 #include <stdlib.h>
-#include <syscalls.h>
 
 #include <map>
 #include <new>
@@ -51,6 +50,7 @@
 #include <unicode/utmscale.h>
 #include <ICUWrapper.h>
 
+#include "TimeBackend.h"
 #include "TimeMessages.h"
 #include "TimeZoneListItem.h"
 #include "TimeZoneListView.h"
@@ -543,8 +543,7 @@ TimeZoneView::_SetSystemTimeZone()
 
 	MutableLocaleRoster::Default()->SetDefaultTimeZone(timeZone);
 
-	_kern_set_timezone(timeZone.OffsetFromGMT(), timeZone.ID().String(),
-		timeZone.ID().Length());
+	TimeBackend::SetTimeZone(timeZone.ID().String());
 
 	fSetZone->SetEnabled(false);
 	fLastUpdateMinute = -1;
@@ -558,8 +557,7 @@ TimeZoneView::_FormatTime(const BTimeZone& timeZone)
 	BString result;
 
 	time_t now = time(NULL);
-	bool rtcIsGMT;
-	_kern_get_real_time_clock_is_gmt(&rtcIsGMT);
+	bool rtcIsGMT = TimeBackend::RealTimeClockIsGMT();
 	if (!rtcIsGMT) {
 		int32 currentOffset
 			= fCurrentZoneItem != NULL && fCurrentZoneItem->HasTimeZone()
@@ -576,22 +574,9 @@ TimeZoneView::_FormatTime(const BTimeZone& timeZone)
 void
 TimeZoneView::_ReadRTCSettings()
 {
-	BPath path;
-	if (find_directory(B_USER_SETTINGS_DIRECTORY, &path) != B_OK)
-		return;
-
-	path.Append("RTC_time_settings");
-
-	BEntry entry(path.Path());
-	if (entry.Exists()) {
-		BFile file(&entry, B_READ_ONLY);
-		if (file.InitCheck() == B_OK) {
-			char buffer[6];
-			file.Read(buffer, 6);
-			if (strncmp(buffer, "gmt", 3) == 0)
-				fUseGmtTime = true;
-		}
-	}
+	// The RTC mode lives in timedated (/etc/adjtime), not in a settings
+	// file the kernel reads at boot as on Haiku.
+	fUseGmtTime = TimeBackend::RealTimeClockIsGMT();
 }
 
 
@@ -621,7 +606,7 @@ TimeZoneView::_UpdateGmtSettings()
 
 	_ShowOrHidePreview();
 
-	_kern_set_real_time_clock_is_gmt(fUseGmtTime);
+	TimeBackend::SetRealTimeClockIsGMT(fUseGmtTime);
 }
 
 
