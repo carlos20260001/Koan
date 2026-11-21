@@ -15,7 +15,9 @@
 #include <Autolock.h>
 
 
-static const char* kDevice = "/dev/video/rk3588_vpu/0";
+// Linux: librockchip_mpp drives the encoder through the kernel's MPP
+// service node (air/OS: its rk3588_vpu driver)
+static const char* kDevice = "/dev/mpp_service";
 static const char* kTag = "mediaconverter";
 
 

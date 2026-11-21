@@ -148,7 +148,7 @@ PersonList::EntryCreated(QueryList& source, const entry_ref& ref, ino_t node)
 		return;
 
 	fPersons.AddItem(person);
-	fPersonMap.insert(std::make_pair(node_ref(ref.device, node), person));
+	fPersonMap.insert(std::make_pair(node_ref(ref.device(), node), person));
 }
 
 

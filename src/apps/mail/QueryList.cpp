@@ -97,7 +97,7 @@ QueryList::AddListener(QueryListener* listener)
 	// Add all entries that were already retrieved
 	RefMap::const_iterator iterator = fRefs.begin();
 	for (; iterator != fRefs.end(); iterator++) {
-		listener->EntryCreated(*this, iterator->second, iterator->first.node);
+		listener->EntryCreated(*this, iterator->second, iterator->first.node());
 	}
 
 	fListeners.AddItem(listener);
@@ -149,7 +149,7 @@ QueryList::_AddEntry(const entry_ref& ref, ino_t node)
 	BAutolock locker(this);
 
 	// TODO: catch bad_alloc
-	fRefs.insert(std::make_pair(node_ref(ref.device, node), ref));
+	fRefs.insert(std::make_pair(node_ref(ref.device(), node), ref));
 
 	_NotifyEntryCreated(ref, node);
 }
@@ -248,7 +248,7 @@ QueryList::_FetchQuery()
 
 	RefMap::const_iterator iterator = map.begin();
 	for (; iterator != map.end(); iterator++) {
-		_AddEntry(iterator->second, iterator->first.node);
+		_AddEntry(iterator->second, iterator->first.node());
 	}
 
 	return B_OK;

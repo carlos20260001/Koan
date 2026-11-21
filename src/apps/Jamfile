@@ -1,13 +1,2 @@
 SubDir HAIKU_TOP src apps ;
 
-HaikuSubInclude haikudepot ;
-HaikuSubInclude icon-o-matic ;
-HaikuSubInclude mail ;
-HaikuSubInclude mediaconverter ;
-HaikuSubInclude midiplayer ;
-HaikuSubInclude serialconnect ;
-HaikuSubInclude softwareupdater ;
-HaikuSubInclude systemupdater ;
-HaikuSubInclude soundrecorder ;
-HaikuSubInclude stylededit ;
-HaikuSubInclude terminal ;

@@ -17,6 +17,7 @@
 #include <errno.h>
 #include <math.h>
 #include <poll.h>
+#include <sys/prctl.h>
 #include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -133,6 +134,9 @@ nvenc_api_get()
 		return sApi;
 	sTried = true;
 
+	// TODO(linux backend): the nvenc add-on wraps air/OS's nvidia_rm
+	// driver and is not built for Linux yet; there it would open NVIDIA's
+	// libnvidia-encode.so.1 (NvEncodeAPICreateInstance) instead.
 	const directory_which kDirectories[] = {
 		B_USER_NONPACKAGED_ADDONS_DIRECTORY,
 		B_SYSTEM_NONPACKAGED_ADDONS_DIRECTORY,
@@ -602,7 +606,9 @@ int
 NvencEncoder::SelfTestMain(const char* codec)
 {
 	// a crash ends this process quietly: the parent reads it as a failure
-	disable_debugger(1);
+	// (Linux: no core dump, so systemd-coredump and debug_server's crash
+	// dialog leave it alone; libroot2 has no disable_debugger())
+	prctl(PR_SET_DUMPABLE, 0, 0, 0, 0);
 	uint32 bit = (uint32)strtoul(codec, NULL, 10);
 	const nvenc_api* api = nvenc_api_get();
 	if (api == NULL) {
