@@ -1,59 +1,58 @@
-# Target names (cmake-unique): used for ImageInclude and DEPENDS
+# Target names (cmake-unique): used for ImageInclude and DEPENDS.
+# air/OS's preference panels; VitruvianOS's own panels (Accounts, Camera,
+# Hardware, Location, User) are not part of this tree.
 set(SYSTEM_PREFERENCES_TARGETS
-	Accounts
 	Appearance
 	Backgrounds
 	Bluetooth
-	Camera_prefs
 	DataTranslations
 	Deskbar_prefs
+	E-mail
 	FileTypes
-	Hardware
 	Input
 	Joysticks
 	Keymap
 	Locale
-	Location
+	MCP
 	Media
 	Network
+	Notifications
 	Power
 	Printers
 	Screen
 	ScreenSaver
 	Shortcuts
+	Sounds
 	Time
 	Tracker_prefs
-	User
 )
 
 # Installed binary names (OUTPUT_NAME where it differs): used for symlinks and staging
 set(SYSTEM_PREFERENCES
-	Accounts
 	Appearance
 	Backgrounds
 	Bluetooth
-	Camera
 	DataTranslations
 	Deskbar
+	E-mail
 	FileTypes
-	Hardware
 	Input
 	Joysticks
 	Keymap
 	Locale
-	Location
+	MCP
 	Media
 	Network
+	Notifications
 	Power
 	Printers
 	Screen
 	ScreenSaver
 	Shortcuts
+	Sounds
 	Time
 	Tracker
-	User
 )
 
 VosKeepTargets(SYSTEM_PREFERENCES_TARGETS PARALLEL SYSTEM_PREFERENCES)
 ImageInclude("/system/preferences" ${SYSTEM_PREFERENCES_TARGETS})
-
