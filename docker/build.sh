@@ -178,7 +178,10 @@ else
         rm -rf buildtools/CMakeCache.txt buildtools/CMakeFiles buildtools/build.ninja
     fi
 
-    if ! _tools_run buildtools; then
+    # The keymap compiler came later than rc/xres/resattr: a tree built
+    # before it is completed by the same incremental cmake + ninja.
+    if ! _tools_run buildtools \
+            || [ ! -x buildtools/src/tools/keymap/keymap ]; then
         # air/OS port: libroot2 is milestone M4; without it the buildtools
         # configure stops on missing sources. Say so instead of letting
         # cmake print a page of errors.
