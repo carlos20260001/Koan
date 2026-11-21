@@ -120,3 +120,17 @@ set(DESKBAR_APPLETS
 VosKeepTargets(DESKBAR_APPLETS)
 ImageInclude("/system/apps" ${DESKBAR_APPLETS})
 
+
+# Cortex (demos port): the add-on host Cortex starts by signature, and its
+# classic Media Kit add-ons, where air/OS installed them (SYSTEM_BIN and
+# SYSTEM_ADD_ONS_MEDIA).
+set(CORTEX_SYSTEM_BIN CortexAddOnHost)
+VosKeepTargets(CORTEX_SYSTEM_BIN)
+ImageInclude("/system/bin" ${CORTEX_SYSTEM_BIN})
+set(CORTEX_MEDIA_ADDONS
+	cortex_audioadapter.media_addon
+	cortex_flanger.media_addon
+	cortex_logging_consumer.media_addon
+)
+VosKeepTargets(CORTEX_MEDIA_ADDONS)
+ImageInclude("/system/add-ons/media" ${CORTEX_MEDIA_ADDONS})

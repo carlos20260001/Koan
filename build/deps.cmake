@@ -51,6 +51,13 @@ DeclareDependency(
 )
 
 DeclareDependency(
+	EXPAT
+	LIBRARIES	"expat"
+	PACKAGES	"libexpat1-dev"
+	RUNTIMES	"libexpat1"
+)
+
+DeclareDependency(
 	FREETYPE
 	LIBRARIES	"freetype"
 	PACKAGES	"libfreetype6-dev"
