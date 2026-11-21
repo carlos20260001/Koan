@@ -21,7 +21,6 @@ HaikuSubInclude glteapot ;
 HaikuSubInclude gradients ;
 HaikuSubInclude haikudepot ;
 HaikuSubInclude icon-o-matic ;
-HaikuSubInclude launchbox ;
 HaikuSubInclude login ;
 HaikuSubInclude lookout ;
 HaikuSubInclude magnify ;
