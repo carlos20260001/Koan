@@ -1,7 +1,6 @@
 SubDir HAIKU_TOP src preferences ;
 
 SubInclude HAIKU_TOP src preferences bluetooth ;
-SubInclude HAIKU_TOP src preferences locale ;
 SubInclude HAIKU_TOP src preferences mail ;
 SubInclude HAIKU_TOP src preferences mcp ;
 SubInclude HAIKU_TOP src preferences media ;
