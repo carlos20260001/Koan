@@ -14,10 +14,11 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
-#include <drivers/device_manager.h>
-#include <device_manager_defs.h>
-#include <generic_syscall_defs.h>
-#include <syscalls.h>
+#include <dirent.h>
+
+#include <algorithm>
+#include <string>
+#include <vector>
 
 #include "CedarVideoEncoder.h"
 #include "IrisVideoEncoder.h"
@@ -484,68 +485,56 @@ HardwareInventory::_ProbeVaapi()
 }
 
 
-static status_t
-dm_call(uint32 call, void* data, size_t size)
+/*!	Reads one hexadecimal value from a sysfs file ("0x10de\n"). */
+static bool
+read_sysfs_hex(const char* directory, const char* name, uint32& _value)
 {
-	return _kern_generic_syscall(DEVICE_MANAGER_SYSCALLS, call, data, size);
+	BString path;
+	path.SetToFormat("%s/%s", directory, name);
+	FILE* file = fopen(path.String(), "r");
+	if (file == NULL)
+		return false;
+	unsigned int value = 0;
+	bool ok = fscanf(file, "%x", &value) == 1;
+	fclose(file);
+	if (ok)
+		_value = value;
+	return ok;
 }
 
 
+/*!	The display controllers on the PCI bus. On Linux the kernel lists them
+	in sysfs (/sys/bus/pci/devices/<address>/{class,vendor,device}), where
+	air/OS's walked its device manager's tree.
+*/
 void
 HardwareInventory::_ProbePci()
 {
-	uint32 version = 0;
-	if (dm_call(B_SYSCALL_INFO, &version, sizeof(version)) != B_OK)
+	static const char* kDevices = "/sys/bus/pci/devices";
+	DIR* dir = opendir(kDevices);
+	if (dir == NULL)
 		return;
 
-	// walk the device tree, depth first
-	std::vector<device_node_cookie> stack;
-	device_node_cookie root;
-	if (dm_call(DM_GET_ROOT, &root, sizeof(root)) != B_OK)
-		return;
-	stack.push_back(root);
-	int visited = 0;
-	while (!stack.empty() && visited < 4096) {
-		device_node_cookie node = stack.back();
-		stack.pop_back();
-		visited++;
+	std::vector<std::string> names;
+	while (struct dirent* entry = readdir(dir)) {
+		if (entry->d_name[0] != '.')
+			names.push_back(entry->d_name);
+	}
+	closedir(dir);
+	// the bus order, so that the list does not change between runs
+	std::sort(names.begin(), names.end());
 
-		char data[256];
-		device_attr_info attr;
-		attr.cookie = 0;
-		attr.node_cookie = node;
-		attr.value.raw.data = data;
-		attr.value.raw.length = sizeof(data);
-		bool pci = false;
-		uint16 vendor = 0, device = 0, type = 0xffff;
-		while (dm_call(DM_GET_NEXT_ATTRIBUTE, &attr, sizeof(attr)) == B_OK) {
-			if (strcmp(attr.name, B_DEVICE_BUS) == 0
-				&& attr.type == B_STRING_TYPE)
-				pci = strcmp(attr.value.string, "pci") == 0;
-			else if (strcmp(attr.name, B_DEVICE_VENDOR_ID) == 0
-				&& attr.type == B_UINT16_TYPE)
-				vendor = attr.value.ui16;
-			else if (strcmp(attr.name, B_DEVICE_ID) == 0
-				&& attr.type == B_UINT16_TYPE)
-				device = attr.value.ui16;
-			else if (strcmp(attr.name, B_DEVICE_TYPE) == 0
-				&& attr.type == B_UINT16_TYPE)
-				type = attr.value.ui16;
-			attr.value.raw.data = data;
-			attr.value.raw.length = sizeof(data);
-		}
-		// display controllers
-		if (pci && type == 0x03)
-			_AddTableDevice(vendor, device);
-
-		device_node_cookie child = node;
-		if (dm_call(DM_GET_CHILD, &child, sizeof(child)) == B_OK) {
-			stack.push_back(child);
-			device_node_cookie sibling = child;
-			while (dm_call(DM_GET_NEXT_CHILD, &sibling, sizeof(sibling))
-					== B_OK)
-				stack.push_back(sibling);
-		}
+	for (size_t i = 0; i < names.size() && i < 4096; i++) {
+		BString device;
+		device.SetToFormat("%s/%s", kDevices, names[i].c_str());
+		uint32 pciClass = 0, vendor = 0, deviceID = 0;
+		if (!read_sysfs_hex(device.String(), "class", pciClass)
+			|| !read_sysfs_hex(device.String(), "vendor", vendor)
+			|| !read_sysfs_hex(device.String(), "device", deviceID))
+			continue;
+		// display controllers (base class 0x03)
+		if ((pciClass >> 16) == 0x03)
+			_AddTableDevice((uint16)vendor, (uint16)deviceID);
 	}
 }
 
@@ -660,6 +649,10 @@ HardwareInventory::_AddTableDevice(uint16 vendor, uint16 deviceID)
 void
 HardwareInventory::_ProbeIris()
 {
+	// TODO(linux backend): air/OS's qcom_iris driver interface; Linux
+	// drives the Iris/Venus codec as a V4L2 memory-to-memory encoder
+	// (/dev/videoN, driver "qcom-venus"/"iris"), which IrisDevice does not
+	// speak yet, so no device is found here.
 	if (!IrisVideoEncoder::IsAvailable())
 		return;
 	GpuDevice device;
@@ -686,6 +679,9 @@ HardwareInventory::_ProbeIris()
 void
 HardwareInventory::_ProbeCedar()
 {
+	// TODO(linux backend): air/OS's sunxi_ve driver interface; mainline
+	// Linux has no Cedar encoder driver (cedrus decodes only), so no device
+	// is found here.
 	if (!CedarVideoEncoder::IsAvailable())
 		return;
 	GpuDevice device;
@@ -714,10 +710,12 @@ HardwareInventory::_ProbeCedar()
 void
 HardwareInventory::_ProbeRockchip()
 {
-	if (access("/dev/video/rk3588_vpu/0", F_OK) != 0)
+	// Linux: the MPP service node of Rockchip's kernel (air/OS: the
+	// rk3588_vpu driver)
+	if (access("/dev/mpp_service", F_OK) != 0)
 		return;
 	GpuDevice device;
-	device.id = "rkvenc:/dev/video/rk3588_vpu/0";
+	device.id = "rkvenc:/dev/mpp_service";
 	device.name = "Rockchip RK3588";
 	device.vendor = kVendorOther;
 	device.vendorID = 0;
@@ -725,7 +723,7 @@ HardwareInventory::_ProbeRockchip()
 	device.generation = "RK3588";
 	device.engine = "RKVENC (VEPU580)";
 	device.backend = kBackendRockchip;
-	device.devicePath = "/dev/video/rk3588_vpu/0";
+	device.devicePath = "/dev/mpp_service";
 	BString why;
 	device.ready = MppVideoEncoder::IsAvailable(&why);
 	device.status = why;

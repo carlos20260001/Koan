@@ -16,6 +16,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/prctl.h>
 #include <sys/wait.h>
 #include <unistd.h>
 
@@ -400,7 +401,9 @@ watch_input(void* data)
 JobProcess::WorkerMain()
 {
 	// a crash ends this process at once, for the window to notice
-	disable_debugger(1);
+	// (Linux: no core dump, so systemd-coredump and debug_server's crash
+	// dialog leave it alone; libroot2 has no disable_debugger())
+	prctl(PR_SET_DUMPABLE, 0, 0, 0, 0);
 
 	BString line;
 	char c;

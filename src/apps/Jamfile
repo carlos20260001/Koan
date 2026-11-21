@@ -26,7 +26,6 @@ HaikuSubInclude login ;
 HaikuSubInclude lookout ;
 HaikuSubInclude magnify ;
 HaikuSubInclude mandelbrot ;
-HaikuSubInclude mediaconverter ;
 HaikuSubInclude mediaplayer ;
 HaikuSubInclude musiccollection ;
 HaikuSubInclude networkstatus ;
