@@ -724,4 +724,5 @@ this tree builds, so its folders fill as ports land.
 | 2026-11-21 | `f01071d9b2` | W4: Deskbar + its menu data from air/OS sources; logind suspend/hibernate, lock, log out |
 | 2026-11-21 | `17be2fda96` | W4: all 26 preference panels from air/OS sources; src/preferences Jamfile-free |
 | 2026-11-21 | `84a0729c50` | W4: all 63 remaining apps on CMake from air/OS sources; 96 binaries 0 undefined; src/apps Jamfile-free |
+| 2026-11-21 | `41fda17b21` | **Release ISO with every app**: vos-uefi.iso 1.38 GB (sha256 `2815a423fb3b…`), 60 apps, 26 panels, Deskbar, Tracker, Login (vitruvian-login link), FirstBootPrompt, splash, Nexus area/nexus/nexus_node_monitor for 6.12.117-rt; vos configures cleanly. Not booted yet |
 | 2026-11-21 | `594475e1b6` | W4: data/ and src/data ported, data.cmake active; **Release ISO builds** (vos-uefi.iso, 1.3 GB) |
