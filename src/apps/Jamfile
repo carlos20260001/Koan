@@ -43,7 +43,6 @@ HaikuSubInclude resedit ;
 HaikuSubInclude screenreader ;
 HaikuSubInclude screenshot ;
 HaikuSubInclude showimage ;
-HaikuSubInclude softwareupdater ;
 HaikuSubInclude systemupdater ;
 HaikuSubInclude sudoku ;
 HaikuSubInclude switcher ;
