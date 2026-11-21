@@ -664,6 +664,17 @@ Updater::_CheckClockForSecureFeed(const BString& url)
 status_t
 Updater::CheckPreconditions(const SystemState& state, BString& _error) const
 {
+	// TODO(linux backend): System Updater moves air/OS's packagefs package
+	// states and its boot loader's trial starts. A system on Linux keeps its
+	// software in Debian packages (apt, the vos repository) and has neither,
+	// so it updates nothing there.
+	if (access(kAdminDirectory "/" kActivationFile, F_OK) != 0) {
+		_error = "This system has no air/OS package states to update: its "
+			"software comes in Debian packages. Update it with the package "
+			"manager.";
+		return B_NOT_SUPPORTED;
+	}
+
 	Release installed;
 	time_t built = LoadInstalledRelease(installed) == B_OK
 		? installed_build_time(installed) : 0;
