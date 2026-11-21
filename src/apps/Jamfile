@@ -52,4 +52,3 @@ HaikuSubInclude sudoku ;
 HaikuSubInclude terminal ;
 HaikuSubInclude text_search ;
 HaikuSubInclude tv ;
-HaikuSubInclude wifistatus ;
