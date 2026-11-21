@@ -149,9 +149,10 @@ UninstallView::MessageReceived(BMessage* msg)
 				fprintf(stderr, "Created?...\n");
 				BString filename, name, version;
 				node_ref ref;
+				// Linux node monitor messages carry the node as a node_ref
+				// ("virtual:node"), as NodeMonitorHandler reads them.
 				if (msg->FindString("name", &filename) != B_OK
-					|| msg->FindInt32("device", &ref.device) != B_OK
-					|| msg->FindInt64("node", &ref.node) != B_OK)
+					|| msg->FindNodeRef("virtual:node", &ref) != B_OK)
 					break;
 
 				// TODO: This obviously is a hack
@@ -173,8 +174,7 @@ UninstallView::MessageReceived(BMessage* msg)
 				}
 			} else if (opcode == B_ENTRY_REMOVED) {
 				node_ref ref;
-				if (msg->FindInt32("device", &ref.device) != B_OK
-					|| msg->FindInt64("node", &ref.node) != B_OK)
+				if (msg->FindNodeRef("virtual:node", &ref) != B_OK)
 					break;
 
 				int32 i, count = fAppList->CountItems();
@@ -189,19 +189,23 @@ UninstallView::MessageReceived(BMessage* msg)
 					}
 				}
 			} else if (opcode == B_ENTRY_MOVED) {
-				ino_t from, to;
-				if (msg->FindInt64("from directory", &from) != B_OK
-					|| msg->FindInt64("to directory", &to) != B_OK)
+				entry_ref fromDirectory, toDirectory;
+				if (msg->FindRef("virtual:from directory", &fromDirectory)
+						!= B_OK
+					|| msg->FindRef("virtual:to directory", &toDirectory)
+						!= B_OK)
 					break;
+				ino_t from = fromDirectory.vdirectory();
+				ino_t to = toDirectory.vdirectory();
 
 				BDirectory packagesDir(fToPackages.Path());
 				node_ref ref;
 				packagesDir.GetNodeRef(&ref);
 
-				if (ref.node == to) {
+				if (ref.vnode() == to) {
 					// Package added
 					// TODO
-				} else if (ref.node == from) {
+				} else if (ref.vnode() == from) {
 					// Package removed
 					// TODO
 				}
