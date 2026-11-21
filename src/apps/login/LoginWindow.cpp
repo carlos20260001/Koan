@@ -15,15 +15,16 @@
 #define WINDOW_FEEL B_NORMAL_WINDOW_FEEL
 //#define WINDOW_FEEL B_FLOATING_ALL_WINDOW_FEEL
 
-LoginWindow::LoginWindow(BRect frame)
-	: BWindow(frame, B_TRANSLATE("Welcome to Haiku"), B_TITLED_WINDOW_LOOK, 
+LoginWindow::LoginWindow(BRect frame, bool unlockMode)
+	: BWindow(frame, unlockMode ? B_TRANSLATE("Screen locked")
+			: B_TRANSLATE("Welcome to Haiku"), B_TITLED_WINDOW_LOOK, 
 		WINDOW_FEEL, 
 		B_NOT_MOVABLE | B_NOT_CLOSABLE | B_NOT_ZOOMABLE | 
 		B_NOT_MINIMIZABLE | B_NOT_RESIZABLE | 
 		B_ASYNCHRONOUS_CONTROLS,
 		B_ALL_WORKSPACES)
 {
-	LoginView *v = new LoginView(Bounds());
+	LoginView *v = new LoginView(Bounds(), unlockMode);
 	AddChild(v);
 	SetPulseRate(1000000LL);
 }

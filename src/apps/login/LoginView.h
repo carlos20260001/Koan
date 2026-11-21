@@ -1,5 +1,6 @@
 /*
  * Copyright 2008, François Revol, <revol@free.fr>. All rights reserved.
+ * Copyright 2026, Koan contributors. All rights reserved.
  * Distributed under the terms of the MIT License.
  */
 #ifndef _LOGINVIEW_H_
@@ -23,7 +24,7 @@ const uint32 kSetProgress = 'setp';
 
 class LoginView : public BView {
 public:
-				LoginView(BRect frame);
+				LoginView(BRect frame, bool unlockMode = false);
 	virtual		~LoginView();
 	void		AttachedToWindow();
 	void		MessageReceived(BMessage *message);
@@ -41,6 +42,7 @@ private:
 	BButton*		fRebootButton;
 	BButton*		fLoginButton;
 	BStringView*	fInfoView;
+	bool			fUnlockMode;
 };
 
 

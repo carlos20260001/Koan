@@ -1013,7 +1013,8 @@ SysInfoView::_GetOSVersion()
 {
 	BString revision;
 	// add system revision to os version
-	const char* hrev = __get_haiku_revision();
+	// libroot2 names the revision call after the system.
+	const char* hrev = __get_vos_revision();
 	if (hrev != NULL)
 		revision.SetToFormat(B_TRANSLATE_COMMENT("Version: %s",
 			"Version: R1 or hrev99999"), hrev);

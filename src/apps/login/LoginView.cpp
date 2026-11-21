@@ -1,5 +1,6 @@
 /*
  * Copyright 2008, François Revol, <revol@free.fr>. All rights reserved.
+ * Copyright 2026, Koan contributors. All rights reserved.
  * Distributed under the terms of the MIT License.
  */
 #include <Catalog.h>
@@ -11,6 +12,10 @@
 #endif
 
 #include <pwd.h>
+#include <stdlib.h>
+#include <string.h>
+#include <time.h>
+#include <unistd.h>
 
 #include "LoginApp.h"
 #include "LoginView.h"
@@ -30,8 +35,13 @@ public:
 						 : BStringItem("", level, expanded)
 						{
 							if (pwd) {
+								// Linux GECOS: "Full Name,room,phone,..."
 								BString name(pwd->pw_gecos);
-								// TODO: truncate at first ;
+								int32 comma = name.FindFirst(',');
+								if (comma >= 0)
+									name.Truncate(comma);
+								if (name.IsEmpty())
+									name = pwd->pw_name;
 								fLogin = pwd->pw_name;
 								SetText(name.String());
 							}
@@ -43,8 +53,29 @@ private:
 };
 
 
-LoginView::LoginView(BRect frame)
-	: BView(frame, "LoginView", B_FOLLOW_ALL, B_PULSE_NEEDED)
+// The accounts janus accepts for a graphical login (see its
+// is_graphical_login_allowed()): regular users with a login shell, not root,
+// system accounts or the greeter's own vos_login.
+static bool
+can_log_in(const struct passwd* pwd)
+{
+	if (pwd == NULL || pwd->pw_shell == NULL)
+		return false;
+	if (pwd->pw_uid < 1000 || pwd->pw_uid == 65534)
+		return false;
+	if (strcmp(pwd->pw_name, "vos_login") == 0
+		|| strcmp(pwd->pw_name, "vos-live") == 0)
+		return false;
+	return strstr(pwd->pw_shell, "nologin") == NULL
+		&& strstr(pwd->pw_shell, "false") == NULL
+		&& strcmp(pwd->pw_shell, "true") != 0
+		&& strcmp(pwd->pw_shell, "/bin/true") != 0;
+}
+
+
+LoginView::LoginView(BRect frame, bool unlockMode)
+	: BView(frame, "LoginView", B_FOLLOW_ALL, B_PULSE_NEEDED),
+	fUnlockMode(unlockMode)
 {
 	// TODO: when I don't need to test in BeOS anymore,
 	// rewrite to use layout engine.
@@ -128,10 +159,25 @@ LoginView::AttachedToWindow()
 	fRebootButton->SetTarget(be_app_messenger);
 	fLoginButton->SetTarget(this);
 	Window()->SetDefaultButton(fLoginButton);
-	//fLoginControl->MakeFocus();
-	fUserList->MakeFocus();
-	// populate user list
-	BMessenger(this).SendMessage(kAddNextUser);
+	if (fUnlockMode) {
+		// Unlocking: only the session's own user, no shutdown from here.
+		struct passwd* pwd = getpwuid(getuid());
+		if (pwd != NULL) {
+			PwdItem* item = new PwdItem(pwd);
+			fUserList->AddItem(item);
+			fUserList->Select(0);
+			fLoginControl->SetText(pwd->pw_name);
+		}
+		fLoginControl->SetEnabled(false);
+		fHaltButton->Hide();
+		fRebootButton->Hide();
+		fPasswordControl->MakeFocus();
+	} else {
+		//fLoginControl->MakeFocus();
+		fUserList->MakeFocus();
+		// populate user list
+		BMessenger(this).SendMessage(kAddNextUser);
+	}
 
 	// size window relative to buttons
 	BRect bounds = Window()->Bounds();
@@ -245,11 +291,7 @@ LoginView::AddNextUser()
 
 	pwd = getpwent();
 
-	if (pwd && pwd->pw_shell &&
-		strcmp(pwd->pw_shell, "false") &&
-		strcmp(pwd->pw_shell, "true") &&
-		strcmp(pwd->pw_shell, "/bin/false") &&
-		strcmp(pwd->pw_shell, "/bin/true")) {
+	if (can_log_in(pwd)) {
 		// not disabled
 		PwdItem *item = new PwdItem(pwd);
 		fUserList->AddItem(item);
@@ -267,6 +309,12 @@ LoginView::EnableControls(bool enable)
 	int32 i;
 	for (i = 0; i < fUserList->CountItems(); i++) {
 		fUserList->ItemAt(i)->SetEnabled(enable);
+	}
+	if (fUnlockMode) {
+		fPasswordControl->SetEnabled(enable);
+		fHidePasswordCheckBox->SetEnabled(enable);
+		fLoginButton->SetEnabled(enable);
+		return;
 	}
 	fLoginControl->SetEnabled(enable);
 	fPasswordControl->SetEnabled(enable);

@@ -1,23 +1,13 @@
 SubDir HAIKU_TOP src apps ;
 
-HaikuSubInclude aboutsystem ;
-HaikuSubInclude activitymonitor ;
-HaikuSubInclude firstbootprompt ;
-HaikuSubInclude gradients ;
 HaikuSubInclude haikudepot ;
 HaikuSubInclude icon-o-matic ;
-HaikuSubInclude login ;
 HaikuSubInclude mail ;
 HaikuSubInclude mediaconverter ;
 HaikuSubInclude midiplayer ;
-HaikuSubInclude remotedesktop ;
-HaikuSubInclude resedit ;
-HaikuSubInclude screenshot ;
 HaikuSubInclude serialconnect ;
-HaikuSubInclude showimage ;
 HaikuSubInclude softwareupdater ;
 HaikuSubInclude systemupdater ;
 HaikuSubInclude soundrecorder ;
 HaikuSubInclude stylededit ;
 HaikuSubInclude terminal ;
-HaikuSubInclude text_search ;

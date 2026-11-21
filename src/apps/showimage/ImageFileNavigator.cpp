@@ -270,9 +270,9 @@ FolderNavigator::FolderNavigator(entry_ref& ref)
 	if (entry.IsDirectory())
 		fFolder.SetTo(&ref);
 	else {
-		node_ref nodeRef;
-		nodeRef.device = ref.device;
-		nodeRef.node = ref.directory;
+		// vref model: the fields are private, the accessors give the
+		// real device and directory.
+		node_ref nodeRef(ref.device(), ref.directory());
 
 		fFolder.SetTo(&nodeRef);
 	}
@@ -642,7 +642,7 @@ ImageFileNavigator::MoveFileToTrash()
 	entry_ref nextRef;
 	if (!fNavigator->FindNextImage(fCurrentRef, nextRef, true, false)
 		&& !fNavigator->FindNextImage(fCurrentRef, nextRef, false, false))
-		nextRef.device = -1;
+		nextRef.unset();
 
 	// Move image to Trash
 	BMessage trash(BPrivate::kMoveToTrash);
@@ -654,7 +654,7 @@ ImageFileNavigator::MoveFileToTrash()
 	if (tracker.SendMessage(&trash) != B_OK)
 		return false;
 
-	if (nextRef.device != -1) {
+	if (nextRef.init_check() == B_OK) {
 		SetTo(nextRef, 1, 1);
 		return true;
 	}
