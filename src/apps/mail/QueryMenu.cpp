@@ -267,7 +267,7 @@ int32 QueryMenu::QueryThread()
 		{
 			BEntry entry(&ref);
 			entry.GetNodeRef(&node);
-			EntryCreated(ref, node.node);
+			EntryCreated(ref, node.node());
 		}
 	};
 

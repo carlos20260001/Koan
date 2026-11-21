@@ -240,18 +240,16 @@ TEnclosuresView::MessageReceived(BMessage *msg)
 		{
 			int32 opcode;
 			if (msg->FindInt32("opcode", &opcode) == B_NO_ERROR) {
-				dev_t device;
-				if (msg->FindInt32("device", &device) < B_OK)
-					break;
-				ino_t inode;
-				if (msg->FindInt64("node", &inode) < B_OK)
+				// the node monitor of libroot2 names the node with a
+				// node_ref, and a move's target directory with an entry_ref
+				node_ref nodeRef;
+				if (msg->FindNodeRef("virtual:node", &nodeRef) < B_OK)
 					break;
 
 				for (int32 index = fList->CountItems();index-- > 0;) {
 					TListItem *item = static_cast<TListItem *>(fList->ItemAt(index));
 
-					if (device == item->NodeRef()->device
-						&& inode == item->NodeRef()->node)
+					if (nodeRef == *item->NodeRef())
 					{
 						if (opcode == B_ENTRY_REMOVED) {
 							// don't hide the <missing attachment> item
@@ -261,8 +259,10 @@ TEnclosuresView::MessageReceived(BMessage *msg)
 							//watch_node(item->NodeRef(), B_STOP_WATCHING, this);
 							//delete item;
 						} else if (opcode == B_ENTRY_MOVED) {
-							item->Ref()->device = device;
-							msg->FindInt64("to directory", &item->Ref()->directory);
+							// the moved entry's new ref: its directory and name
+							entry_ref movedRef;
+							if (msg->FindRef("virtual:to directory", &movedRef) == B_OK)
+								*item->Ref() = movedRef;
 
 							const char *name;
 							msg->FindString("name", &name);

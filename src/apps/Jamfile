@@ -26,7 +26,6 @@ HaikuSubInclude launchbox ;
 HaikuSubInclude login ;
 HaikuSubInclude lookout ;
 HaikuSubInclude magnify ;
-HaikuSubInclude mail ;
 HaikuSubInclude mandelbrot ;
 HaikuSubInclude mediaconverter ;
 HaikuSubInclude mediaplayer ;

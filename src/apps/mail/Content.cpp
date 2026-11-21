@@ -1279,24 +1279,24 @@ TTextView::MessageReceived(BMessage *msg)
 		{
 			int32 opcode;
 			if (msg->FindInt32("opcode", &opcode) == B_NO_ERROR) {
-				dev_t device;
-				if (msg->FindInt32("device", &device) < B_OK)
-					break;
-				ino_t inode;
-				if (msg->FindInt64("node", &inode) < B_OK)
+				// the node monitor of libroot2 names the node with a
+				// node_ref, and a move's target directory with an entry_ref
+				node_ref nodeRef;
+				if (msg->FindNodeRef("virtual:node", &nodeRef) < B_OK)
 					break;
 
 				hyper_text *enclosure;
 				for (int32 index = 0;
 						(enclosure = (hyper_text *)fEnclosures->ItemAt(index++)) != NULL;) {
-					if (device == enclosure->node.device
-						&& inode == enclosure->node.node) {
+					if (nodeRef == enclosure->node) {
 						if (opcode == B_ENTRY_REMOVED) {
 							enclosure->saved = false;
 							enclosure->have_ref = false;
 						} else if (opcode == B_ENTRY_MOVED) {
-							enclosure->ref.device = device;
-							msg->FindInt64("to directory", &enclosure->ref.directory);
+							// the moved entry's new ref: its directory and name
+							entry_ref movedRef;
+							if (msg->FindRef("virtual:to directory", &movedRef) == B_OK)
+								enclosure->ref = movedRef;
 
 							const char *name;
 							msg->FindString("name", &name);
