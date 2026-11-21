@@ -663,27 +663,25 @@ InterfaceView::_IsPrimaryInterface(const BNetworkAddress& address)
 		return false;
 	FileDescriptorCloser closer(socket);
 
-	struct {
-		route_entry	entry;
-		uint8		buffer[256];
-	} request;
-	memset(&request, 0, sizeof(request));
-
-	// Any address outside the local networks takes the default route
+	// Any address outside the local networks takes the default route.
+	// Linux has no SIOCGETRT: connecting a datagram socket (which sends
+	// nothing) makes the kernel pick the route and its source address.
 	sockaddr_in destination;
 	memset(&destination, 0, sizeof(destination));
-	destination.sin_len = sizeof(destination);
 	destination.sin_family = AF_INET;
+	destination.sin_port = htons(53);
 	destination.sin_addr.s_addr = inet_addr("1.1.1.1");
-	request.entry.destination = (sockaddr*)&destination;
-
-	if (ioctl(socket, SIOCGETRT, &request, sizeof(request)) < 0
-		|| request.entry.source == NULL
-		|| (request.entry.flags & RTF_DEFAULT) == 0)
+	if (connect(socket, (sockaddr*)&destination, sizeof(destination)) < 0)
 		return false;
 
-	BNetworkAddress source(*request.entry.source);
-	return source.Equals(address, false);
+	sockaddr_in source;
+	socklen_t sourceLength = sizeof(source);
+	if (getsockname(socket, (sockaddr*)&source, &sourceLength) < 0
+		|| source.sin_addr.s_addr == INADDR_ANY)
+		return false;
+
+	BNetworkAddress sourceAddress(source);
+	return sourceAddress.Equals(address, false);
 }
 
 
