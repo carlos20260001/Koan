@@ -44,6 +44,7 @@ All rights reserved.
 #include <Menu.h>
 #include <MenuItem.h>
 #include <Roster.h>
+#include <RosterPrivate.h>
 
 #include "BarApp.h"
 #include "BarView.h"
@@ -345,18 +346,36 @@ B_TRANSLATE_MARK_VOID("About this system")
 	item->SetEnabled(!dragging);
 	shutdownMenu->AddItem(item);
 
-	B_TRANSLATE_MARK_VOID("Suspend");
-
-#ifdef APM_SUPPORT
-	if (_kapm_control_(APM_CHECK_ENABLED) == B_OK) {
-		item = new BMenuItem(B_TRANSLATE_NOCOLLECT("Suspend"),
+	// logind decides whether this machine can sleep; ask the registrar
+	BRoster roster;
+	BRoster::Private rosterPrivate(roster);
+	bool available;
+	if (rosterPrivate.CanSuspend(&available) == B_OK && available) {
+		item = new BMenuItem(B_TRANSLATE("Suspend"),
 			new BMessage(kSuspendSystem));
 		item->SetEnabled(!dragging);
 		shutdownMenu->AddItem(item);
 	}
-#endif
+	if (rosterPrivate.CanHibernate(&available) == B_OK && available) {
+		item = new BMenuItem(B_TRANSLATE("Hibernate"),
+			new BMessage(kHibernateSystem));
+		item->SetEnabled(!dragging);
+		shutdownMenu->AddItem(item);
+	}
 
 	shutdownMenu->SetTargetForItems(be_app);
+
+	item = new BMenuItem(B_TRANSLATE("Lock screen"),
+		new BMessage(kLockScreen));
+	item->SetEnabled(!dragging);
+	item->SetTarget(be_app);
+	AddItem(item);
+
+	item = new BMenuItem(B_TRANSLATE("Log out" B_UTF8_ELLIPSIS),
+		new BMessage(kLogOutUser));
+	item->SetEnabled(!dragging);
+	item->SetTarget(be_app);
+	AddItem(item);
 
 	BMessage* message = new BMessage(kShutdownSystem);
 	message->AddBool("confirm", true);
@@ -419,7 +438,10 @@ TDeskbarMenu::ResetTargets()
 				case kTrackerFirst:
 				case kRebootSystem:
 				case kSuspendSystem:
+				case kHibernateSystem:
 				case kShutdownSystem:
+				case kLogOutUser:
+				case kLockScreen:
 				case kRealignReplicants:
 				case kShowHideTime:
 				case kShowSeconds:

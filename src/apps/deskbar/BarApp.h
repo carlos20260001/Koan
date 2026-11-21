@@ -67,6 +67,11 @@ const uint32 kShutDown = 'ShDn';
 const uint32 kShutdownSystem = 301;
 const uint32 kRebootSystem = 302;
 const uint32 kSuspendSystem = 304;
+const uint32 kHibernateSystem = 305;
+
+// session actions, handled by the registrar and janus
+const uint32 kLogOutUser = 'LgOt';
+const uint32 kLockScreen = 'LkSc';
 
 // icon size constants
 const int32 kIconPadding = B_USE_SMALL_SPACING;
@@ -186,6 +191,8 @@ private:
 			status_t				_CacheTeamIcon(BarTeamInfo* barInfo);
 			status_t				_CacheTeamIcon(BarTeamInfo* barInfo, int32 size);
 			status_t				_CacheWindowIcon(WindowIconCache* winCache);
+
+	static	status_t				_LockScreenThread(void* data);
 
 private:
 			TBarWindow*				fBarWindow;
