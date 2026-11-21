@@ -72,7 +72,10 @@ ZipperThread::ThreadStartup()
 		fThreadDataStore->FindRef("refs", index, &ref);
 
 		if (index > 0) {
-			if (lastRef.directory != ref.directory) {
+			// entry_ref keeps its node fields private here; compare the
+			// real parent directory through the accessors.
+			if (lastRef.device() != ref.device()
+				|| lastRef.directory() != ref.directory()) {
 				sameFolder = false;
 				break;
 			}
