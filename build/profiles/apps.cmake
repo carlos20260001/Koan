@@ -30,8 +30,10 @@ endif()
 set(SYSTEM_APPS
 	AboutSystem
 	ActivityMonitor
+	BootManager
 	Camera
 	Cortex
+	DebugAnalyzer
 	DeskCalc
 	DiskProbe
 	DiskUsage
@@ -40,10 +42,13 @@ set(SYSTEM_APPS
 	GLTeapot
 	Installer
 	LaunchBox
+	LegacyPackageInstaller
 	LocalSend
 	Magnify
 	MediaConverter
 	MediaPlayer
+	MusicCollection
+	NVPlay
 	NetworkStatus
 	NetPlus
 	PackageManager
@@ -60,7 +65,9 @@ set(SYSTEM_APPS
 	Switcher
 	Terminal
 	#TextSearch
+	TV
 	WebMail
+	WebPositive
 	Workspaces
 )
 VosKeepTargets(SYSTEM_APPS)
