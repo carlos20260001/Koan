@@ -74,7 +74,7 @@ Files: `CMakeLists.txt` (root), `configure`, `bake`, `build/*.cmake`,
 - [x] `cd generated.amd64 && ../vos-configure --buildtools=<Koan buildtools> --arch=amd64 --build-type=Release`
       → "Configured correctly!"; in the `vitruvian_build` container `ninja` and
       `ninja nexus` pass (host lacks `attr`, debhelper, dkms)
-- [ ] `bake` packaging produces a `vos` deb — not run; `cpack -G DEB` in the
+- [x] `bake` packaging produces a `vos` deb — done in the M9 W4 ISO run (the debs and `vos-uefi.iso`); was not run; `cpack -G DEB` in the
       container already emits `VOS-0.6.3-Linux-{runtime,data,dev,buildtools}.deb`
       (runtime is empty until M4)
 
@@ -552,6 +552,24 @@ Waves (each on its own `port/*` branch, merged here when green):
       **Exception (user, 2026-11-20): Deskbar and the Tracker app/add-ons use no
       VitruvianOS source** — air/OS's code ported to Linux by hand (VitruvianOS read
       only as a reference for mechanisms), committed under our authorship.
+      - [x] data port merged (`port/w4-data`): VitruvianOS's session, systemd, PAM,
+            helpers, /etc fragments and /system/boot imported; welcome,
+            makefile-engine, profile, SetupEnvironment merged; mime_db merged (189
+            types, air/OS's 19 extra kept; Summit stays preferred browser) and built by
+            CMake; keymaps compiled by a new host `keymap` tool; `data.cmake` active again
+            (ported-subset fallback gone; licenses still ship); kits that installed to
+            `/system/lib` (mail, package, quicklook, web) now install to `/lib`, and
+            postinst copies a real `/system/lib` before relinking it (a first install
+            deleted them); first_login unpacks the E-mail provider infos; postinst names
+            air/OS's Office/Media/Developer/Utilities folders. **Release ISO builds**:
+            `vos-uefi.iso`, 1.3 GB (sha256 `3fdf8117db88…`), `vos` configures with no
+            postinst skips, Nexus DKMS module for 6.12.117-rt in the image. Not
+            installed yet: classic `libmedia.so` (media_server needs it), Wi-Fi firmware,
+            Haiku `data/settings`, Mail dictionaries; janus starts the greeter path, which
+            needs FirstBootPrompt / a login app (not ported yet). Not booted yet
+      - **Apps (user, 2026-11-21): the 63 remaining apps use air/OS sources only**, like
+            Deskbar/Tracker/preferences; `src/apps/CMakeLists.txt` adds every app
+            directory with a CMakeLists
       - [x] Tracker app + 8 add-ons (`bd442cd7d5`), Deskbar + menu data
             (`f01071d9b2`), all 26 preference panels (P1 `port/w4-prefs-ui`, P2
             `port/w4-prefs-sys`, `17be2fda96`), air/OS sources only; VitruvianOS-only
@@ -689,3 +707,4 @@ this tree builds, so its folders fill as ports land.
 | 2026-11-21 | `bd442cd7d5` | W4: Tracker app + 8 add-ons from air/OS sources (no VitruvianOS code) |
 | 2026-11-21 | `f01071d9b2` | W4: Deskbar + its menu data from air/OS sources; logind suspend/hibernate, lock, log out |
 | 2026-11-21 | `17be2fda96` | W4: all 26 preference panels from air/OS sources; src/preferences Jamfile-free |
+| 2026-11-21 | `594475e1b6` | W4: data/ and src/data ported, data.cmake active; **Release ISO builds** (vos-uefi.iso, 1.3 GB) |
