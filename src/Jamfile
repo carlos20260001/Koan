@@ -1,7 +1,6 @@
 SubDir HAIKU_TOP src ;
 
 SubInclude HAIKU_TOP src add-ons ;
-SubInclude HAIKU_TOP src apps ;
 SubInclude HAIKU_TOP src bin ;
 SubInclude HAIKU_TOP src build ;
 SubInclude HAIKU_TOP src kits ;

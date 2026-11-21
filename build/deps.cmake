@@ -51,6 +51,12 @@ DeclareDependency(
 )
 
 DeclareDependency(
+	FFMPEG
+	PACKAGES	"libavcodec-dev libavformat-dev libavfilter-dev libswscale-dev libswresample-dev libavutil-dev"
+	RUNTIMES	"libavcodec61" "libavformat61" "libavfilter10" "libswscale8" "libswresample5" "libavutil59"
+)
+
+DeclareDependency(
 	EXPAT
 	LIBRARIES	"expat"
 	PACKAGES	"libexpat1-dev"

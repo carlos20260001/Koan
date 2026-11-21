@@ -66,6 +66,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libargon2-dev libcairo2-dev \
     && rm -rf /var/lib/apt/lists/*
 
+# MediaConverter (FFmpeg) and Cortex (expat), M9 W4 app ports.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libavcodec-dev libavformat-dev libavfilter-dev libswscale-dev \
+    libswresample-dev libavutil-dev libexpat1-dev \
+    && rm -rf /var/lib/apt/lists/*
+
 ENV DEBIAN_MIRROR=http://deb.debian.org/debian/
 ENV VOS_BASE_SUITE=trixie
 ENV VOS_KERNEL_FLAVOUR=rt-amd64

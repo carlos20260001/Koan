@@ -153,7 +153,8 @@ get_dev_packages() {
                 " libsane1 libsane-common sane-utils sane-airscan ipp-usb" \
                 " libpipewire-0.3-dev libspa-0.2-dev libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev libfluidsynth-dev libsane-dev liblilv-dev libsuil-dev lv2-dev libasound2-dev" \
                 " libglu1-mesa-dev libnm-dev libbluetooth-dev" \
-                " libwpewebkit-2.0-dev libwpe-1.0-dev libwpebackend-fdo-1.0-dev libetpan-dev libcurl4-gnutls-dev libre-dev libvpx-dev"
+                " libwpewebkit-2.0-dev libwpe-1.0-dev libwpebackend-fdo-1.0-dev libetpan-dev libcurl4-gnutls-dev libre-dev libvpx-dev" \
+                " libexpat1-dev libavcodec-dev libavformat-dev libavfilter-dev libswscale-dev libswresample-dev libavutil-dev"
             ;;
         arm64)
             printf '%s' \
@@ -168,7 +169,8 @@ get_dev_packages() {
                 " libsane1 libsane-common sane-utils sane-airscan ipp-usb" \
                 " libpipewire-0.3-dev libspa-0.2-dev libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev libfluidsynth-dev libsane-dev liblilv-dev libsuil-dev lv2-dev libasound2-dev" \
                 " libglu1-mesa-dev libnm-dev libbluetooth-dev" \
-                " libwpewebkit-2.0-dev libwpe-1.0-dev libwpebackend-fdo-1.0-dev libetpan-dev libcurl4-gnutls-dev libre-dev libvpx-dev"
+                " libwpewebkit-2.0-dev libwpe-1.0-dev libwpebackend-fdo-1.0-dev libetpan-dev libcurl4-gnutls-dev libre-dev libvpx-dev" \
+                " libexpat1-dev libavcodec-dev libavformat-dev libavfilter-dev libswscale-dev libswresample-dev libavutil-dev"
             ;;
         arm32)
             printf '%s' \
@@ -182,7 +184,8 @@ get_dev_packages() {
                 " libjpeg-dev libpng-dev libtiff-dev libwebp-dev libicns-dev libavif-dev libssl-dev libargon2-dev" \
                 " libsane1 libsane-common sane-utils sane-airscan ipp-usb" \
                 " libpipewire-0.3-dev libspa-0.2-dev libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev libfluidsynth-dev libsane-dev liblilv-dev libsuil-dev lv2-dev libasound2-dev libglu1-mesa-dev libnm-dev libbluetooth-dev" \
-                " libwpewebkit-2.0-dev libwpe-1.0-dev libwpebackend-fdo-1.0-dev libetpan-dev libcurl4-gnutls-dev libre-dev libvpx-dev"
+                " libwpewebkit-2.0-dev libwpe-1.0-dev libwpebackend-fdo-1.0-dev libetpan-dev libcurl4-gnutls-dev libre-dev libvpx-dev" \
+                " libexpat1-dev libavcodec-dev libavformat-dev libavfilter-dev libswscale-dev libswresample-dev libavutil-dev"
             ;;
         riscv64)
             printf '%s' \
@@ -196,7 +199,8 @@ get_dev_packages() {
                 " libjpeg-dev libpng-dev libtiff-dev libwebp-dev libicns-dev libavif-dev libssl-dev libargon2-dev" \
                 " libsane1 libsane-common sane-utils sane-airscan ipp-usb" \
                 " libpipewire-0.3-dev libspa-0.2-dev libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev libfluidsynth-dev libsane-dev liblilv-dev libsuil-dev lv2-dev libasound2-dev libglu1-mesa-dev libnm-dev libbluetooth-dev" \
-                " libwpewebkit-2.0-dev libwpe-1.0-dev libwpebackend-fdo-1.0-dev libetpan-dev libcurl4-gnutls-dev libre-dev libvpx-dev"
+                " libwpewebkit-2.0-dev libwpe-1.0-dev libwpebackend-fdo-1.0-dev libetpan-dev libcurl4-gnutls-dev libre-dev libvpx-dev" \
+                " libexpat1-dev libavcodec-dev libavformat-dev libavfilter-dev libswscale-dev libswresample-dev libavutil-dev"
             ;;
         *)
             die "No dev package list for architecture: $_arch"

@@ -159,3 +159,17 @@ ImageInclude("/system/add-ons/media" ${CORTEX_MEDIA_ADDONS})
 set(SCREENSHOT_CLI screenshot)
 VosKeepTargets(SCREENSHOT_CLI)
 ImageInclude("/system/bin" ${SCREENSHOT_CLI})
+
+# Menu programs part 2: Terminal's OpenGL add-on (Terminal looks in
+# <system add-ons>/Terminal), its shell integration, and Mail's
+# spell-check dictionaries.
+set(TERMINAL_ADDONS Terminal-OpenGL)
+VosKeepTargets(TERMINAL_ADDONS)
+ImageInclude("/system/add-ons/Terminal" ${TERMINAL_ADDONS})
+if(TARGET Terminal)
+	ImageIncludeFile("src/apps/terminal/shell-integration/airos-terminal.sh" "/system/data/profile.d")
+endif()
+if(TARGET Mail)
+	ImageIncludeFile("src/apps/mail/words" "/system/data/spell_check/word_dictionary")
+	ImageIncludeFile("src/apps/mail/geekspeak" "/system/data/spell_check/word_dictionary")
+endif()
