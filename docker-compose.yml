@@ -31,11 +31,11 @@ services:
     build:
       context: .
       dockerfile: docker/Dockerfile
-    # air/OS port: not Koan's "vitruvian-build". podman-compose starts an
-    # existing container of the same name instead of creating one, and Koan's
-    # container bind-mounts the Koan checkout, so sharing the name would run
-    # the Koan build when this tree's `up` is invoked.
-    container_name: vitruvian-airos-build
+    # No container_name: podman-compose names the container after the project
+    # directory (<dir>_build_1), so every checkout and worktree gets its own.
+    # `up` starts an existing container of the same name instead of creating
+    # one, so a fixed name made one tree's `up` run another tree's build
+    # (Koan's "vitruvian-build", or another worktree of this branch).
     # mount/chroot/unshare for debootstrap and the chroot build
     privileged: true
     # rootless podman supports host networking; avoids slirp overhead
