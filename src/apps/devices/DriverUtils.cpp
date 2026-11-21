@@ -14,7 +14,6 @@
 
 #include <DriverSettingsMessageAdapter.h>
 #include <driver_settings.h>
-#include <package/PackageInfo.h>
 
 #include "Device.h"
 
@@ -174,26 +173,15 @@ IsDriverEnabled(const BString& driver)
 bool
 IsPackagedDriver(const BString& driver, BString* outPackageName)
 {
-	BPath settingsPath;
-	BString relativePath;
-	if (GetDriverPackageSettings(driver, settingsPath, relativePath) != B_OK)
-		return false;
-
-	char packagePath[B_PATH_NAME_LENGTH];
-	status_t status = find_path_for_path(driver.String(), B_FIND_PATH_PACKAGE_PATH, NULL,
-		packagePath, sizeof(packagePath));
-	if (status != B_OK)
-		return false;
-
-	BPackageKit::BPackageInfo packageInfo;
-	status = packageInfo.ReadFromPackageFile(packagePath);
-	if (status != B_OK)
-		return false;
-
-	if (outPackageName != NULL)
-		*outPackageName = packageInfo.Name();
-
-	return true;
+	// TODO(linux backend): air/OS blocks a driver by adding its file to the
+	// BlockedEntries of the package that ships it. On Linux "Driver used" is
+	// a kernel driver name (dm_wrapper_linux.cpp), not a file in a package
+	// volume; the counterpart is a modprobe.d blacklist entry for its module,
+	// written by a root helper behind polkit. Until that exists no driver
+	// counts as packaged, so Devices keeps the button disabled.
+	(void)driver;
+	(void)outPackageName;
+	return false;
 }
 
 
