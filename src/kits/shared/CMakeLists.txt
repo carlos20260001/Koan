@@ -65,3 +65,14 @@ AddOn(
 
 UsePrivateHeaders(shared shared locale interface kernel libroot system app)
 target_link_libraries(shared PRIVATE xkbcommon)
+
+# ExpressionParser on MAPM, the separate static libexpression_parser.a of
+# air/OS's Jamfile (DeskCalc, DiskProbe).
+add_library(expression_parser STATIC ExpressionParser.cpp)
+set_target_properties(expression_parser PROPERTIES
+	POSITION_INDEPENDENT_CODE ON
+	COMPILE_FLAGS "-include LinuxBuildCompatibility.h")
+target_include_directories(expression_parser
+	PUBLIC ${PROJECT_SOURCE_DIR}/headers/private/shared
+	PRIVATE ${PROJECT_SOURCE_DIR}/headers/libs/mapm)
+target_link_libraries(expression_parser PUBLIC be mapm)
