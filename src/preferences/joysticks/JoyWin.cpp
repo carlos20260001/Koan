@@ -17,6 +17,7 @@
 
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 
 #include <Box.h>
 #include <Button.h>
@@ -40,9 +41,28 @@
 #include <FindDirectory.h>
 #include <Joystick.h>
 
-#define JOYSTICKPATH "/dev/joystick/"
-#define JOYSTICKFILEPATH "/boot/system/data/joysticks/"
-#define JOYSTICKFILESETTINGS "/boot/home/config/settings/joysticks/"
+// Linux: there is no /boot. The joystick descriptions are in the system
+// data directory and the per-port links in the user's settings. Ports
+// are the evdev nodes BJoystick lists (/dev/input/eventN); a port's link
+// is named after the node's leaf name.
+static BString
+JoystickDirectory(directory_which which, bool create)
+{
+	BPath path;
+	if (find_directory(which, &path, create) != B_OK)
+		return BString();
+	path.Append("joysticks");
+	if (create)
+		create_directory(path.Path(), 0755);
+	BString string(path.Path());
+	string << "/";
+	return string;
+}
+
+#define JOYSTICKFILEPATH \
+	JoystickDirectory(B_SYSTEM_DATA_DIRECTORY, false).String()
+#define JOYSTICKFILESETTINGS \
+	JoystickDirectory(B_USER_SETTINGS_DIRECTORY, true).String()
 #define SELECTGAMEPORTFIRST "Select a game port first"
 
 static int
@@ -219,12 +239,12 @@ JoyWin::MessageReceived(BMessage *message)
 					BString str = portname->GetOldJoystickName();
 					if (str != NULL) {
 						BString strOldFile(JOYSTICKFILESETTINGS);
-						strOldFile.Append(portname->Text());
+						strOldFile.Append(_FixPathToName(portname->Text()));
 						BEntry entry(strOldFile.String());
 						entry.Remove();
 					}
 					BString strLinkPlace(JOYSTICKFILESETTINGS);
-					strLinkPlace.Append(portname->Text());
+					strLinkPlace.Append(_FixPathToName(portname->Text()));
 
 					BString strLinkTo(JOYSTICKFILEPATH);
 					strLinkTo.Append(controllerName->Text());
@@ -377,7 +397,7 @@ status_t
 JoyWin::_CheckJoystickExist(const char* path)
 {
 	BString str(JOYSTICKFILESETTINGS);
-	str << path;
+	str << _FixPathToName(path);
 
 	BFile file;
 	status_t status = file.SetTo(str.String(), B_READ_ONLY | B_FAIL_IF_EXISTS);
@@ -458,7 +478,7 @@ BString
 JoyWin::_BuildDisabledJoysticksFile()
 {
 	BString temp("# This is a list of disabled joystick devices.");
-	temp << "# Do not include the /dev/joystick/ part of the device name.";
+	temp << "# Do not include the /dev/input/ part of the device name.";
 
 	int32 number = fGamePortL->CountItems();
 	PortItem *item;
@@ -530,7 +550,7 @@ BString
 JoyWin::_FindFilePathForSymLink(const char* symLinkPath, PortItem *item)
 {
 	BPath path(symLinkPath);
-	path.Append(item->Text());
+	path.Append(_FixPathToName(item->Text()));
 	BEntry entry(path.Path());
 	if (entry.IsSymLink()) {
 		BSymLink symLink(&entry);

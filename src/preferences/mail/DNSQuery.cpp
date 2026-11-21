@@ -2,6 +2,7 @@
 
 #include <errno.h>
 #include <stdio.h>
+#include <string.h>
 
 #include <ByteOrder.h>
 #include <FindDirectory.h>
@@ -164,11 +165,9 @@ DNSTools::GetDNSServers(BObjectList<BString, true>* serverList)
 	(line[sizeof(name) - 1] == ' ' || \
 	 line[sizeof(name) - 1] == '\t'))
 
-	BPath path;
-	if (find_directory(B_SYSTEM_SETTINGS_DIRECTORY, &path) != B_OK)
-		return B_ENTRY_NOT_FOUND;
-
-	path.Append("network/resolv.conf");
+	// Linux: the resolver configuration is /etc/resolv.conf, which
+	// NetworkManager (or systemd-resolved's stub) maintains.
+	BPath path("/etc/resolv.conf");
 
 	FILE* fp = fopen(path.Path(), "r");
 	if (fp == NULL) {
