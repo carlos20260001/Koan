@@ -625,8 +625,13 @@ _kern_cpu_enabled(int32 cpu)
 	snprintf(path, sizeof(path), "/sys/devices/system/cpu/cpu%d/online", cpu);
 
 	unsigned long online = 0;
-	if (!proc_read_sysfs_uint(path, &online))
-		return false;
+	if (!proc_read_sysfs_uint(path, &online)) {
+		// A CPU that cannot be taken offline (usually cpu0) has no
+		// "online" file: it is enabled if it exists, as in
+		// _kern_get_cpu_info().
+		snprintf(path, sizeof(path), "/sys/devices/system/cpu/cpu%d", cpu);
+		return access(path, F_OK) == 0;
+	}
 	return online == 1;
 }
 
