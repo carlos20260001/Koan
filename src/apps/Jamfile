@@ -49,7 +49,6 @@ HaikuSubInclude showimage ;
 HaikuSubInclude softwareupdater ;
 HaikuSubInclude systemupdater ;
 HaikuSubInclude soundrecorder ;
-HaikuSubInclude stylededit ;
 HaikuSubInclude sudoku ;
 HaikuSubInclude switcher ;
 HaikuSubInclude text_search ;

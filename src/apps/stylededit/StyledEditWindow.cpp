@@ -625,7 +625,7 @@ StyledEditWindow::MessageReceived(BMessage* message)
 			bool readOnly = !fTextView->IsEditable();
 			message->AddBool("readOnly", readOnly);
 			if (readOnly) {
-				BVolume volume(fNodeRef.device);
+				BVolume volume(fNodeRef.device());
 				message->AddBool("canUnlock", !volume.IsReadOnly());
 			}
 			fStatusView->SetStatus(message);
@@ -1561,7 +1561,7 @@ StyledEditWindow::_LoadFile(entry_ref* ref, const char* forceEncoding)
 		bool editable = (getuid() == st.st_uid && S_IWUSR & st.st_mode)
 					|| (getgid() == st.st_gid && S_IWGRP & st.st_mode)
 					|| (S_IWOTH & st.st_mode);
-		BVolume volume(ref->device);
+		BVolume volume(ref->device());
 		editable = editable && !volume.IsReadOnly();
 		_SetReadOnly(!editable);
 	}
@@ -2119,8 +2119,12 @@ StyledEditWindow::_HandleNodeMonitorEvent(BMessage *message)
 	if (message->FindInt32("opcode", &opcode) != B_OK)
 		return;
 
+	// libroot2's node monitor names the node with a node_ref and the
+	// entries with entry_refs ("virtual:node", "virtual:directory", ...)
+	node_ref nodeRef;
 	if (opcode != B_ENTRY_CREATED
-		&& message->FindInt64("node") != fNodeRef.node)
+		&& (message->FindNodeRef("virtual:node", &nodeRef) != B_OK
+			|| nodeRef != fNodeRef))
 		// bypass foreign nodes' event
 		return;
 
@@ -2143,17 +2147,17 @@ StyledEditWindow::_HandleNodeMonitorEvent(BMessage *message)
 
 		case B_ENTRY_MOVED:
 			{
-				int32 device = 0;
-				int64 srcFolder = 0;
-				int64 dstFolder = 0;
+				entry_ref newRef;
+				entry_ref oldRef;
 				const char* name = NULL;
-				if (message->FindInt32("device", &device) != B_OK
-					|| message->FindInt64("to directory", &dstFolder) != B_OK
-					|| message->FindInt64("from directory", &srcFolder) != B_OK
+				if (message->FindRef("virtual:to directory", &newRef) != B_OK
+					|| message->FindRef("virtual:from directory", &oldRef)
+						!= B_OK
 					|| message->FindString("name", &name) != B_OK)
 						break;
+				node_ref srcFolder(oldRef.device(), oldRef.directory());
+				node_ref dstFolder(newRef.device(), newRef.directory());
 
-				entry_ref newRef(device, dstFolder, name);
 				BEntry entry(&newRef);
 
 				BEntry dirEntry;
@@ -2195,17 +2199,17 @@ StyledEditWindow::_HandleNodeMonitorEvent(BMessage *message)
 				// 2) re-create t.txt and write data to it
 				// 3) remove t.txt~
 				// go to catch this case
-				int32 device = 0;
-				int64 directory = 0;
+				entry_ref removedRef;
 				BString orgName;
 				if (fSaveMessage->FindString("org.name", &orgName) == B_OK
-					&& message->FindInt32("device", &device) == B_OK
-					&& message->FindInt64("directory", &directory) == B_OK)
+					&& message->FindRef("virtual:directory", &removedRef)
+						== B_OK)
 				{
 					// reuse the source name if it is not too old
 					bigtime_t time = fSaveMessage->FindInt64("move time");
 					if ((system_time() - time) < 1000000) {
-						entry_ref ref(device, directory, orgName);
+						entry_ref ref(removedRef.device(),
+							removedRef.directory(), orgName);
 						BEntry entry(&ref);
 						if (entry.InitCheck() == B_OK) {
 							_SwitchNodeMonitor(true, &ref);
