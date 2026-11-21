@@ -29,7 +29,9 @@
 #include <UTF8.h>
 
 #include "BootDrive.h"
+#ifndef __VOS__
 #include "BootLoader.h"
+#endif
 
 
 /*
@@ -324,8 +326,15 @@ LegacyBootMenu::CanBeInstalled(const BootDrive& drive)
 		return B_ENTRY_NOT_FOUND;
 
 	// Enough space to write boot menu to drive?
+#ifdef __VOS__
+	// bootman.S is not assembled on Linux (see CMakeLists.txt); the menu
+	// takes the kNumberOfBootLoaderBlocks the MBR code reserves.
+	if (visitor.FirstOffset() < (int)(kBlockSize * kNumberOfBootLoaderBlocks))
+		return B_PARTITION_TOO_SMALL;
+#else
 	if (visitor.FirstOffset() < (int)sizeof(kBootLoader))
 		return B_PARTITION_TOO_SMALL;
+#endif
 
 	if (device.IsReadOnlyMedia())
 		return B_READ_ONLY_DEVICE;
@@ -371,6 +380,15 @@ LegacyBootMenu::CollectPartitions(const BootDrive& drive, BMessage& settings)
 status_t
 LegacyBootMenu::Install(const BootDrive& drive, BMessage& settings)
 {
+#ifdef __VOS__
+	// TODO(linux backend): this system boots through GRUB; writing Haiku's
+	// boot menu into the MBR would replace GRUB's boot code. Write the
+	// chosen entries, default and timeout as a grub.d fragment through a
+	// polkit root helper and run update-grub instead.
+	(void)drive;
+	(void)settings;
+	return B_NOT_SUPPORTED;
+#else
 	int32 defaultPartitionIndex;
 	if (settings.FindInt32("defaultPartition", &defaultPartitionIndex) != B_OK)
 		return B_BAD_VALUE;
@@ -457,6 +475,7 @@ LegacyBootMenu::Install(const BootDrive& drive, BMessage& settings)
 	status_t status = _WriteBlocks(fd, buffer, newBootLoader.Position());
 	close(fd);
 	return status;
+#endif
 }
 
 
@@ -504,6 +523,13 @@ LegacyBootMenu::SaveMasterBootRecord(BMessage* settings, BFile* file)
 status_t
 LegacyBootMenu::RestoreMasterBootRecord(BMessage* settings, BFile* file)
 {
+#ifdef __VOS__
+	// TODO(linux backend): writes the boot code part of the MBR back, which
+	// would replace GRUB's; goes with the GRUB back end of Install().
+	(void)settings;
+	(void)file;
+	return B_NOT_SUPPORTED;
+#else
 	BString path;
 	if (settings->FindString("disk", &path) != B_OK)
 		return B_BAD_VALUE;
@@ -550,6 +576,7 @@ LegacyBootMenu::RestoreMasterBootRecord(BMessage* settings, BFile* file)
 	delete[] buffer;
 	close(fd);
 	return status;
+#endif
 }
 
 
@@ -614,6 +641,9 @@ LegacyBootMenu::_GetBIOSDrive(const char* device, int8& drive)
 	if (fd < 0)
 		return errno;
 
+	// TODO(linux backend): Linux has no B_GET_BIOS_DRIVE_ID; the ioctl fails
+	// and only the target disk is listed. The EDD module's
+	// /sys/firmware/edd/int13_dev8N/mbr_signature maps disks to BIOS drives.
 	status_t status = ioctl(fd, B_GET_BIOS_DRIVE_ID, &drive, 1);
 	close(fd);
 	return status;

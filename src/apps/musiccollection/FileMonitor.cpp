@@ -74,8 +74,8 @@ FileMonitor::MessageReceived(BMessage* msg)
 				if (node.GetNodeRef(&nodeRef) != B_OK)
 					continue;
 
-				EntryCreated(entry.name, entry.directory, entry.device,
-					nodeRef.node);
+				EntryCreated(entry.name, entry.directory(), entry.device(),
+					nodeRef.node());
 			}
 			if (fCurrentReadList)
 				Looper()->PostMessage(kMsgAddRefs, this);

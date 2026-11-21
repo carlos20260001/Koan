@@ -501,7 +501,7 @@ FilePlaylistItem::_MoveIntoTrash(vector<entry_ref>* refs,
 	vector<BString>* namesInTrash)
 {
 	char trashPath[B_PATH_NAME_LENGTH];
-	status_t err = find_directory(B_TRASH_DIRECTORY, (*refs)[0].device,
+	status_t err = find_directory(B_TRASH_DIRECTORY, (*refs)[0].device(),
 		true /*create it*/, trashPath, B_PATH_NAME_LENGTH);
 	if (err != B_OK) {
 		fprintf(stderr, "failed to find Trash: %s\n", strerror(err));
@@ -564,7 +564,7 @@ FilePlaylistItem::_RestoreFromTrash(vector<entry_ref>* refs,
 	vector<BString>* namesInTrash)
 {
 	char trashPath[B_PATH_NAME_LENGTH];
-	status_t err = find_directory(B_TRASH_DIRECTORY, (*refs)[0].device,
+	status_t err = find_directory(B_TRASH_DIRECTORY, (*refs)[0].device(),
 		false /*create it*/, trashPath, B_PATH_NAME_LENGTH);
 	if (err != B_OK) {
 		fprintf(stderr, "failed to find Trash: %s\n", strerror(err));
@@ -588,8 +588,7 @@ FilePlaylistItem::_RestoreFromTrash(vector<entry_ref>* refs,
 	
 		// construct the folder of the original entry_ref
 		node_ref nodeRef;
-		nodeRef.device = (*refs)[i].device;
-		nodeRef.node = (*refs)[i].directory;
+		nodeRef.set_to((*refs)[i].device(), (*refs)[i].directory());
 		BDirectory originalDir(&nodeRef);
 		err = originalDir.InitCheck();
 		if (err != B_OK) {

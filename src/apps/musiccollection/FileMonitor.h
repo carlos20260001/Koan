@@ -32,7 +32,7 @@ public:
 	bool
 	operator()(const node_ref& a, const node_ref& b) const
 	{
-		return a.node < b.node;
+		return a.node() < b.node();
 	}
 };
 
