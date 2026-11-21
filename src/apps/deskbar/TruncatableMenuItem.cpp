@@ -37,6 +37,8 @@ All rights reserved.
 
 #include "TruncatableMenuItem.h"
 
+#include <string.h>
+
 #include <StackOrHeapArray.h>
 
 #include <stdlib.h>

@@ -36,6 +36,8 @@ All rights reserved.
 
 #include "TeamMenuItem.h"
 
+#include <math.h>
+
 #include <string.h>
 #include <stdio.h>
 #include <stdlib.h>

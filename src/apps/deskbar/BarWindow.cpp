@@ -36,6 +36,8 @@ All rights reserved.
 
 #include "BarWindow.h"
 
+#include <algorithm>
+
 #include <stdio.h>
 
 #include <Application.h>

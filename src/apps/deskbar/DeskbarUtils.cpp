@@ -32,6 +32,10 @@ brand product names are registered trademarks or trademarks of their respective
 holders.
 All rights reserved.
 */
+/*
+ * Copyright 2026, Koan contributors. All rights reserved.
+ * Distributed under the terms of the MIT License.
+ */
 
 
 #include "DeskbarUtils.h"
@@ -43,12 +47,15 @@ All rights reserved.
 #include <AppFileInfo.h>
 #include <Debug.h>
 #include <Directory.h>
+#include <File.h>
 #include <FilePanel.h>
 #include <FindDirectory.h>
 #include <List.h>
 #include <Mime.h>
 #include <NodeInfo.h>
 #include <Screen.h>
+#include <String.h>
+#include <StringList.h>
 #include <SymLink.h>
 #include <Window.h>
 
@@ -131,4 +138,94 @@ GetDeskbarDataDirectory(BPath& _path)
 		return error;
 
 	return _path.Append(kDeskbarDirectoryName);
+}
+
+
+/*!	The system's menu_entries can only name fixed paths, but on Linux each
+	user's home is a passwd entry (/home/<name>), not /boot/home. This writes
+	a definition with this user's real menu directories to the settings
+	directory, where TBarWindow::MenusBeginning() looks first.
+
+	A file Deskbar wrote carries kGeneratedMarker and is refreshed when the
+	directories change; one without the marker is the user's own and is
+	left alone.
+*/
+status_t
+UpdateUserDeskbarMenuEntries()
+{
+	static const char* const kGeneratedMarker
+		= "# Written by Deskbar; remove this line to keep your changes.";
+	static const directory_which kMenuDirectories[] = {
+		B_USER_DESKBAR_DIRECTORY,
+		B_USER_NONPACKAGED_DATA_DIRECTORY,
+		B_USER_DATA_DIRECTORY,
+		B_SYSTEM_NONPACKAGED_DATA_DIRECTORY,
+		B_SYSTEM_DATA_DIRECTORY
+	};
+
+	BStringList paths;
+	for (size_t i = 0; i < sizeof(kMenuDirectories)
+			/ sizeof(kMenuDirectories[0]); i++) {
+		BPath path;
+		if (find_directory(kMenuDirectories[i], &path) != B_OK)
+			continue;
+		if (kMenuDirectories[i] != B_USER_DESKBAR_DIRECTORY
+			&& path.Append("deskbar/menu") != B_OK) {
+			continue;
+		}
+		// libroot2 maps the non-packaged directories onto the others
+		if (!paths.HasString(path.Path()))
+			paths.Add(path.Path());
+	}
+	if (paths.IsEmpty())
+		return B_ENTRY_NOT_FOUND;
+
+	BString content(kGeneratedMarker);
+	content << "\n";
+	for (int32 i = 0; i < paths.CountStrings(); i++) {
+		BString path(paths.StringAt(i));
+		path.CharacterEscape("\\\"", '\\');
+		content << "directory \"" << path << "\"\n";
+	}
+
+	BPath filePath;
+	status_t error = GetDeskbarSettingsDirectory(filePath, true);
+	if (error == B_OK)
+		error = filePath.Append(kDeskbarMenuEntriesFileName);
+	if (error != B_OK)
+		return error;
+
+	BFile file;
+	if (file.SetTo(filePath.Path(), B_READ_ONLY) == B_OK) {
+		off_t size = 0;
+		if (file.GetSize(&size) != B_OK || size > 64 * 1024)
+			return B_OK;
+
+		BString existing;
+		char* buffer = existing.LockBuffer((int32)size + 1);
+		if (buffer == NULL)
+			return B_NO_MEMORY;
+		ssize_t bytesRead = file.Read(buffer, (size_t)size);
+		existing.UnlockBuffer(bytesRead > 0 ? (int32)bytesRead : 0);
+
+		if (existing == content)
+			return B_OK;
+		if (!existing.StartsWith(kGeneratedMarker))
+			return B_OK;
+				// the user's own definition
+	}
+
+	error = file.SetTo(filePath.Path(),
+		B_WRITE_ONLY | B_CREATE_FILE | B_ERASE_FILE);
+	if (error != B_OK)
+		return error;
+
+	ssize_t written = file.Write(content.String(), content.Length());
+	if (written != content.Length())
+		return written < 0 ? (status_t)written : B_IO_ERROR;
+
+	// Tracker's kVirtualDirectoryMimeType; headers/private/storage has a
+	// MimeTypes.h of its own that shadows Tracker's
+	BNodeInfo(&file).SetType("application/x-vnd.vos-virtual-directory");
+	return B_OK;
 }

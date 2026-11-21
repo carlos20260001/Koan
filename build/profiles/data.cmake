@@ -212,8 +212,7 @@ install(DIRECTORY DESTINATION /etc/skel/config/settings/ssh
 # The first_login marker is written by /system/boot/first_login/* on first
 # successful run. Do NOT ship it — that would signal "already provisioned".
 
-# Deskbar menu entries descriptor file
-ImageIncludeFile("src/data/deskbar/menu_entries" "/system/data/deskbar")
+# The Deskbar menu and menu_entries: build/profiles/deskbar.cmake
 
 # Tracker New Templates: shipped as templates_attrs.tar (see base.cmake)
 # and extracted with xattrs in postinst. Plain install(DIRECTORY) loses

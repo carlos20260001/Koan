@@ -182,6 +182,8 @@ ImageInclude("/system/add-ons/Screen Savers" ${SCREEN_SAVERS})
 
 
 include(${CMAKE_CURRENT_LIST_DIR}/preferences.cmake)
+# after apps.cmake and preferences.cmake: it reads their install lists
+include(${CMAKE_CURRENT_LIST_DIR}/deskbar.cmake)
 
 
 include(${CMAKE_CURRENT_LIST_DIR}/bin.cmake)
