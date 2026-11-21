@@ -31,7 +31,12 @@ mkdir -p /system/settings/
 
 ln -sf /bin /system/bin
 # `ln -sf SRC DST` silently creates DST/<basename SRC> when DST already
-# exists as a dir, so /system/lib must be removed before relinking.
+# exists as a dir, so /system/lib must be removed before relinking. On a
+# first install it is a real directory when a package unpacked files
+# into it; move them to /lib first, or removing it deletes them.
+if [ -d /system/lib ] && [ ! -L /system/lib ]; then
+	cp -a /system/lib/. /lib/
+fi
 rm -rf /system/lib
 ln -sf /lib /system/lib
 ln -sf /tmp /system/cache
@@ -105,6 +110,10 @@ beos_string SYS:NAME "x-vnd.Be-TSKB:B_USER_DESKBAR_DIRECTORY/Applications:Applic
 beos_string SYS:NAME "x-vnd.Be-TSKB:B_USER_DESKBAR_DIRECTORY/Demos:Demos" /system/data/deskbar/menu/Demos
 beos_string SYS:NAME "x-vnd.Be-TSKB:B_USER_DESKBAR_DIRECTORY/Preferences:Preferences" /system/data/deskbar/menu/Preferences
 beos_string SYS:NAME "x-vnd.Be-TSKB:B_USER_DESKBAR_DIRECTORY/Desktop applets:Desktop applets" "/system/data/deskbar/menu/Desktop applets"
+beos_string SYS:NAME "x-vnd.Be-TSKB:B_USER_DESKBAR_DIRECTORY/Office:Office" /system/data/deskbar/menu/Office
+beos_string SYS:NAME "x-vnd.Be-TSKB:B_USER_DESKBAR_DIRECTORY/Media:Media" /system/data/deskbar/menu/Media
+beos_string SYS:NAME "x-vnd.Be-TSKB:B_USER_DESKBAR_DIRECTORY/Developer:Developer" /system/data/deskbar/menu/Developer
+beos_string SYS:NAME "x-vnd.Be-TSKB:B_USER_DESKBAR_DIRECTORY/Utilities:Utilities" /system/data/deskbar/menu/Utilities
 beos_string SYS:NAME "x-vnd.vos-libtracker:B_USER_SETTINGS_DIRECTORY/Tracker/Tracker New Templates:Tracker New Templates" "/etc/skel/config/settings/Tracker/Tracker New Templates"
 
 # Hide Linux-userland root dirs; /boot /system /home /dev /tmp stay visible.
@@ -175,11 +184,10 @@ if [ -f /usr/share/vos/apps_attrs.tar ]; then
     rm -rf "$_tmp"
 fi
 
-# ported subset: enable the units that are installed; app_server, Deskbar and
-# Tracker have none in this tree yet (janus_session starts them at login).
+# Deskbar and Tracker have no units: janus_session starts them at login.
+# ported subset: a unit that is not installed is reported, not fatal.
 for _unit in janus.service registrar.service app_server.service \
-		input_server.service mount_server.service notification_server.service \
-		deskbar.service tracker.service; do
+		input_server.service mount_server.service notification_server.service; do
 	systemctl enable "$_unit" 2>/dev/null \
 		|| echo "vos: postinst: $_unit not installed, not enabled" >&2
 done
