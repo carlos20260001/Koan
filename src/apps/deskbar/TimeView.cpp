@@ -36,6 +36,8 @@ All rights reserved.
 
 #include "TimeView.h"
 
+#include <math.h>
+
 #include <algorithm>
 
 #include <string.h>

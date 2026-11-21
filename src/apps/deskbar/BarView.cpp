@@ -36,6 +36,10 @@ All rights reserved.
 
 #include "BarView.h"
 
+#include <math.h>
+#include <string.h>
+#include <algorithm>
+
 #include <AppFileInfo.h>
 #include <Bitmap.h>
 #include <ControlLook.h>

@@ -36,6 +36,9 @@ All rights reserved.
 
 #include "DeskbarMenu.h"
 
+#include <stdlib.h>
+#include <string.h>
+
 #include <Debug.h>
 #include <Bitmap.h>
 #include <Catalog.h>

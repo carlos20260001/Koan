@@ -36,6 +36,8 @@ All rights reserved.
 
 #include "BarMenuBar.h"
 
+#include <math.h>
+
 #include <algorithm>
 
 #include <Bitmap.h>

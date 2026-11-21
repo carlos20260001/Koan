@@ -36,6 +36,8 @@ All rights reserved.
 
 #include "StatusView.h"
 
+#include <math.h>
+
 #include <errno.h>
 #include <stdio.h>
 #include <string.h>

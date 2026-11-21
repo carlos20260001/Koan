@@ -6,6 +6,8 @@
 
 #include "LocationMenuItem.h"
 
+#include <math.h>
+
 #include <Catalog.h>
 #include <ControlLook.h>
 #include <Directory.h>

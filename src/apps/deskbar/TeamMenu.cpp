@@ -36,6 +36,8 @@ All rights reserved.
 
 #include "TeamMenu.h"
 
+#include <math.h>
+
 #include <algorithm>
 #include <strings.h>
 
