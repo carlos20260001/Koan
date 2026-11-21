@@ -24,7 +24,10 @@
 #include <Size.h>
 #include <TextControl.h>
 
+#include <crypt.h>
 #include <ctype.h>
+#include <stdlib.h>
+#include <string.h>
 
 #include "ScreenSaverSettings.h"
 
@@ -161,7 +164,26 @@ PasswordWindow::MessageReceived(BMessage* message)
 					alert->Go();
 					break;
 				}
-				fSettings.SetPassword(crypt(fPasswordControl->Text(), NULL));
+				{
+					// Haiku's crypt() made up a salt when given NULL;
+					// libxcrypt wants one, so ask it for its default
+					// method's. screen_blanker checks the password with
+					// crypt(typed, stored), which reads the salt back.
+					char* salt = crypt_gensalt_ra(NULL, 0, NULL, 0);
+					const char* hash = salt != NULL
+						? crypt(fPasswordControl->Text(), salt) : NULL;
+					free(salt);
+					if (hash == NULL || hash[0] == '*') {
+						BAlert* alert = new BAlert("noHash",
+							B_TRANSLATE("The password could not be "
+								"encrypted."),
+							B_TRANSLATE("OK"));
+						alert->SetFlags(alert->Flags() | B_CLOSE_ON_ESCAPE);
+						alert->Go();
+						break;
+					}
+					fSettings.SetPassword(hash);
+				}
 			} else
 				fSettings.SetPassword("");
 
