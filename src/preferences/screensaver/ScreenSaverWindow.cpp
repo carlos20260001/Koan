@@ -702,11 +702,16 @@ ModulesView::MessageReceived(BMessage* message)
 				case B_ENTRY_CREATED:
 				{
 					const char* name;
-					node_ref nodeRef;
+					entry_ref dirRef;
 
-					message->FindString("name", &name);
-					message->FindInt32("device", &nodeRef.device);
-					message->FindInt64("directory", &nodeRef.node);
+					// The Nexus node monitor names the parent directory
+					// by its vref, not by device and inode fields.
+					if (message->FindString("name", &name) != B_OK
+						|| message->FindRef("virtual:directory", &dirRef)
+							!= B_OK) {
+						break;
+					}
+					node_ref nodeRef(dirRef.vdevice(), dirRef.vdirectory());
 
 					BDirectory dir(&nodeRef);
 
@@ -893,7 +898,7 @@ ModulesView::_OpenSaver()
 	fCurrentName = fSettings.ModuleName();
 	fSaverRunner = new ScreenSaverRunner(view->Window(), view, fSettings);
 
-#ifdef __HAIKU__
+#if defined(__HAIKU__) || defined(__VOS__)
 	BRect rect = fSettingsBox->InnerFrame().InsetByCopy(4, 4);
 #else
 	BRect rect = fSettingsBox->Bounds().InsetByCopy(4, 4);
