@@ -138,7 +138,7 @@ TLocationMenuItem::AddLocations(BMenu* menu)
 			continue;
 		}
 
-		BVolume parentVolume(ref.device);
+		BVolume parentVolume(ref.device());
 		if (parentVolume.InitCheck() == B_OK && parentVolume.IsPersistent())
 			continue;
 

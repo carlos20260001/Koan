@@ -147,7 +147,8 @@ private:
 										bool removeAll);
 				void				RemoveItem(int32 id);
 
-				void				MoveItem(entry_ref*, ino_t toDirectory);
+				void				MoveItem(const node_ref& nodeRef,
+										const entry_ref& newRef);
 #endif
 
 				BPoint				LocationForReplicant(int32 index,
