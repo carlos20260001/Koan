@@ -21,6 +21,8 @@
 #include <NetworkAddress.h>
 #include <NetworkAddressResolver.h>
 
+#include "TimeBackend.h"
+
 
 #undef B_TRANSLATION_CONTEXT
 #define B_TRANSLATION_CONTEXT "Time"
@@ -203,6 +205,11 @@ ntp_update_time(const char* hostname, const char** errorString,
 	}
 
 	time_t now = message.transmit_timestamp.Integer() - kSecondsBetween1900And1970;
-	set_real_time_clock(now);
-	return B_OK;
+	static BString sError;
+	status_t result = TimeBackend::SetSystemTime(now, &sError);
+	if (result != B_OK) {
+		*errorString = sError.String();
+		*errorCode = result;
+	}
+	return result;
 }

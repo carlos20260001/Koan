@@ -13,7 +13,6 @@
 #include "DateTimeView.h"
 
 #include <time.h>
-#include <syscalls.h>
 
 #include <Box.h>
 #include <CalendarView.h>
@@ -32,6 +31,7 @@
 #include <Window.h>
 
 #include "AnalogClock.h"
+#include "TimeBackend.h"
 #include "TimeMessages.h"
 #include "TimeWindow.h"
 
@@ -161,7 +161,7 @@ DateTimeView::_Revert()
 	dateTime.SetTime(time);
 	dateTime.SetDate(date);
 
-	set_real_time_clock(dateTime.Time_t());
+	TimeBackend::SetSystemTime(dateTime.Time_t());
 }
 
 
