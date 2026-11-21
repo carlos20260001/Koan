@@ -35,7 +35,6 @@ HaikuSubInclude pairs ;
 HaikuSubInclude patchbay ;
 HaikuSubInclude people ;
 HaikuSubInclude poorman ;
-HaikuSubInclude processcontroller ;
 HaikuSubInclude pulse ;
 HaikuSubInclude remotedesktop ;
 HaikuSubInclude resedit ;
