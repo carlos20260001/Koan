@@ -39,7 +39,6 @@ HaikuSubInclude processcontroller ;
 HaikuSubInclude pulse ;
 HaikuSubInclude screenreader ;
 HaikuSubInclude serialconnect ;
-HaikuSubInclude showimage ;
 HaikuSubInclude softwareupdater ;
 HaikuSubInclude systemupdater ;
 HaikuSubInclude soundrecorder ;
