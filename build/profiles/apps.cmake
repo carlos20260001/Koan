@@ -51,11 +51,13 @@ set(SYSTEM_APPS
 	Passwords
 	PrintOMatic
 	ResEdit
+	ScreenReader
 	SerialConnect
 	#Screenshot
 	ShowImage
 	SoundRecorder
 	StyledEdit
+	Switcher
 	Terminal
 	#TextSearch
 	WebMail
@@ -98,13 +100,12 @@ ImageInclude("/system/apps" ${DESKBAR_DEMOS_TARGETS})
 
 set(DESKBAR_APPLETS
 	AudioMixer
-	#AutoRaise
+	AutoRaise
 	BluetoothStatus
 	Clock
 	LocationStatus
 	Messages
 	MPRISReplicant
-	NetworkStatus
 	NetworkStatus
 	NotificationReplicant
 	OverlayImage
@@ -113,6 +114,7 @@ set(DESKBAR_APPLETS
 	PowerStatus
 	ProcessController
 	Pulse
+	WiFiStatus
 )
 
 VosKeepTargets(DESKBAR_APPLETS)
