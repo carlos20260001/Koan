@@ -45,6 +45,9 @@
 #include "APMDriverInterface.h"
 #include "ExtendedInfoWindow.h"
 #include "PowerStatus.h"
+#ifdef __VOS__
+#include "UPowerDriverInterface.h"
+#endif
 
 
 #undef B_TRANSLATION_CONTEXT
@@ -868,7 +871,17 @@ PowerStatusReplicant::_AboutRequested()
 void
 PowerStatusReplicant::_Init()
 {
+#ifdef __VOS__
+	// On Linux the batteries come from UPower; Haiku's ACPI and APM
+	// drivers do not exist there, but are still tried after it.
+	fDriverInterface = new UPowerDriverInterface;
+	if (fDriverInterface->Connect() != B_OK) {
+		delete fDriverInterface;
+		fDriverInterface = new ACPIDriverInterface;
+	}
+#else
 	fDriverInterface = new ACPIDriverInterface;
+#endif
 	if (fDriverInterface->Connect() != B_OK) {
 		delete fDriverInterface;
 		fDriverInterface = new APMDriverInterface;
