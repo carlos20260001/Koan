@@ -1,0 +1,11 @@
+# Desktop session PAM stack (janus opens the session; autologin, no auth).
+auth       required     pam_permit.so
+@include   common-account
+@include   common-password
+
+# pam_loginuid must fire before pam_systemd (via common-session).
+session    optional     pam_loginuid.so
+session    optional     pam_keyinit.so force revoke
+@include   common-session
+# Thread priority band, /etc/security/limits.d/90-vos.conf.
+session    required     pam_limits.so
