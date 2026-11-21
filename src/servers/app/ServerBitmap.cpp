@@ -11,7 +11,7 @@
 #include "ServerBitmap.h"
 
 #include <new>
-#include <math.h>
+#include <cmath>
 #include <Bitmap.h>
 #include <BitmapPrivate.h>
 #include <IconUtils.h>
@@ -153,8 +153,8 @@ ServerBitmap::SetVectorIcon(const BMessage& description)
 		|| !bounds.IsValid() || !bounds.Contains(crop)
 		|| bounds.left != 0 || bounds.top != 0
 		|| bounds.right > 1023 || bounds.bottom > 1023
-		|| !isfinite(crop.left) || !isfinite(crop.top)
-		|| !isfinite(crop.right) || !isfinite(crop.bottom)
+		|| !std::isfinite(crop.left) || !std::isfinite(crop.top)
+		|| !std::isfinite(crop.right) || !std::isfinite(crop.bottom)
 		|| crop.Width() + 1 != Width() || crop.Height() + 1 != Height())
 		return B_BAD_VALUE;
 	int32 effect;
@@ -187,7 +187,7 @@ BReference<ServerBitmap>
 ServerBitmap::ScaledIcon(float scale, BRect& source) const
 {
 	BReference<ServerBitmap> result;
-	if (scale <= 1 || !isfinite(scale))
+	if (scale <= 1 || !std::isfinite(scale))
 		return result;
 	MutexLocker lock(fIconLock);
 	BitmapVectorIcon* icon = fVectorIcon;

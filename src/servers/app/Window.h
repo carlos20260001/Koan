@@ -21,7 +21,7 @@
 #include "View.h"
 #include "WindowList.h"
 
-#include <math.h>
+#include <cmath>
 
 #include <AutoDeleter.h>
 #include <ObjectList.h>
@@ -43,7 +43,7 @@ static const float kMaxWindowCoordinate = 1048576.0f;
 static inline float
 limit_window_coordinate(float value)
 {
-	if (isnan(value))
+	if (std::isnan(value))
 		return 0;
 	if (value < -kMaxWindowCoordinate)
 		return -kMaxWindowCoordinate;
