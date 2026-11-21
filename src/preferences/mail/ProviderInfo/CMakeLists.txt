@@ -7,8 +7,8 @@
 # air/OS's image put them. Git and install() keep no attributes, so the
 # files are packed with their user.beos.* xattrs into
 # /usr/share/vos/mail_provider_info.tar, like apps_attrs.tar.
-# TODO(linux backend): unpack it into each user's settings at first
-# login (data/system/boot/first_login).
+# data/system/boot/first_login/20-mail-provider-info unpacks it into each
+# user's settings at first login.
 if(BUILDTOOLS_DIR)
 	set(_rc "${BUILDTOOLS_DIR}/src/bin/rc/rc")
 	set(_resattr "${BUILDTOOLS_DIR}/src/bin/resattr")

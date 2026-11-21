@@ -11,4 +11,4 @@ AddOn(
 )
 
 UsePrivateHeaders(quicklook shared)
-install(TARGETS quicklook DESTINATION /system/lib/)
+install(TARGETS quicklook DESTINATION /lib/)

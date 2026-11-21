@@ -87,59 +87,7 @@ if(CMAKE_BUILD_TYPE STREQUAL "Debug")
 include(build/profiles/debug.cmake)
 endif()
 
-# ported subset: VitruvianOS's data/ (libexec helpers, polkit, pam, boot
-# scripts, most systemd units) is not in this tree yet. data/systemd has
-# the units of the servers W3 ported, so test for a file data.cmake
-# installs unconditionally and only W4 brings, rather than for a unit.
-if(EXISTS "${CMAKE_SOURCE_DIR}/data/tmpfiles.d/vos.conf")
 include(build/profiles/data.cmake)
-else()
-# ported subset: the license texts. data.cmake installs them with the rest
-# of data/; until it is active they must still ship, since the image carries
-# MIT, LGPL, GPL, NewOS and Be Sample Code licensed files.
-ImageIncludeDir("data/system/data/licenses" "/system/data/")
-# ported subset: installer backend. The rules data.cmake has for the
-# DriveSetup/Installer root helpers, their polkit files and GRUB files,
-# verbatim, until data.cmake itself is active.
-install(PROGRAMS data/libexec/vos-firstboot-commit
-  DESTINATION /usr/libexec/)
-install(PROGRAMS data/libexec/vos-install-helper
-  DESTINATION /usr/libexec/)
-install(PROGRAMS data/libexec/vos-partition-lib.sh
-  DESTINATION /usr/libexec/)
-install(FILES data/etc/installer/excludes.list
-  DESTINATION /usr/share/vos/installer/ COMPONENT data)
-install(PROGRAMS data/etc/grub.d/15_vos
-  DESTINATION /etc/grub.d/)
-install(FILES data/etc/default/grub
-  DESTINATION /usr/share/vos/grub/ COMPONENT data)
-install(FILES data/share/vos/user-default-groups
-  DESTINATION /usr/share/vos/ COMPONENT data)
-install(FILES data/polkit-1/actions/org.vitruvian.installer.policy
-  DESTINATION /usr/share/polkit-1/actions/ COMPONENT data)
-install(FILES data/polkit-1/rules.d/49-vitruvian-installer.rules
-  DESTINATION /usr/share/polkit-1/rules.d/ COMPONENT data)
-install(PROGRAMS data/libexec/vos-drivesetup-helper
-  DESTINATION /usr/libexec/)
-install(FILES data/polkit-1/actions/org.vitruvian.drivesetup.policy
-  DESTINATION /usr/share/polkit-1/actions/ COMPONENT data)
-install(PROGRAMS data/libexec/vos-drivesetup-query
-  DESTINATION /usr/libexec/)
-install(FILES data/polkit-1/actions/org.vitruvian.drivesetup-query.policy
-  DESTINATION /usr/share/polkit-1/actions/ COMPONENT data)
-install(FILES data/systemd/vos-polkit-agent.service
-  DESTINATION /usr/share/vos/systemd/ COMPONENT data)
-# ported subset: the units of janus and the core session servers, as
-# data.cmake installs them (its SYSTEMD_SERVICES).
-install(FILES
-  data/systemd/janus.service
-  data/systemd/registrar.service
-  data/systemd/mount_server.service
-  data/systemd/input_server.service
-  data/systemd/notification_server.service
-  data/systemd/vos-login.target
-  DESTINATION /etc/systemd/system/ COMPONENT data)
-endif()
 
 string(REPLACE ";" "," RESULT "${RUN_LIST}")
 

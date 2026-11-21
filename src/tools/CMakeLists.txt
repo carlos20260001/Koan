@@ -40,6 +40,7 @@ endif()
 
 else()
 
+add_subdirectory(keymap)
 add_subdirectory(locale)
 
 endif()

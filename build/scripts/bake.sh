@@ -303,7 +303,9 @@ cmd_build() {
     log_step "Packaging debs..."
     # Drop older VOS builds first: the image installs every *.deb here.
     rm -f "$BASEDIR"/VOS-*-Linux-*.deb
-    cpack
+    # A UTF-8 locale: libarchive cannot store a non-ASCII file name
+    # (Tracker's "Label as…" add-on) under the container's POSIX locale.
+    LC_ALL=C.UTF-8 cpack
 
     for _t in $_types; do
         case "$_t" in

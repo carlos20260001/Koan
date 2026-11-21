@@ -1,4 +1,4 @@
-## Haiku Generic Makefile Engine v2.6 ##
+## Generic Makefile Engine v2.6 ##
 
 ## Does all the hard work for the Generic Makefile, which only has to specify
 ## the project parameters.
@@ -24,7 +24,7 @@ ifeq ($(TYPE), )
 endif
 
 ifeq ($(APP_MIME_SIG), )
-	APP_MIME = x.vnd-Haiku-$(NAME)
+	APP_MIME_SIG = x-vnd.vos-$(NAME)
 endif
 
 ifeq ($(DRIVER_PATH), )
@@ -43,8 +43,16 @@ ifeq ($(strip $(TYPE)), DRIVER)
 	CFLAGS	+= -D_KERNEL_MODE=1
 	CXXFLAGS += -D_KERNEL_MODE=1
 else
-	CFLAGS +=
-	CXXFLAGS +=
+	CFLAGS += `cat /etc/vos.specs`
+	CXXFLAGS += `cat /etc/vos.specs`
+endif
+
+CFLAGS += -include LinuxBuildCompatibility.h
+CXXFLAGS += -include LinuxBuildCompatibility.h
+
+ifneq ($(filter SHARED STATIC, $(strip $(TYPE))), )
+	CFLAGS += -fPIC
+	CXXFLAGS += -fPIC
 endif
 
 # Set up optimization flags.
@@ -52,7 +60,7 @@ ifeq ($(strip $(OPTIMIZE)), FULL)
 	OPTIMIZER	= -O3
 else
 ifeq ($(strip $(OPTIMIZE)), SOME)
-	OPTIMIZER	= -O1
+	OPTIMIZER	= -O2
 else
 ifeq ($(strip $(OPTIMIZE)), NONE)
 	OPTIMIZER	= -O0
@@ -90,7 +98,7 @@ LDFLAGS		+= $(DEBUG)
 
 # Binary-type-specific linker flags.
 ifeq ($(strip $(TYPE)), APP)
-	LDFLAGS += -Xlinker -soname=_APP_
+	LDFLAGS += -Xlinker -soname=_APP_ -rdynamic
 else
 ifeq ($(strip $(TYPE)), SHARED)
 	LDFLAGS += -shared -Xlinker -soname=$(NAME)
@@ -111,10 +119,9 @@ CC_VER = $(word 1, $(subst -, , $(subst ., , $(shell $(CC) -dumpversion))))
 # Set the object directory if it isn't already.
 OBJ_DIR := objects.$(CPU)-$(CC)$(CC_VER)-$(if $(DEBUGGER),debug,release)
 
-# Output the binary alongside the objects unless another directory is specified.
-ifeq ($(TARGET_DIR), )
-	TARGET_DIR	:= $(OBJ_DIR)
-endif
+# The binary always lands in the object directory.
+NAME		:= $(notdir $(NAME))
+TARGET_DIR	:= $(OBJ_DIR)
 
 # NOTE: make doesn't find the target if its name is enclosed in quotes.
 ifeq ($(strip $(TYPE)), STATIC)
@@ -178,6 +185,9 @@ LINK_LIBS += $(foreach lib, $(filter-out %.so %.a _APP_ _KERNEL_, $(LIBS)), $(ad
 
 # Add the linkpaths and linklibs to LDFLAGS.
 LDFLAGS += $(LINK_PATHS)  $(LINK_LIBS)
+ifneq ($(strip $(TYPE)), DRIVER)
+	LDFLAGS += -lm
+endif
 
 # Add the defines to CFLAGS.
 CFLAGS += $(foreach define, $(DEFINES), $(addprefix -D, $(define)))
@@ -246,7 +256,6 @@ default: $(TARGET)
 $(TARGET):	$(OBJ_DIR) $(OBJS) $(RSRCS)
 	$(BUILD_LINE)
 	$(DO_RSRCS)
-	$(MIMESET) -f "$@"
 
 # Create OBJ_DIR if it doesn't exist.
 $(OBJ_DIR)::
@@ -313,9 +322,11 @@ $(OBJ_DIR)/%.o : %.CXX
 
 # Rules to compile the resource definition files.
 $(OBJ_DIR)/%.rsrc : %.rdef
-	cat $< | $(CC) -E $(INCLUDES) $(CFLAGS) - | grep -av '^#' | $(RESCOMP) -I $(dir $<) -o "$@" -
+	$(RESCOMP) $< -o "$@"
+#	cat $< | $(CC) -E $(INCLUDES) $(CFLAGS) - | grep -av '^#' | $(RESCOMP) -I $(dir $<) -o "$@" -
 $(OBJ_DIR)/%.rsrc : %.RDEF
-	cat $< | $(CC) -E $(INCLUDES) $(CFLAGS) - | grep -av '^#' | $(RESCOMP) -I $(dir $<) -o "$@" -
+	$(RESCOMP) $< -o "$@"
+#	cat $< | $(CC) -E $(INCLUDES) $(CFLAGS) - | grep -av '^#' | $(RESCOMP) -I $(dir $<) -o "$@" -
 
 # Rule to compile localization data catalogs.
 $(CATALOGS_DIR)/%.catalog : $(CATKEYS_DIR)/%.catkeys

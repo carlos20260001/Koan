@@ -104,7 +104,6 @@ SubInclude HAIKU_TOP src tools gensyscalls ;
 SubInclude HAIKU_TOP src tools get_package_dependencies ;
 SubInclude HAIKU_TOP src tools hack_coff ;
 SubInclude HAIKU_TOP src tools hvif2png ;
-SubInclude HAIKU_TOP src tools keymap ;
 SubInclude HAIKU_TOP src tools makebootable ;
 SubInclude HAIKU_TOP src tools mbrtool ;
 SubInclude HAIKU_TOP src tools opd_to_package_info ;

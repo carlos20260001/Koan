@@ -1,0 +1,7 @@
+#!/bin/sh
+# Create the standard Desktop shortcuts.
+# Runs once per user (marker: ~/config/settings/first_login).
+mkdir -p "$HOME/Desktop"
+ln -sfn ..      "$HOME/Desktop/home"
+ln -sfn /system "$HOME/Desktop/System"
+ln -sfn /system/data/samples "$HOME/Desktop/Samples"

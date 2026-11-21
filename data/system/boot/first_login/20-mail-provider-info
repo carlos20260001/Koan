@@ -1,0 +1,16 @@
+#!/bin/sh
+# Copyright 2026, Koan contributors. All rights reserved.
+# Distributed under the terms of the MIT License.
+#
+# Unpack the mail provider infos into the user's settings, where E-mail's
+# AutoConfig reads them (B_USER_SETTINGS_DIRECTORY/Mail/ProviderInfo).
+# Each is an empty file whose user.beos.* attributes hold the servers and
+# options, so they come from a tar --xattrs archive. Files the user
+# already has are kept.
+# Runs once per user (marker: ~/config/settings/first_login).
+_tar=/usr/share/vos/mail_provider_info.tar
+[ -f "$_tar" ] || exit 0
+_dir="$HOME/config/settings/Mail/ProviderInfo"
+mkdir -p "$_dir" || exit 0
+tar --xattrs --xattrs-include='user.beos.*' --keep-old-files \
+	-xf "$_tar" -C "$_dir" 2>/dev/null || true

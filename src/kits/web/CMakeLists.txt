@@ -109,4 +109,6 @@ set_target_properties(web PROPERTIES
 	SOVERSION 1
 )
 
-install(TARGETS web DESTINATION /system/lib/)
+# Installed to /lib by build/profiles/base.cmake (SYSTEM_LIBS). A second
+# install to /system/lib was lost on a first install: postinst replaces
+# that directory with a link to /lib.
