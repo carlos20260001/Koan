@@ -15,7 +15,6 @@ SubInclude HAIKU_TOP src preferences mcp ;
 SubInclude HAIKU_TOP src preferences media ;
 SubInclude HAIKU_TOP src preferences network ;
 SubInclude HAIKU_TOP src preferences notifications ;
-SubInclude HAIKU_TOP src preferences power ;
 SubInclude HAIKU_TOP src preferences printers ;
 SubInclude HAIKU_TOP src preferences repositories ;
 SubInclude HAIKU_TOP src preferences screen ;
