@@ -29,6 +29,13 @@
 #include <TextView.h>
 
 #include <scheduler.h>
+
+#ifdef __VOS__
+// Linux: the scheduler modes are power-profiles-daemon's profiles.
+#	include "SchedulerMode.h"
+#	define get_scheduler_mode pc_get_scheduler_mode
+#	define set_scheduler_mode pc_set_scheduler_mode
+#endif
 #include <syscalls.h>
 
 #include "AutoIcon.h"

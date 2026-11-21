@@ -9,9 +9,11 @@
 
 #include "APMDriverInterface.h"
 
+#ifndef __VOS__
 #include <arch/x86/apm_defs.h>
 #include <generic_syscall_defs.h>
 #include <syscalls.h>
+#endif
 
 
 const bigtime_t kUpdateInterval = 2000000;
@@ -26,6 +28,12 @@ APMDriverInterface::~APMDriverInterface()
 status_t
 APMDriverInterface::Connect()
 {
+#ifdef __VOS__
+	// TODO(linux backend): Haiku's APM generic syscall has no Linux
+	// counterpart (Linux dropped userland APM; /proc/apm is 32-bit only).
+	// Batteries come from UPower (UPowerDriverInterface) instead.
+	return B_NOT_SUPPORTED;
+#else
 	uint32 version = 0;
 	status_t status = _kern_generic_syscall(APM_SYSCALLS, B_SYSCALL_INFO,
 		&version, sizeof(version));
@@ -36,6 +44,7 @@ APMDriverInterface::Connect()
 	}
 
 	return status;
+#endif
 }
 
 
@@ -47,6 +56,9 @@ APMDriverInterface::GetBatteryInfo(int32 index, battery_info* info)
 
 	info->current_rate = -1;
 
+#ifdef __VOS__
+	return B_NOT_SUPPORTED;
+#else
 	apm_battery_info apmInfo;
 	status_t status = _kern_generic_syscall(APM_SYSCALLS, APM_GET_BATTERY_INFO,
 		&apmInfo, sizeof(apm_battery_info));
@@ -58,6 +70,7 @@ APMDriverInterface::GetBatteryInfo(int32 index, battery_info* info)
 	}
 
 	return status;
+#endif
 }
 
 
