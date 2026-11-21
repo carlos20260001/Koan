@@ -28,10 +28,11 @@ VOS_IMAGE_TYPES=none VOS_BUILD_TYPE=Release ./podman-compose up --build
 ./podman-compose down
 ```
 
-The service's container is called `vitruvian-airos-build`, not Koan's
-`vitruvian-build`: `podman-compose up` starts an existing container of the
-same name instead of creating one, and Koan's container bind-mounts the Koan
-checkout.
+The service's container has no fixed name: podman-compose names it after the
+checkout's directory (`<dir>_build_1`), so each checkout or worktree gets its
+own. `podman-compose up` starts an existing container of the same name
+instead of creating one, so a shared name would run another tree's build
+(Koan's `vitruvian-build`, or another worktree of this branch).
 
 Steps run by `docker/build.sh`, in order:
 
