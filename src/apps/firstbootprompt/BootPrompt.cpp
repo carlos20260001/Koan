@@ -1,19 +1,30 @@
 /*
  * Copyright 2010, Stephan Aßmus <superstippi@gmx.de>
  * Copyright 2020, Panagiotis "Ivory" Vasilopoulos <git@n0toose.net>
+ * Copyright 2026, Koan contributors. All rights reserved.
  * All rights reserved. Distributed under the terms of the MIT License.
  */
 
 
 #include "BootPrompt.h"
 
+#include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 
+#include <Alert.h>
 #include <Catalog.h>
-#include <LaunchRoster.h>
 #include <Locale.h>
+#include <Roster.h>
+#include <String.h>
 
-#include <syscalls.h>
+#include <LaunchDaemonDefs.h>
+#include <RosterPrivate.h>
+#include <util/KMessage.h>
+
+
+#undef B_TRANSLATION_CONTEXT
+#define B_TRANSLATION_CONTEXT "BootPromptApp"
 
 
 static int sExitValue;
@@ -33,6 +44,31 @@ main(int, char **)
 
 const char* kAppSignature = "application/x-vnd.vos-FirstBootPrompt";
 const char* kDeskbarSignature = "application/x-vnd.Be-TSKB";
+static const char* kInstallerSignature = "application/x-vnd.vos-Installer";
+
+
+// On Linux, janus (the login broker on the launch daemon's port) runs this
+// app as the greeter frontend while /var/lib/vos/first-boot-done is
+// missing. "Try" asks janus to switch the seat to the live persona, the
+// Linux counterpart of air/OS's launch_daemon "desktop" target.
+static status_t
+start_live_session()
+{
+	port_id janusPort = find_port(B_LAUNCH_DAEMON_PORT_NAME);
+	if (janusPort < 0)
+		return janusPort;
+
+	BPrivate::KMessage request(BPrivate::B_JANUS_LOGIN_OK);
+	request.AddString("user", "vos-live");
+	request.AddString("mode", "live");
+
+	BPrivate::KMessage reply;
+	status_t status = request.SendTo(janusPort, -1, &reply, 2000000LL,
+		5000000LL);
+	if (status != B_OK)
+		return status;
+	return (status_t)reply.What();
+}
 
 
 BootPromptApp::BootPromptApp()
@@ -60,23 +96,64 @@ BootPromptApp::MessageReceived(BMessage* message)
 		// confirm box.
 		case MSG_BOOT_DESKTOP:
 		{
-			BLaunchRoster().Target("desktop");
-			sExitValue = 1;
+			// Run by hand inside a session (Deskbar up): nothing to start.
+			if (be_roster->IsRunning(kDeskbarSignature)) {
+				sExitValue = 0;
+				PostMessage(B_QUIT_REQUESTED);
+				break;
+			}
 
+			status_t status = start_live_session();
+			if (status != B_OK) {
+				fprintf(stderr, "FirstBootPrompt: live session refused: %s\n",
+					strerror(status));
+				BString text(B_TRANSLATE("The live desktop could not be "
+					"started: %error%"));
+				text.ReplaceFirst("%error%", strerror(status));
+				BAlert* alert = new BAlert(B_TRANSLATE("Error"),
+					text.String(), B_TRANSLATE("OK"), NULL, NULL,
+					B_WIDTH_AS_USUAL, B_STOP_ALERT);
+				alert->Go(NULL);
+				break;
+			}
+
+			// janus now replaces this greeter session with the live one.
+			sExitValue = 0;
 			PostMessage(B_QUIT_REQUESTED);
 			break;
 		}
 		case MSG_RUN_INSTALLER:
 		{
-			BLaunchRoster().Target("installer");
+			status_t status = be_roster->Launch(kInstallerSignature);
+			if (status != B_OK && status != B_ALREADY_RUNNING) {
+				BString text(B_TRANSLATE("The installer could not be "
+					"started: %error%"));
+				text.ReplaceFirst("%error%", strerror(status));
+				BAlert* alert = new BAlert(B_TRANSLATE("Error"),
+					text.String(), B_TRANSLATE("OK"), NULL, NULL,
+					B_WIDTH_AS_USUAL, B_STOP_ALERT);
+				alert->Go(NULL);
+				break;
+			}
 			sExitValue = 0;
 
-			PostMessage(B_QUIT_REQUESTED);
+			// As the greeter frontend this window is all the seat shows
+			// besides the Installer; quitting would leave a blank screen
+			// once the Installer closes. Inside a session, quit as before.
+			if (be_roster->IsRunning(kDeskbarSignature))
+				PostMessage(B_QUIT_REQUESTED);
 			break;
 		}
 		case MSG_REBOOT_REQUESTED:
 		{
-			_kern_shutdown(true);
+			// The registrar hands the reboot to janus, which runs as root.
+			BRoster roster;
+			BRoster::Private rosterPrivate(roster);
+			status_t status = rosterPrivate.ShutDown(true, false, false);
+			if (status != B_OK) {
+				fprintf(stderr, "FirstBootPrompt: reboot failed: %s\n",
+					strerror(status));
+			}
 			sExitValue = -1;
 			break;
 		}

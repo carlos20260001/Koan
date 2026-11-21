@@ -16,7 +16,6 @@ HaikuSubInclude devices ;
 HaikuSubInclude diskprobe ;
 HaikuSubInclude diskusage ;
 HaikuSubInclude expander ;
-HaikuSubInclude firstbootprompt ;
 HaikuSubInclude fontdemo ;
 HaikuSubInclude glteapot ;
 HaikuSubInclude gradients ;
