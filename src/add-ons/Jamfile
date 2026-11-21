@@ -14,5 +14,4 @@ SubInclude HAIKU_TOP src add-ons print ;
 SubInclude HAIKU_TOP src add-ons quick_look ;
 SubInclude HAIKU_TOP src add-ons screen_savers ;
 SubInclude HAIKU_TOP src add-ons translators ;
-SubInclude HAIKU_TOP src add-ons tracker ;
 
