@@ -61,16 +61,6 @@ set(SYSTEM_APPS_UNLISTED
 VosKeepTargets(SYSTEM_APPS_UNLISTED)
 ImageInclude("/system/apps" ${SYSTEM_APPS_UNLISTED})
 
-install(CODE "
-	file(MAKE_DIRECTORY \"\$ENV{DESTDIR}/system/data/deskbar/menu/Applications\")
-")
-foreach(app ${SYSTEM_APPS})
-	install(CODE "
-		file(CREATE_LINK \"/system/apps/${app}\"
-			\"\$ENV{DESTDIR}/system/data/deskbar/menu/Applications/${app}\"
-			SYMBOLIC)
-	")
-endforeach()
 
 set(DESKBAR_DEMOS
 	#FontDemo
@@ -93,16 +83,6 @@ VosKeepTargets(DESKBAR_DEMOS_TARGETS)
 VosKeepTargets(DESKBAR_DEMOS)
 ImageInclude("/system/apps" ${DESKBAR_DEMOS_TARGETS})
 
-install(CODE "
-	file(MAKE_DIRECTORY \"\$ENV{DESTDIR}/system/data/deskbar/menu/Demos\")
-")
-foreach(app ${DESKBAR_DEMOS})
-	install(CODE "
-		file(CREATE_LINK \"/system/apps/${app}\"
-			\"\$ENV{DESTDIR}/system/data/deskbar/menu/Demos/${app}\"
-			SYMBOLIC)
-	")
-endforeach()
 
 set(DESKBAR_APPLETS
 	AudioMixer
@@ -126,13 +106,3 @@ set(DESKBAR_APPLETS
 VosKeepTargets(DESKBAR_APPLETS)
 ImageInclude("/system/apps" ${DESKBAR_APPLETS})
 
-install(CODE "
-	file(MAKE_DIRECTORY \"\$ENV{DESTDIR}/system/data/deskbar/menu/Desktop applets\")
-")
-foreach(app ${DESKBAR_APPLETS})
-	install(CODE "
-		file(CREATE_LINK \"/system/apps/${app}\"
-			\"\$ENV{DESTDIR}/system/data/deskbar/menu/Desktop applets/${app}\"
-			SYMBOLIC)
-	")
-endforeach()
