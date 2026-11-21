@@ -65,6 +65,9 @@ mkdir -p "/etc/skel/config/settings/printers/Save as PDF"
 
 beos_string() {
 	local name="$1" value="$2" target="$3"
+	# ported subset: data/ is not all in this tree yet (M9 W4); skip
+	# what is not installed instead of failing the whole configure.
+	[ -e "$target" ] || { echo "vos: postinst: $target not installed, attribute skipped" >&2; return 0; }
 	# B_STRING_TYPE LE prefix + value bytes (no null; setfattr adds none,
 	# fs_read_attr only reads dataSize = attrSize - 4 bytes)
 	local hex
@@ -74,6 +77,9 @@ beos_string() {
 
 beos_mime() {
 	local name="$1" value="$2" target="$3"
+	# ported subset: data/ is not all in this tree yet (M9 W4); skip
+	# what is not installed instead of failing the whole configure.
+	[ -e "$target" ] || { echo "vos: postinst: $target not installed, attribute skipped" >&2; return 0; }
 	# B_MIME_STRING_TYPE LE prefix
 	local hex
 	hex="534d494d$(printf '%s' "$value" | od -A n -t x1 | tr -d ' \n')00"
@@ -169,7 +175,14 @@ if [ -f /usr/share/vos/apps_attrs.tar ]; then
     rm -rf "$_tmp"
 fi
 
-systemctl enable janus.service registrar.service app_server.service input_server.service mount_server.service notification_server.service deskbar.service tracker.service
+# ported subset: enable the units that are installed; app_server, Deskbar and
+# Tracker have none in this tree yet (janus_session starts them at login).
+for _unit in janus.service registrar.service app_server.service \
+		input_server.service mount_server.service notification_server.service \
+		deskbar.service tracker.service; do
+	systemctl enable "$_unit" 2>/dev/null \
+		|| echo "vos: postinst: $_unit not installed, not enabled" >&2
+done
 # live-boot exists only on the live ISO; enabling it on installed targets would undo the Installer's disable on every upgrade.
 if [ "$(dpkg-query -W -f='${Status}' live-boot 2>/dev/null || true)" = "install ok installed" ]; then
     systemctl enable userbootscript@vos-live.service
