@@ -1,11 +1,14 @@
 /*
  * Copyright 2008, François Revol, revol@free.fr. All rights reserved.
+ * Copyright 2026, Koan contributors. All rights reserved.
  * Distributed under the terms of the MIT License.
  */
 
 
 #include "SystemInfoHandler.h"
 
+#include <fcntl.h>
+#include <cmath>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -35,23 +38,35 @@ SystemInfoHandler::SystemInfoHandler()
 	fMediaConnections = 0;
 	fMediaBuffers = 0;
 
-	fThermalFD = open("/dev/power/acpi_thermal/0", O_RDONLY);
-	if (fThermalFD <= 0) {
+	// Linux back end: the first thermal zone in sysfs instead of Haiku's
+	// acpi_thermal driver; "type" names it, "temp" holds millidegrees C.
+	fThermalFD = open("/sys/class/thermal/thermal_zone0/temp",
+		O_RDONLY | O_CLOEXEC);
+	if (fThermalFD < 0) {
 		fThermalZoneName = B_TRANSLATE("No thermal sensor");
 		return;
 	}
 
 	char buffer[256];
-	if (ioctl(fThermalFD, B_GET_DEVICE_NAME, buffer, sizeof(buffer)) == B_OK)
+	int typeFD = open("/sys/class/thermal/thermal_zone0/type",
+		O_RDONLY | O_CLOEXEC);
+	ssize_t length = typeFD >= 0
+		? read(typeFD, buffer, sizeof(buffer) - 1) : -1;
+	if (typeFD >= 0)
+		close(typeFD);
+	if (length > 0) {
+		buffer[length] = '\0';
 		fThermalZoneName = buffer;
-	else
+		fThermalZoneName.RemoveSet("\n");
+	} else
 		fThermalZoneName = B_TRANSLATE("Unknown thermal sensor");
 }
 
 
 SystemInfoHandler::~SystemInfoHandler()
 {
-	close(fThermalFD);
+	if (fThermalFD >= 0)
+		close(fThermalFD);
 }
 
 
@@ -223,17 +238,14 @@ SystemInfoHandler::Temperature() const
 {
 	float temperature = std::nanf("");
 	if (fThermalFD >= 0) {
-		char buffer[256];
-		// TODO it would be nice to use ioctl to get direct access to the temperature instead,
-		// but that provides raw values from the sensors without the "kelvin offset" fixup, making
-		// it unusable.
-		// The ioctl reply also uses a different format for each of the *_thermal drivers, so that
-		// would be a problem if ActivityMonitor is extended to collect info from these as well.
-		pread(fThermalFD, buffer, sizeof(buffer), 0);
-
-		char* currTemp = strstr(buffer, "Current Temperature: ");
-		if (currTemp != NULL)
-			sscanf(currTemp + strlen("Current Temperature: "), "%f", &temperature);
+		char buffer[32];
+		ssize_t length = pread(fThermalFD, buffer, sizeof(buffer) - 1, 0);
+		long milliCelsius;
+		if (length > 0) {
+			buffer[length] = '\0';
+			if (sscanf(buffer, "%ld", &milliCelsius) == 1)
+				temperature = milliCelsius / 1000.0f;
+		}
 
 	}
 

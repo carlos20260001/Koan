@@ -1,6 +1,5 @@
 SubDir HAIKU_TOP src apps ;
 
-HaikuSubInclude activitymonitor ;
 HaikuSubInclude autoraise ;
 HaikuSubInclude bluetoothstatus ;
 HaikuSubInclude bootmanager ;
