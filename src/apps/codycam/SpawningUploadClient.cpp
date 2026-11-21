@@ -8,6 +8,7 @@
 #include "SpawningUploadClient.h"
 
 #include <errno.h>
+#include <fcntl.h>
 #include <signal.h>
 #include <stdlib.h>
 #include <unistd.h>
@@ -122,23 +123,21 @@ SpawningUploadClient::ParseReply()
 int
 SpawningUploadClient::getpty(char* pty, char* tty)
 {
-	static const char major[] = "pqrs";
-	static const char minor[] = "0123456789abcdef";
-	uint32 i, j;
-	int32 fd = -1;
+	// Linux: a Unix 98 pseudo terminal from /dev/ptmx instead of the BSD
+	// /dev/pt/XX + /dev/tt/XX pairs air/OS opened.
+	int fd = posix_openpt(O_RDWR | O_NOCTTY);
+	if (fd < 0)
+		return fd;
 
-	for (i = 0; i < sizeof(major); i++)
-	{
-		for (j = 0; j < sizeof(minor); j++)
-		{
-			sprintf(pty, "/dev/pt/%c%c", major[i], minor[j]);
-			sprintf(tty, "/dev/tt/%c%c", major[i], minor[j]);
-			fd = open(pty, O_RDWR|O_NOCTTY);
-			if (fd >= 0)
-				return fd;
-		}
+	const char* slave = NULL;
+	if (grantpt(fd) != 0 || unlockpt(fd) != 0
+		|| (slave = ptsname(fd)) == NULL || strlen(slave) >= 20) {
+		close(fd);
+		return -1;
 	}
 
+	strcpy(pty, "/dev/ptmx");
+	strcpy(tty, slave);
 	return fd;
 }
 
