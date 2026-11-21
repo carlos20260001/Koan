@@ -45,7 +45,6 @@ HaikuSubInclude remotedesktop ;
 HaikuSubInclude resedit ;
 HaikuSubInclude screenreader ;
 HaikuSubInclude screenshot ;
-HaikuSubInclude serialconnect ;
 HaikuSubInclude showimage ;
 HaikuSubInclude softwareupdater ;
 HaikuSubInclude systemupdater ;
