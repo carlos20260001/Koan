@@ -1,6 +1,4 @@
-directory /boot/home/config/settings/deskbar/menu
-directory /boot/home/config/non-packaged/data/deskbar/menu
-directory /boot/home/config/data/deskbar/menu
-directory /boot/system/non-packaged/data/deskbar/menu
-directory /boot/system/data/deskbar/menu
-
+# The system-wide Deskbar menu. Deskbar writes each user a copy that adds
+# their own menu directories (~/config/settings/deskbar/menu_entries); this
+# file is used when it cannot.
+directory /system/data/deskbar/menu

@@ -332,6 +332,8 @@ TBarApp::InitSettings()
 	find_directory(B_USER_DESKBAR_DIRECTORY, &dirPath, true);
 		// just make it
 
+	UpdateUserDeskbarMenuEntries();
+
 	if (GetDeskbarSettingsDirectory(dirPath, true) == B_OK) {
 		BPath filePath = dirPath;
 		filePath.Append(settingsFileName);
