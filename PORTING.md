@@ -549,6 +549,9 @@ Waves (each on its own `port/*` branch, merged here when green):
             "Can't open Nexus IPC" without the module. Registrar test programs built,
             not run. Runtime deps to add: cifs-utils (Recommends)
 - [ ] W4: `src/apps`, `src/preferences`, `src/add-ons`, `src/bin`, `src/libs`,
+      **Exception (user, 2026-11-20): Deskbar and the Tracker app/add-ons use no
+      VitruvianOS source** — air/OS's code ported to Linux by hand (VitruvianOS read
+      only as a reference for mechanisms), committed under our authorship.
       `src/data`, `data/`, remaining tests
 - [ ] W5: `Jamrules`, `Jamfile`, `build/jam`, Haiku `configure`, Haiku-only
       `build/scripts` deleted; `git ls-files | grep -c Jamfile` = 0; full `ninja`,
@@ -604,6 +607,37 @@ counterparts and Mesa:
 - Koan's Wayland server (`VOS_WITH_WLROOTS`) and the DRM display layout it needs
   come after this, on the same KMS device
 
+### M10 - Desktop completeness — pending (user, 2026-11-21; after the running W4 tasks)
+The Deskbar menu (`build/profiles/deskbar.cmake`, air/OS's lists) links only programs
+this tree builds, so its folders fill as ports land.
+- [ ] **Applications, Utilities, Demos, Preferences:** port the remaining programs the
+      menu lists (`deskbar.cmake`): Applications (DeskCalc, StyledEdit, Terminal,
+      HaikuDepot, Icon-O-Matic, Mail, MediaConverter, MidiPlayer, People,
+      SoftwareUpdater, SoundRecorder, System Updater), Utilities (CharacterMap,
+      Debugger, Devices, DiskProbe, DiskUsage, Expander, CodyCam, Magnify, PoorMan,
+      SerialConnect; DriveSetup done), Demos (Chart, Clock, Cortex, FontDemo, GLTeapot,
+      Lookout, Mandelbrot, OverlayImage, Pairs, PatchBay, Playground, Pulse, Sudoku);
+      Preferences are running (P1/P2)
+- [ ] **Desktop applets:** port the Deskbar status applets `src/apps/{wifistatus,
+      bluetoothstatus,networkstatus,powerstatus,processcontroller,workspaces,autoraise,
+      launchbox,switcher,screenreader}`, Pulse's `DeskbarPulseView`, `src/bin/desklink`
+      (volume), the KeymapSwitcher (`src/preferences/keymap`), and the media-controls and
+      notification replicants (`src/servers/{media_controls,notification}`). Deskbar runs
+      without them; `first_login/default_deskbar_items.sh` adds the installed ones
+- [ ] **Office, Media, Developer:** air/OS fills these from external packages: its image
+      pulls prebuilt `.hpkg` packages from HaikuPorts (`build/jam/repositories/HaikuPorts`),
+      and each package supplies its own menu link (`build/jam/packages/Haiku`: "Office,
+      Media and Developer applications supply their links in their own packages").
+      Plan: add the recipe sources as git submodule(s) (HaikuPorts recipes and/or the
+      `airos-works/*` forks, to be chosen), and a **bypass** in the build so those recipes
+      produce **Debian `.deb` packages, not `.hpkg`**, built in the container/chroot,
+      each installing its menu link under `/system/data/deskbar/menu/{Office,Media,
+      Developer}` and published through the vos apt repository. To decide: which
+      repository and which packages per folder
+- [ ] Also open from the shell ports: `src/preferences/deskbar` link name (`Deskbar_prefs`)
+      and `Tracker_prefs` must match the preferences ports; the `menu_entries` type
+      attribute on the system file comes from `postinst`
+
 ### Not started (later milestones)
 - Kits (`libbe`) and `input_server` on CMake, needed before M5 can link
 - app_server on DRM, registrar, the rest of the VitruvianOS userland
@@ -637,3 +671,6 @@ counterparts and Mesa:
 | 2026-11-20 | `72f99e7e6b` | License audit of the 1183 VitruvianOS-derived files: all license/copyright headers kept; license texts now installed; License.md appendix corrected |
 | 2026-11-20 | `15f4ad3df0` | M9 W3-B: KMS/GBM/Mesa display backend merged; wave 3 code complete, integrated build green, ctest 9+1 skipped |
 | 2026-11-20 | `cff8afefe1` | Splash shows the Koan wordmark (images-koan.h, generator on CMake) |
+| 2026-11-21 | `1c42a01c50` | Release ISO: chroot-only compile fixes (`<utility>` in netservices2, `std::isnan`/`isfinite` in app_server); postinst skips missing data |
+| 2026-11-21 | `bd442cd7d5` | W4: Tracker app + 8 add-ons from air/OS sources (no VitruvianOS code) |
+| 2026-11-21 | `f01071d9b2` | W4: Deskbar + its menu data from air/OS sources; logind suspend/hibernate, lock, log out |
