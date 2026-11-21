@@ -162,7 +162,7 @@ target_include_directories(bpackage PRIVATE
 	${CMAKE_SOURCE_DIR}/headers/private/package
 )
 UsePrivateHeaders(bpackage app kernel shared libroot storage support system)
-install(TARGETS bpackage DESTINATION /system/lib/)
+install(TARGETS bpackage DESTINATION /lib/)
 
 # The libsolv based BSolver add-on, against Debian's libsolv (air/OS uses
 # the copy in src/libs/libsolv).
@@ -192,7 +192,7 @@ if(VOS_LIBSOLV_INCLUDE_DIR AND VOS_LIBSOLV_LIBRARY AND VOS_LIBSOLVEXT_LIBRARY)
 		${CMAKE_SOURCE_DIR}/headers/private/package
 	)
 	UsePrivateHeaders(package-add-on-libsolv shared)
-	install(TARGETS package-add-on-libsolv DESTINATION /system/lib/)
+	install(TARGETS package-add-on-libsolv DESTINATION /lib/)
 else()
 	message(STATUS "package kit: no libsolv with repo_haiku; the libsolv "
 		"solver add-on is left out")

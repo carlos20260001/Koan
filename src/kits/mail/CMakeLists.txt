@@ -39,4 +39,4 @@ target_include_directories(mail PRIVATE
 	${CMAKE_SOURCE_DIR}/headers/os/add-ons/mail_daemon
 )
 UsePrivateHeaders(mail shared textencoding)
-install(TARGETS mail DESTINATION /system/lib/)
+install(TARGETS mail DESTINATION /lib/)
