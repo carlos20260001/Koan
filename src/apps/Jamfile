@@ -9,8 +9,6 @@ HaikuSubInclude charactermap ;
 HaikuSubInclude clock ;
 HaikuSubInclude codycam ;
 HaikuSubInclude cortex ;
-HaikuSubInclude debuganalyzer ;
-HaikuSubInclude debugger ;
 HaikuSubInclude deskcalc ;
 HaikuSubInclude devices ;
 HaikuSubInclude diskprobe ;
