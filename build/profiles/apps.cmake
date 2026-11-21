@@ -5,6 +5,18 @@ set(CORE_APPLICATIONS
 VosKeepTargets(CORE_APPLICATIONS)
 ImageInclude("/system/" ${CORE_APPLICATIONS})
 
+# Tracker's mail add-ons. The other Tracker add-ons are listed in
+# base.cmake (TRACKER_ADDONS); these link air/OS's mail kit and are kept
+# only when it builds. Tracker reads their resources from the file, so
+# they need no entry in apps_attrs.
+set(TRACKER_MAIL_ADDONS
+	LabelAs
+	MarkAs
+	MarkAsRead
+)
+VosKeepTargets(TRACKER_MAIL_ADDONS)
+ImageInclude("/system/add-ons/Tracker" ${TRACKER_MAIL_ADDONS})
+
 # Greeter binary — /system/servers/ so janus finds it by name.
 if(TARGET vitruvian-login) # ported subset: not in this tree yet
 ImageInclude("/system/servers" vitruvian-login)
