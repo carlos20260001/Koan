@@ -20,7 +20,6 @@ HaikuSubInclude firstbootprompt ;
 HaikuSubInclude fontdemo ;
 HaikuSubInclude glteapot ;
 HaikuSubInclude gradients ;
-HaikuSubInclude haikudepot ;
 HaikuSubInclude launchbox ;
 HaikuSubInclude login ;
 HaikuSubInclude lookout ;
