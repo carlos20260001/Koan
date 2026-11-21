@@ -30,7 +30,6 @@ HaikuSubInclude mail ;
 HaikuSubInclude mandelbrot ;
 HaikuSubInclude mediaconverter ;
 HaikuSubInclude mediaplayer ;
-HaikuSubInclude midiplayer ;
 HaikuSubInclude musiccollection ;
 HaikuSubInclude networkstatus ;
 HaikuSubInclude overlayimage ;
