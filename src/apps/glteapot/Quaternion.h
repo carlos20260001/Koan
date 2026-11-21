@@ -33,6 +33,9 @@ subject to the following restrictions:
 #ifndef __QUATERNION_H__
 #define __QUATERNION_H__
 
+#include <float.h>
+#include <math.h>
+
 #include "Vector3.h"
 
 class Quaternion {

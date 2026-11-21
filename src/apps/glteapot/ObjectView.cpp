@@ -24,6 +24,8 @@
 #include <InterfaceKit.h>
 #include <FindDirectory.h>
 
+#include <math.h>
+
 #include "FPS.h"
 #include "GLObject.h"
 #include "ResScroll.h"
@@ -34,6 +36,16 @@
 float displayScale = 1.0;
 float depthOfView = 30.0;
 float zRatio = 10.0;
+
+// The perspective projection gluPerspective() sets up, built with
+// glFrustum(): Linux builds do not need GLU for this one call.
+static void
+SetPerspective(GLdouble fovY, GLdouble aspect, GLdouble zNear, GLdouble zFar)
+{
+	GLdouble yMax = zNear * tan(fovY * M_PI / 360.0);
+	GLdouble xMax = yMax * aspect;
+	glFrustum(-xMax, xMax, -yMax, yMax, zNear, zFar);
+}
 
 float white[3] = {1.0, 1.0, 1.0};
 float dimWhite[3] = {0.25, 0.25, 0.25};
@@ -574,7 +586,7 @@ ObjectView::FrameResized(float width, float height)
 	float scale = displayScale;
 
 	if (fPersp) {
-		gluPerspective(60, 1.0 / fYxRatio, 0.15, 120);
+		SetPerspective(60, 1.0 / fYxRatio, 0.15, 120);
 	} else {
 		if (fYxRatio < 1) {
 			glOrtho(-scale / fYxRatio, scale / fYxRatio, -scale, scale, -1.0,
@@ -612,7 +624,7 @@ ObjectView::RepositionView()
 	float scale = displayScale;
 
 	if (fPersp) {
-		gluPerspective(60, 1.0 / fYxRatio, 0.15, 120);
+		SetPerspective(60, 1.0 / fYxRatio, 0.15, 120);
 	} else {
 		if (fYxRatio < 1) {
 			glOrtho(-scale / fYxRatio, scale / fYxRatio, -scale, scale, -1.0,
