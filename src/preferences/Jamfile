@@ -1,7 +1,6 @@
 SubDir HAIKU_TOP src preferences ;
 
 SubInclude HAIKU_TOP src preferences bluetooth ;
-SubInclude HAIKU_TOP src preferences input ;
 SubInclude HAIKU_TOP src preferences joysticks ;
 SubInclude HAIKU_TOP src preferences keymap ;
 SubInclude HAIKU_TOP src preferences locale ;
