@@ -18,7 +18,6 @@ HaikuSubInclude diskusage ;
 HaikuSubInclude expander ;
 HaikuSubInclude fontdemo ;
 HaikuSubInclude glteapot ;
-HaikuSubInclude gradients ;
 HaikuSubInclude haikudepot ;
 HaikuSubInclude icon-o-matic ;
 HaikuSubInclude launchbox ;
