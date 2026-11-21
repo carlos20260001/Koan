@@ -1,6 +1,0 @@
-SubDir HAIKU_TOP src data ;
-
-HaikuSubInclude bin ;
-HaikuSubInclude keyboard_layouts ;
-HaikuSubInclude keymaps ;
-HaikuSubInclude mime_db ;
