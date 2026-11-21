@@ -36,6 +36,8 @@ All rights reserved.
 
 #include "BarMenuTitle.h"
 
+#include <math.h>
+
 #include <Bitmap.h>
 #include <ControlLook.h>
 #include <Debug.h>

@@ -36,6 +36,11 @@ All rights reserved.
 
 #include "ExpandoMenuBar.h"
 
+#include <math.h>
+#include <stdlib.h>
+#include <string.h>
+#include <algorithm>
+
 #include <strings.h>
 
 #include <map>

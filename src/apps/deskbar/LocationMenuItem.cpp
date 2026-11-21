@@ -6,6 +6,8 @@
 
 #include "LocationMenuItem.h"
 
+#include <math.h>
+
 #include <Catalog.h>
 #include <ControlLook.h>
 #include <Directory.h>
@@ -138,7 +140,7 @@ TLocationMenuItem::AddLocations(BMenu* menu)
 			continue;
 		}
 
-		BVolume parentVolume(ref.device);
+		BVolume parentVolume(ref.device());
 		if (parentVolume.InitCheck() == B_OK && parentVolume.IsPersistent())
 			continue;
 

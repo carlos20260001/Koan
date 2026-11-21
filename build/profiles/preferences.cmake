@@ -57,13 +57,3 @@ set(SYSTEM_PREFERENCES
 VosKeepTargets(SYSTEM_PREFERENCES_TARGETS PARALLEL SYSTEM_PREFERENCES)
 ImageInclude("/system/preferences" ${SYSTEM_PREFERENCES_TARGETS})
 
-install(CODE "
-	file(MAKE_DIRECTORY \"\$ENV{DESTDIR}/system/data/deskbar/menu/Preferences\")
-")
-foreach(pref ${SYSTEM_PREFERENCES})
-	install(CODE "
-		file(CREATE_LINK \"/system/preferences/${pref}\"
-			\"\$ENV{DESTDIR}/system/data/deskbar/menu/Preferences/${pref}\"
-			SYMBOLIC)
-	")
-endforeach()

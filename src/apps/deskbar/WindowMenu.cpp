@@ -36,6 +36,8 @@ All rights reserved.
 
 #include "WindowMenu.h"
 
+#include <stdlib.h>
+
 #include <Catalog.h>
 #include <Locale.h>
 #include <Window.h>

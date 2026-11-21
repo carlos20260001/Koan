@@ -36,9 +36,16 @@ All rights reserved.
 
 #include "BarApp.h"
 
-#include <locale.h>
-#include <strings.h>
+#include <math.h>
+#include <stdlib.h>
 
+#include <locale.h>
+#include <stdio.h>
+#include <string.h>
+#include <strings.h>
+#include <unistd.h>
+
+#include <Alert.h>
 #include <AppFileInfo.h>
 #include <Autolock.h>
 #include <Bitmap.h>
@@ -60,7 +67,9 @@ All rights reserved.
 
 #include <DeskbarPrivate.h>
 #include <InterfacePrivate.h>
+#include <LaunchDaemonDefs.h>
 #include <RosterPrivate.h>
+#include <kernel/util/KMessage.h>
 #include "tracker_private.h"
 
 #include "BarView.h"
@@ -322,6 +331,8 @@ TBarApp::InitSettings()
 
 	find_directory(B_USER_DESKBAR_DIRECTORY, &dirPath, true);
 		// just make it
+
+	UpdateUserDeskbarMenuEntries();
 
 	if (GetDeskbarSettingsDirectory(dirPath, true) == B_OK) {
 		BPath filePath = dirPath;
@@ -708,8 +719,40 @@ TBarApp::MessageReceived(BMessage* message)
 			break;
 
 		case kSuspendSystem:
-			// TODO: Call BRoster?
+		case kHibernateSystem:
+		{
+			// The registrar asks logind, and locks the screen first
+			BRoster roster;
+			BRoster::Private rosterPrivate(roster);
+			status_t error = message->what == kSuspendSystem
+				? rosterPrivate.Suspend() : rosterPrivate.Hibernate();
+			if (error != B_OK)
+				fprintf(stderr, "Sleep failed: %s\n", strerror(error));
 			break;
+		}
+
+		case kLogOutUser:
+		{
+			// The registrar quits the applications like for a shutdown,
+			// then janus ends the session instead of powering off.
+			BRoster roster;
+			BRoster::Private rosterPrivate(roster);
+			status_t error = rosterPrivate.LogOut(false);
+			if (error != B_OK)
+				fprintf(stderr, "Log out failed: %s\n", strerror(error));
+			break;
+		}
+
+		case kLockScreen:
+		{
+			// janus answers only after it started the unlock window, so
+			// wait for it away from the application looper.
+			thread_id thread = spawn_thread(&_LockScreenThread,
+				"lock screen", B_NORMAL_PRIORITY, NULL);
+			if (thread >= 0)
+				resume_thread(thread);
+			break;
+		}
 
 		case kRebootSystem:
 		case kShutdownSystem:
@@ -1112,6 +1155,16 @@ TBarApp::_CacheTeamIcon(BarTeamInfo* barInfo, int32 size)
 		}
 	}
 
+	// Linux applications (X11, Qt, Wayland clients) are plain ELF files
+	// without icon resources; their signature's MIME type may have one
+	BMimeType signatureType(barInfo->sig);
+	if (signatureType.InitCheck() == B_OK
+		&& signatureType.GetIcon(icon, (icon_size)size) == B_OK) {
+		barInfo->iconCache[index] = barInfo->icon = icon;
+
+		return B_OK;
+	}
+
 	// couldn't find the app icon
 	// fetch the generic 3 boxes icon and cache it
 	BMimeType defaultAppMime;
@@ -1276,4 +1329,44 @@ WindowIconCache::_Init()
 {
 	for (int32 i = 0; i < kWindowIconCacheCount; i++)
 		iconCache[i] = NULL;
+}
+
+
+#undef B_TRANSLATION_CONTEXT
+#define B_TRANSLATION_CONTEXT "BarApp"
+
+
+/*!	Asks janus to lock the session, the way the registrar does before a
+	suspend, and tells the user when the screen cannot be locked.
+*/
+/*static*/ status_t
+TBarApp::_LockScreenThread(void* /*data*/)
+{
+	status_t error = B_NAME_NOT_FOUND;
+	port_id janus = find_port(B_LAUNCH_DAEMON_PORT_NAME);
+	if (janus >= 0) {
+		BPrivate::KMessage request(BPrivate::B_JANUS_LOCK_SESSION);
+		BPrivate::KMessage reply;
+		error = request.SendTo(janus, -1, &reply, 2000000LL, 2000000LL,
+			getpid());
+		if (error == B_OK)
+			error = (status_t)reply.What();
+	}
+
+	if (error == B_OK)
+		return B_OK;
+
+	const char* text;
+	if (error == B_NOT_ALLOWED) {
+		text = B_TRANSLATE("The screen can only be locked when your "
+			"account has a password.");
+	} else {
+		text = B_TRANSLATE("The screen could not be locked.");
+	}
+	BAlert* alert = new BAlert(B_TRANSLATE("Lock screen"), text,
+		B_TRANSLATE("OK"), NULL, NULL, B_WIDTH_AS_USUAL, B_STOP_ALERT);
+	alert->SetFlags(alert->Flags() | B_CLOSE_ON_ESCAPE);
+	alert->Go(NULL);
+
+	return error;
 }

@@ -36,6 +36,8 @@ All rights reserved.
 
 #include "StatusView.h"
 
+#include <math.h>
+
 #include <errno.h>
 #include <stdio.h>
 #include <string.h>
@@ -103,9 +105,10 @@ DumpItem(DeskbarItemInfo* item)
 {
 	printf("is addon: %i, id: %" B_PRId32 "\n", item->isAddOn, item->id);
 	printf("entry_ref:  %" B_PRIdDEV ", %" B_PRIdINO ", %s\n",
-		item->entryRef.device, item->entryRef.directory, item->entryRef.name);
-	printf("node_ref:  %" B_PRIdDEV ", %" B_PRIdINO "\n", item->nodeRef.device,
-		item->nodeRef.node);
+		item->entryRef.device(), item->entryRef.directory(),
+		item->entryRef.name);
+	printf("node_ref:  %" B_PRIdDEV ", %" B_PRIdINO "\n",
+		item->nodeRef.device(), item->nodeRef.node());
 }
 
 
@@ -584,24 +587,20 @@ TReplicantTray::HandleEntryUpdate(BMessage* message)
 	switch (opcode) {
 		case B_ENTRY_MOVED:
 		{
-			entry_ref ref;
-			ino_t todirectory;
-			ino_t node;
+			// The storage kit names the moved node and its new directory
+			// in "virtual:" fields; the node itself does not change.
 			const char* name;
+			node_ref nodeRef;
+			entry_ref toDirectory;
 			if (message->FindString("name", &name) == B_OK
-				&& message->FindInt64("from directory", &(ref.directory))
-					== B_OK
-				&& message->FindInt64("to directory", &todirectory) == B_OK
-				&& message->FindInt32("device", &(ref.device)) == B_OK
-				&& message->FindInt64("node", &node) == B_OK ) {
-
+				&& message->FindNodeRef("virtual:node", &nodeRef) == B_OK
+				&& message->FindRef("virtual:to directory", &toDirectory)
+					== B_OK) {
 				if (name == NULL)
 					break;
 
-				ref.set_name(name);
-				// change the directory reference to
-				// the new directory
-				MoveItem(&ref, todirectory);
+				MoveItem(nodeRef, entry_ref(node_ref(toDirectory.vdevice(),
+					toDirectory.vdirectory()), name));
 			}
 			break;
 		}
@@ -610,8 +609,7 @@ TReplicantTray::HandleEntryUpdate(BMessage* message)
 		{
 			// entry was rm'd from the device
 			node_ref nodeRef;
-			if (message->FindInt32("device", &(nodeRef.device)) == B_OK
-				&& message->FindInt64("node", &(nodeRef.node)) == B_OK) {
+			if (message->FindNodeRef("virtual:node", &nodeRef) == B_OK) {
 				DeskbarItemInfo* item = DeskbarItemFor(nodeRef);
 				if (item == NULL)
 					break;
@@ -712,11 +710,8 @@ TReplicantTray::AddItem(int32 id, node_ref nodeRef, BEntry& entry, bool isAddOn)
 	item->id = id;
 	item->isAddOn = isAddOn;
 
-	if (entry.GetRef(&item->entryRef) != B_OK) {
-		item->entryRef.device = -1;
-		item->entryRef.directory = -1;
-		item->entryRef.name = NULL;
-	}
+	if (entry.GetRef(&item->entryRef) != B_OK)
+		item->entryRef.unset();
 	item->nodeRef = nodeRef;
 
 	fItemList->AddItem(item);
@@ -742,7 +737,7 @@ TReplicantTray::UnloadAddOn(node_ref* nodeRef, dev_t* device, bool which,
 			continue;
 
 		if ((which && nodeRef != NULL && item->nodeRef == *nodeRef)
-			|| (device != NULL && item->nodeRef.device == *device)) {
+			|| (device != NULL && item->nodeRef.device() == *device)) {
 
 			if (device != NULL && be_roster->IsRunning(&item->entryRef))
 				continue;
@@ -791,24 +786,18 @@ TReplicantTray::RemoveItem(int32 id)
  */
 
 void
-TReplicantTray::MoveItem(entry_ref* ref, ino_t toDirectory)
+TReplicantTray::MoveItem(const node_ref& nodeRef, const entry_ref& newRef)
 {
-	if (ref == NULL)
-		return;
-
-	// scan for a matching entry_ref and update it
-	//
-	// don't need to change node info as it does not change
+	// scan for the moved node and point its entry_ref at the new place;
+	// the node info does not change
 
 	for (int32 i = fItemList->CountItems() - 1; i >= 0; i--) {
 		DeskbarItemInfo* item = (DeskbarItemInfo*)fItemList->ItemAt(i);
 		if (item == NULL)
 			continue;
 
-		if (strcmp(item->entryRef.name, ref->name) == 0
-			&& item->entryRef.device == ref->device
-			&& item->entryRef.directory == ref->directory) {
-			item->entryRef.directory = toDirectory;
+		if (item->nodeRef == nodeRef) {
+			item->entryRef = newRef;
 			break;
 		}
 	}
