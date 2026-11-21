@@ -9,7 +9,7 @@
 
 class LoginWindow : public BWindow {
 public:
-	LoginWindow(BRect frame);
+	LoginWindow(BRect frame, bool unlockMode = false);
 virtual	~LoginWindow();
 };
 

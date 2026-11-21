@@ -6,6 +6,7 @@
 
 #include <string.h>
 #include <stdio.h>
+#include <unistd.h>
 
 #include <Catalog.h>
 #include <Directory.h>
@@ -43,6 +44,10 @@ DesktopWindow::DesktopWindow(BRect frame, bool editMode)
 	status_t err;
 	entry_ref ref;
 	err = find_directory(B_SYSTEM_SETTINGS_DIRECTORY, &path, true);
+	// On Linux the greeter (vos_login) and the unlock app (the session
+	// user) cannot write the system settings; keep the shelf in their own.
+	if (err >= B_OK && access(path.Path(), W_OK) != 0)
+		err = find_directory(B_USER_SETTINGS_DIRECTORY, &path, true);
 	if (err >= B_OK) {
 		BDirectory dir(path.Path());
 		if (!dir.Contains("x-vnd.vos-Login", B_DIRECTORY_NODE))

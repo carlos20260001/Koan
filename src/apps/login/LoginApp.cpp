@@ -1,5 +1,6 @@
 /*
  * Copyright 2008, François Revol, <revol@free.fr>. All rights reserved.
+ * Copyright 2026, Koan contributors. All rights reserved.
  * Distributed under the terms of the MIT License.
  */
 
@@ -10,17 +11,17 @@
 #include <String.h>
 #include <View.h>
 
+#include <errno.h>
+#include <fcntl.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
 #include <pwd.h>
 
-#include <LaunchRoster.h>
+#include <LaunchDaemonDefs.h>
 #include <RosterPrivate.h>
-#include <shadow.h>
-
-#include "multiuser_utils.h"
+#include <util/KMessage.h>
 
 #include "LoginApp.h"
 #include "LoginWindow.h"
@@ -33,11 +34,34 @@
 const char *kLoginAppSig = "application/x-vnd.vos-Login";
 
 
+// On Linux the password check and the session start belong to janus, the
+// login broker on the launch daemon's port: it runs PAM ("vitruvian-auth")
+// as root and only accepts these requests from the greeter user
+// (vos_login), or from the session user while the screen is locked.
+static status_t
+send_to_janus(BPrivate::KMessage& request)
+{
+	port_id janusPort = find_port(B_LAUNCH_DAEMON_PORT_NAME);
+	if (janusPort < 0)
+		return janusPort;
+
+	BPrivate::KMessage reply;
+	status_t status = request.SendTo(janusPort, -1, &reply, 2000000LL,
+		30000000LL);
+	if (status != B_OK)
+		return status;
+	return (status_t)reply.What();
+}
+
+
 LoginApp::LoginApp()
 	:
 	BApplication(kLoginAppSig),
+	fDesktopWindow(NULL),
+	fLoginWindow(NULL),
 	fEditShelfMode(false),
-	fModalMode(true)
+	fModalMode(true),
+	fUnlockMode(false)
 {
 }
 
@@ -66,7 +90,7 @@ LoginApp::ReadyToRun()
 		BRect frame(0, 0, 450 * sizeDelta, 150 * sizeDelta);
 		frame.OffsetBySelf(screen.Frame().Width()/2 - frame.Width()/2,
 			screen.Frame().Height()/2 - frame.Height()/2);
-		fLoginWindow = new LoginWindow(frame);
+		fLoginWindow = new LoginWindow(frame, fUnlockMode);
 		fLoginWindow->Show();
 	}
 
@@ -79,18 +103,16 @@ LoginApp::ReadyToRun()
 void
 LoginApp::MessageReceived(BMessage *message)
 {
-	bool reboot = false;
-
 	switch (message->what) {
 		case kAttemptLogin:
 			TryLogin(message);
 			// TODO
 			break;
 		case kHaltAction:
-			reboot = false;
-			// FALLTHROUGH
 		case kRebootAction:
 		{
+			// The registrar hands the shutdown to janus, which runs as root.
+			bool reboot = message->what == kRebootAction;
 			BRoster roster;
 			BRoster::Private rosterPrivate(roster);
 			status_t error = rosterPrivate.ShutDown(reboot, false, false);
@@ -129,12 +151,16 @@ LoginApp::ArgvReceived(int32 argc, char **argv)
 			fEditShelfMode = true;
 		else if (arg == "--nonmodal")
 			fModalMode = false;
+		else if (arg == "--unlock")
+			fUnlockMode = true;
 		else /*if (arg == "--help")*/ {
 			puts(B_TRANSLATE("Login application for Haiku\nUsage:"));
-			printf("%s [--nonmodal] [--edit]\n", argv[0]);
+			printf("%s [--nonmodal] [--edit] [--unlock]\n", argv[0]);
 			puts(B_TRANSLATE("--nonmodal	Do not make the window modal"));
 			puts(B_TRANSLATE("--edit	Launch in shelf editing mode to "
 				"allow customizing the desktop."));
+			puts(B_TRANSLATE("--unlock	Ask for the password of the "
+				"current user to unlock the screen."));
 			// just return to the shell
 			exit((arg == "--help") ? 0 : 1);
 			return;
@@ -153,12 +179,15 @@ LoginApp::TryLogin(BMessage *message)
 	if (message->FindString("login", &login) == B_OK) {
 		const char* password = message->GetString("password");
 
-		status = ValidateLogin(login, password);
-		if (status == B_OK) {
-			status = BLaunchRoster().StartSession(login);
+		if (fUnlockMode)
+			status = Unlock(login, password);
+		else {
+			status = ValidateLogin(login, password);
 			if (status == B_OK)
-				Quit();
+				status = StartSession(login);
 		}
+		if (status == B_OK)
+			Quit();
 
 		fprintf(stderr, "ValidateLogin: %s\n", strerror(status));
 	}
@@ -183,11 +212,39 @@ LoginApp::ValidateLogin(const char *login, const char *password)
 		return ENOENT;
 	if (strcmp(pwd->pw_name, login) != 0)
 		return ENOENT;
+	if (password == NULL)
+		password = "";
 
-	if (verify_password(pwd, getspnam(login), password))
-		return B_OK;
+	// The greeter user cannot read /etc/shadow; janus checks the password
+	// through PAM and remembers the user for the LOGIN_OK that follows.
+	BPrivate::KMessage request(BPrivate::B_JANUS_AUTH_REQUEST);
+	request.AddString("user", login);
+	request.AddString("password", password);
+	return send_to_janus(request);
+}
 
-	return B_PERMISSION_DENIED;
+
+status_t
+LoginApp::StartSession(const char *login)
+{
+	// janus replaces this greeter session with the user's own.
+	BPrivate::KMessage request(BPrivate::B_JANUS_LOGIN_OK);
+	request.AddString("user", login);
+	return send_to_janus(request);
+}
+
+
+status_t
+LoginApp::Unlock(const char *login, const char *password)
+{
+	if (password == NULL)
+		password = "";
+
+	// janus checks the password through PAM and unlocks app_server.
+	BPrivate::KMessage request(BPrivate::B_JANUS_UNLOCK_AUTH);
+	request.AddString("user", login);
+	request.AddString("password", password);
+	return send_to_janus(request);
 }
 
 
