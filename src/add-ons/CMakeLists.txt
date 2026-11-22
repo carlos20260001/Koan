@@ -18,6 +18,7 @@ if(TARGET be)
 			locale
 			mail_daemon
 			media
+			network_settings
 			neural
 			opengl
 			print

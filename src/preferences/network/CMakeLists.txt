@@ -38,6 +38,9 @@ Application(
 )
 
 UsePrivateHeaders(Network net shared storage)
+# The network_settings add-ons subclass BNetworkSettingsAddOn and use the
+# shared views compiled in here; they resolve them against this executable.
+set_target_properties(Network PROPERTIES ENABLE_EXPORTS 1)
 target_include_directories(Network PRIVATE
 	${PROJECT_SOURCE_DIR}/headers/os/add-ons/network_settings
 	${PROJECT_SOURCE_DIR}/src/apps/networkstatus

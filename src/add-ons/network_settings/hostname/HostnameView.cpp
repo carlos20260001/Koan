@@ -21,6 +21,13 @@
 #include <SeparatorView.h>
 #include <StringView.h>
 
+#ifdef __linux__
+	// After the Be headers: GLib defines TRUE/FALSE as well.
+#	include <syslog.h>
+#	include <unistd.h>
+#	include <gio/gio.h>
+#endif
+
 
 static const int32 kMsgApply = 'aply';
 
@@ -129,8 +136,35 @@ HostnameView::_SaveHostname()
 
 	hostnamestring << fHostname->Text();
 
+#ifdef __linux__
+	// The static host name belongs to systemd-hostnamed, which writes
+	// /etc/hostname, updates the kernel's name and asks polkit whether this
+	// user may change it.
+	(void)hostnamelen;
+	GError* error = NULL;
+	GDBusConnection* bus = g_bus_get_sync(G_BUS_TYPE_SYSTEM, NULL, &error);
+	if (bus == NULL) {
+		syslog(LOG_WARNING, "Hostname: no system bus: %s", error->message);
+		g_error_free(error);
+		return B_ERROR;
+	}
+	GVariant* result = g_dbus_connection_call_sync(bus,
+		"org.freedesktop.hostname1", "/org/freedesktop/hostname1",
+		"org.freedesktop.hostname1", "SetStaticHostname",
+		g_variant_new("(sb)", hostnamestring.String(), TRUE), NULL,
+		G_DBUS_CALL_FLAGS_ALLOW_INTERACTIVE_AUTHORIZATION, -1, NULL, &error);
+	g_object_unref(bus);
+	if (result == NULL) {
+		syslog(LOG_WARNING, "Hostname: not set: %s", error->message);
+		g_error_free(error);
+		return B_PERMISSION_DENIED;
+	}
+	g_variant_unref(result);
+	return B_OK;
+#else
 	if (sethostname(hostnamestring, hostnamelen) == 0)
 		return B_OK;
 
 	return B_ERROR;
+#endif
 }
