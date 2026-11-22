@@ -69,7 +69,7 @@ VolumeControl::VolumeControl()
 	rect.left = rect.right - 7;
 	BDragger* dragger = new BDragger(rect, this, B_FOLLOW_RIGHT | B_FOLLOW_BOTTOM);
 
-	const char* remove = gSystemCatalog.GetString(B_TRANSLATE("Remove replicant"), "Dragger");
+	const char* remove = gSystemCatalog->GetString(B_TRANSLATE("Remove replicant"), "Dragger");
 
 	BPopUpMenu* popUp = new BPopUpMenu("volume", false, false, B_ITEMS_IN_COLUMN);
 	popUp->AddItem(new BMenuItem(remove, new BMessage(kDeleteReplicant)));

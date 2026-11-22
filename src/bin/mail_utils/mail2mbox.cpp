@@ -336,7 +336,7 @@ main(int argc, char** argv)
 	int messagesDoneCount = 0;
 	status_t status = B_OK;
 
-	while (dirent_t* entry = readdir(dir)) {
+	while (struct dirent* entry = readdir(dir)) {
 		// skip '.' and '..'
 		if (!strcmp(entry->d_name, ".") || !strcmp(entry->d_name, ".."))
 			break;

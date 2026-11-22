@@ -7,6 +7,7 @@
 #include <ctype.h>
 #include <getopt.h>
 #include <math.h>
+#include <cmath>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -567,7 +568,7 @@ main(int argc, char** argv)
 	ScreenMode screenMode(NULL);
 	screen_mode currentMode;
 	screenMode.Get(currentMode);
-	if (!isnan(brightness)) {
+	if (!std::isnan(brightness)) {
 		BScreen screen;
 		if (relativeBrightness) {
 			float previousBrightness;
