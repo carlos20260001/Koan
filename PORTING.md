@@ -780,8 +780,17 @@ overlay plane from app_server), which is follow-up work. vsync through
 `BScreen::WaitForRetrace` is kept and reaches the KMS backend's retrace semaphore.
 
 - [x] Design (this section)
-- [ ] Submodule, series, build step, `vos-mesa-hgl` .deb; compile-only build;
-      NEEDED resolved in the chroot; ctest
+- [x] Submodule, series, build step, `vos-mesa-hgl` .deb (merged `0f159065ab`). Builds:
+      `VOS_TMPFS_BUILD=0 VOS_BUILD_DIR=generated.release VOS_BUILD_TYPE=Release
+      VOS_IMAGE_TYPES=none ./podman-compose up --build` in the `port/opengl` worktree
+      exits 0 (6491 ninja steps, "Mesa hgl: ON (Mesa 22.0.5, 19 patches)", no
+      `OPENGL_RENDERERS` drop line); `LC_ALL=C.UTF-8 cpack -G DEB` writes
+      `VOS-0.6.3-Linux-mesa-hgl.deb` (`vos-mesa-hgl`: `/lib/libGL-hgl.so.1`,
+      `/lib/libglapi-hgl.so.0`, `/system/add-ons/opengl/Zink`); every NEEDED of those,
+      GLTeapot and Terminal-OpenGL is in the chroot or a vos/vos-mesa-hgl library, and
+      `ldd -r` reports none unresolved; ctest 1 passed, 1 skipped (pipewire_graph),
+      1 not run (vos_splash_test, not built in Release). After a checkout:
+      `git submodule update --init 3rdparty/mesa`, else the build leaves Mesa hgl out
 - [ ] Runtime: GLTeapot on RADV/ANV/NVK hardware, and on QEMU (virtio-gpu has no
       Vulkan, so lavapipe or softpipe)
 
@@ -825,3 +834,4 @@ overlay plane from app_server), which is follow-up work. vsync through
 | 2026-11-21 | `84a0729c50` | W4: all 63 remaining apps on CMake from air/OS sources; 96 binaries 0 undefined; src/apps Jamfile-free |
 | 2026-11-21 | `41fda17b21` | **Release ISO with every app**: vos-uefi.iso 1.38 GB (sha256 `2815a423fb3b…`), 60 apps, 26 panels, Deskbar, Tracker, Login (vitruvian-login link), FirstBootPrompt, splash, Nexus area/nexus/nexus_node_monitor for 6.12.117-rt; vos configures cleanly. Not booted yet |
 | 2026-11-21 | `594475e1b6` | W4: data/ and src/data ported, data.cmake active; **Release ISO builds** (vos-uefi.iso, 1.3 GB) |
+| 2026-11-22 | `0f159065ab` | M10: air/OS's Mesa route merged (`port/opengl`): Mesa 22.0.5 + air/OS Zink series + Koan series -> `vos-mesa-hgl` (libGL-hgl, Zink add-on on Debian Vulkan); compile-only Release build and cpack green; not run on a display |
