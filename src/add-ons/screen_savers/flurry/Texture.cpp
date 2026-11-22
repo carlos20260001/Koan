@@ -157,6 +157,42 @@ AverageLastAndFirstTextures(void)
 }
 
 
+// The mipmap chain gluBuild2DMipmaps() uploads for this 256x256
+// luminance-alpha texture, each level a 2x2 box filter of the one above:
+// Linux builds do not need GLU for this one call.
+static void
+BuildMipmaps()
+{
+	static GLubyte level[2][128][128][2];
+	const GLubyte* source = &bigTextureArray[0][0][0];
+	int size = 256;
+	int index = 0;
+
+	glTexImage2D(GL_TEXTURE_2D, 0, GL_LUMINANCE_ALPHA, size, size, 0,
+		GL_LUMINANCE_ALPHA, GL_UNSIGNED_BYTE, source);
+
+	for (int mip = 1; size > 1; mip++, index ^= 1) {
+		int half = size / 2;
+		GLubyte* target = &level[index][0][0][0];
+		for (int y = 0; y < half; y++) {
+			for (int x = 0; x < half; x++) {
+				for (int c = 0; c < 2; c++) {
+					int sum = source[((2 * y) * size + 2 * x) * 2 + c]
+						+ source[((2 * y) * size + 2 * x + 1) * 2 + c]
+						+ source[((2 * y + 1) * size + 2 * x) * 2 + c]
+						+ source[((2 * y + 1) * size + 2 * x + 1) * 2 + c];
+					target[(y * half + x) * 2 + c] = (GLubyte)(sum / 4);
+				}
+			}
+		}
+		glTexImage2D(GL_TEXTURE_2D, mip, GL_LUMINANCE_ALPHA, half, half, 0,
+			GL_LUMINANCE_ALPHA, GL_UNSIGNED_BYTE, target);
+		source = target;
+		size = half;
+	}
+}
+
+
 void
 MakeTexture()
 {
@@ -185,7 +221,6 @@ MakeTexture()
 	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER,
 		GL_LINEAR_MIPMAP_NEAREST);
 
-	gluBuild2DMipmaps(GL_TEXTURE_2D, 2, 256, 256, GL_LUMINANCE_ALPHA,
-		GL_UNSIGNED_BYTE, bigTextureArray);
+	BuildMipmaps();
 	glTexEnvf(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_MODULATE);
 }

@@ -16,7 +16,18 @@
 #include "GravitySource.h"
 #include "Particle.h"
 
-#include <GL/glu.h>
+#include <math.h>
+
+
+// The perspective projection SetPerspective() sets up, built with
+// glFrustum(): Linux builds do not need GLU for this one call.
+static void
+SetPerspective(GLdouble fovY, GLdouble aspect, GLdouble zNear, GLdouble zFar)
+{
+	GLdouble yMax = zNear * tan(fovY * M_PI / 360.0);
+	GLdouble xMax = yMax * aspect;
+	glFrustum(-xMax, xMax, -yMax, yMax, zNear, zFar);
+}
 
 
 GravityView::GravityView(BRect frame, Gravity* parent)
@@ -52,7 +63,7 @@ GravityView::AttachedToWindow()
 
 	glMatrixMode(GL_PROJECTION);
 	glLoadIdentity();
-	gluPerspective(45.0f, Bounds().Width() / Bounds().Height(), 2.0f, 20000.0f);
+	SetPerspective(45.0f, Bounds().Width() / Bounds().Height(), 2.0f, 20000.0f);
 	glMatrixMode(GL_MODELVIEW);
 	glLoadIdentity();
 

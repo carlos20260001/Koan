@@ -121,7 +121,7 @@ FlurryView::AttachedToWindow()
 	glViewport(0, 0, int(fWidth), int(fHeight));
 	glMatrixMode(GL_PROJECTION);
 	glLoadIdentity();
-	gluOrtho2D(0.0, fWidth, 0.0, fHeight);
+	glOrtho(0.0, fWidth, 0.0, fHeight, -1.0, 1.0);
 	glMatrixMode(GL_MODELVIEW);
 	glLoadIdentity();
 
@@ -222,7 +222,7 @@ FlurryView::FrameResized(float newWidth, float newHeight)
 		glViewport(0, 0, int(fWidth), int(fHeight));
 		glMatrixMode(GL_PROJECTION);
 		glLoadIdentity();
-		gluOrtho2D(0.0, fWidth, 0.0, fHeight);
+		glOrtho(0.0, fWidth, 0.0, fHeight, -1.0, 1.0);
 		glMatrixMode(GL_MODELVIEW);
 
 		glClearColor(0.0, 0.0, 0.0, 1.0);

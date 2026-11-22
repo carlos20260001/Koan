@@ -169,6 +169,8 @@ VosKeepTargets(CONTROL_LOOKS)
 ImageInclude("/system/add-ons/control_look" ${CONTROL_LOOKS})
 
 # Menu label is the file name; the kit loads from .../Screen Savers/<name>.
+# leaves is not listed: air/OS dropped the Leaves saver, so this tree has
+# no sources for it.
 set(SCREEN_SAVERS
 	butterfly
 	debugnow
@@ -177,7 +179,6 @@ set(SCREEN_SAVERS
 	gravity
 	icons
 	ifs
-	leaves
 	MessageSaver
 	nebula
 	shelf

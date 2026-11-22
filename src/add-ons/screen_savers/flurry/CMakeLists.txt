@@ -1,0 +1,11 @@
+# Copyright 2026, Dario Casalinuovo. All rights reserved.
+# Distributed under the terms of the MIT License.
+
+ScreenSaverAddOn(flurry
+	SOURCES
+	Flurry.cpp Smoke.cpp Spark.cpp Star.cpp Texture.cpp
+
+	LIBS be localestub ${SCREEN_SAVER_GL_LIBS}
+	RDEF Flurry.rdef
+)
+DoCatalogs("x-vnd.vos-FlurryScreensaver" add-ons/screen_savers/flurry)
