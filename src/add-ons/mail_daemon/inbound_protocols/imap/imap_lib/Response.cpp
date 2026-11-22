@@ -282,7 +282,7 @@ ArgumentList::IsListAt(int32 index, char kind) const
 uint32
 ArgumentList::NumberAt(int32 index) const
 {
-	return atoul(StringAt(index).String());
+	return strtoul(StringAt(index).String(), NULL, 10);
 }
 
 
