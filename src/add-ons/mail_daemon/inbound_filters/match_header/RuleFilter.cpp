@@ -83,8 +83,7 @@ RuleFilter::HeaderFetched(entry_ref& ref, BFile& file, BMessage& attributes)
 			if (status != B_OK)
 				return status;
 
-			ref.device = nodeRef.device;
-			ref.directory = nodeRef.node;
+			ref.set_to(nodeRef.device(), nodeRef.node(), ref.name);
 			return B_MOVE_MAIL_ACTION;
 		}
 

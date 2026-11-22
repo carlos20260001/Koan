@@ -29,8 +29,11 @@
 // DEALINGS IN THE SOFTWARE.
 /*****************************************************************************/
 
+#include <ctype.h>
+#include <fcntl.h>
 #include <unistd.h>
 #include <stdio.h>
+#include <string.h>
 
 #include <StorageKit.h>
 #include <SupportKit.h>
@@ -63,7 +66,8 @@ ParallelTransport::ParallelTransport(BDirectory* printer, BMessage* msg)
 	if (size <= 0 || size >= sizeof(address)) return;
 	address[size] = 0; // make sure string is 0-terminated
 		
-	strcat(strcpy(device, "/dev/parallel/"), address);
+	// Linux parallel printer nodes are /dev/lp0, /dev/lp1, ...
+	strcat(strcpy(device, "/dev/"), address);
 	fFile = open(device, O_RDWR | O_EXCL, 0);
 	if (fFile < 0) {
 		// Try unidirectional access mode
@@ -111,7 +115,8 @@ BDataIO* instantiate_transport(BDirectory* printer, BMessage* msg)
 
 status_t list_transport_ports(BMessage* msg)
 {
-	BDirectory dir("/dev/parallel");
+	// The parport "lp" driver's nodes: /dev/lp0, /dev/lp1, ...
+	BDirectory dir("/dev");
 	status_t rc;
 
 	if ((rc=dir.InitCheck()) != B_OK)
@@ -121,8 +126,12 @@ status_t list_transport_ports(BMessage* msg)
 		return rc;
 
 	entry_ref ref;
-	while(dir.GetNextRef(&ref) == B_OK)
-		msg->AddString("port_id", ref.name);
+	while(dir.GetNextRef(&ref) == B_OK) {
+		const char* name = ref.name;
+		if (strncmp(name, "lp", 2) != 0 || !isdigit((unsigned char)name[2]))
+			continue;
+		msg->AddString("port_id", name);
+	}
 
 	return B_OK;
 }

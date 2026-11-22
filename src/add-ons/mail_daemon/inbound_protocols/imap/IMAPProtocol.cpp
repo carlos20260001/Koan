@@ -239,7 +239,7 @@ IMAPProtocol::HandleFetchBody(const entry_ref& ref, const BMessenger& replyTo)
 	printf("IMAP: fetch body %s\n", ref.name);
 	MutexLocker locker(fWorkerLock);
 
-	IMAPFolder* folder = _FolderFor(ref.directory);
+	IMAPFolder* folder = _FolderFor(ref.directory());
 	if (folder == NULL)
 		return B_ENTRY_NOT_FOUND;
 
@@ -260,7 +260,7 @@ IMAPProtocol::HandleFetchBody(const entry_ref& ref, const BMessenger& replyTo)
 void
 IMAPProtocol::ReadyToRun()
 {
-	const char* haikuRevision = __get_haiku_revision();
+	const char* haikuRevision = __get_vos_revision();
 	if (haikuRevision[0] != '\0')
 		printf("IMAP: version %s\n", haikuRevision);
 

@@ -1,11 +1,15 @@
 /*
  * Copyright 2001-2010 Haiku Inc. All rights reserved.
+ * Copyright 2026, Koan contributors.
  * Distributed under the terms of the MIT License.
  *
  * Originally written based on Parallel port addon by Michael Pfeiffer,
  * changes by Andreas Benzler, Philippe Houdoin
  * Rewritten to use the USBKit by Ithamar R. Adema.
  *   (Using code from usb_printer.cpp by Michael Lotz)
+ * On Linux, the kernel's usblp driver owns USB printer interfaces, so the
+ * transport writes to its /dev/usb/lp* nodes instead of claiming the
+ * interface through the USB kit.
  *
  * Authors:
  *		Ithamar R. Adema, <ithamar.adema@team-embedded.nl>
@@ -16,55 +20,26 @@
 
 #include "PrintTransportAddOn.h"
 
-#include <USBKit.h>
+#include <ctype.h>
+#include <fcntl.h>
+#include <stdio.h>
+#include <string.h>
+#include <sys/ioctl.h>
+#include <unistd.h>
+#include <new>
+
+#include <Directory.h>
+#include <Entry.h>
 #include <String.h>
 
-#include <HashString.h>
-#include <HashMap.h>
 
-#define PRINTER_INTERFACE_CLASS		0x07
-#define PRINTER_INTERFACE_SUBCLASS	0x01
+// usblp's IEEE 1284 device ID request (linux/drivers/usb/class/usblp.c):
+// the reply starts with a big-endian 16-bit length that includes itself.
+#define USBLP_IOCNR_GET_DEVICE_ID	1
+#define USBLP_GET_DEVICE_ID(length) \
+	_IOC(_IOC_READ, 'P', USBLP_IOCNR_GET_DEVICE_ID, length)
 
-// printer interface types
-#define PIT_UNIDIRECTIONAL		0x01
-#define PIT_BIDIRECTIONAL		0x02
-#define PIT_1284_4_COMPATIBLE		0x03
-#define PIT_VENDOR_SPECIFIC		0xff
-
-
-// TODO handle disconnection of printer during printing
-// currently the USBPrinter will be deleted and USBTransport will still
-// access the memory
-class USBPrinter {
-public:
-	USBPrinter(const BString& id, const BString& name,
-		const BUSBInterface *interface, const BUSBEndpoint *in, const BUSBEndpoint *out);
-
-	ssize_t Write(const void *buf, size_t size);
-	ssize_t Read(void *buf, size_t size);
-
-	const BUSBInterface	*fInterface;
-	const BUSBEndpoint	*fOut;
-	const BUSBEndpoint	*fIn;
-	BString			fName;
-	BString			fID;
-};
-
-
-class USBPrinterRoster : public BUSBRoster {
-public:
-	USBPrinterRoster();
-
-	status_t DeviceAdded(BUSBDevice *dev);
-	void DeviceRemoved(BUSBDevice *dev);
-
-	USBPrinter *Printer(const BString& key);
-
-	status_t ListPrinters(BMessage *msg);
-private:
-	typedef HashMap<HashString,USBPrinter*> PrinterMap;
-	PrinterMap fPrinters;
-};
+static const char* kUSBPrinterDirectory = "/dev/usb";
 
 
 class USBTransport : public BDataIO {
@@ -72,166 +47,88 @@ public:
 	USBTransport(BDirectory *printer, BMessage *msg);
 	~USBTransport();
 
-	status_t InitCheck() { return fPrinter ? B_OK : B_ERROR; };
+	status_t InitCheck() { return fFile >= 0 ? B_OK : B_ERROR; };
 
 	ssize_t Read(void *buffer, size_t size);
 	ssize_t Write(const void *buffer, size_t size);
 
 private:
-	USBPrinter *fPrinter;
-	USBPrinterRoster *fRoster;
+	int fFile;
 };
 
 
-// Set transport_features so we stay loaded
-uint32 transport_features = B_TRANSPORT_IS_HOTPLUG;
-
-
-USBPrinterRoster::USBPrinterRoster()
+static bool
+is_printer_node(const char* name)
 {
-	Start();
+	if (strncmp(name, "lp", 2) != 0 || name[2] == '\0')
+		return false;
+	for (const char* c = name + 2; *c != '\0'; c++) {
+		if (!isdigit((unsigned char)*c))
+			return false;
+	}
+	return true;
 }
 
 
-USBPrinter *
-USBPrinterRoster::Printer(const BString& key)
+// Returns the value of a key ("MFG", "MDL", ...) of an IEEE 1284 device ID.
+static BString
+device_id_field(const char* deviceID, const char* key, const char* longKey)
 {
-	if (fPrinters.ContainsKey(key.String()))
-		return fPrinters.Get(key.String());
-
-	return NULL;
+	BString id(deviceID);
+	const char* keys[] = { key, longKey };
+	for (size_t k = 0; k < sizeof(keys) / sizeof(keys[0]); k++) {
+		BString pattern(keys[k]);
+		pattern << ":";
+		int32 start = 0;
+		while ((start = id.FindFirst(pattern, start)) >= 0) {
+			if (start == 0 || id[start - 1] == ';')
+				break;
+			start++;
+		}
+		if (start < 0)
+			continue;
+		start += pattern.Length();
+		int32 end = id.FindFirst(';', start);
+		if (end < 0)
+			end = id.Length();
+		BString value;
+		id.CopyInto(value, start, end - start);
+		value.Trim();
+		return value;
+	}
+	return BString();
 }
 
 
-status_t
-USBPrinterRoster::DeviceAdded(BUSBDevice *dev)
+static BString
+printer_name(const char* path)
 {
-	const BUSBConfiguration *config = dev->ActiveConfiguration();
-	const BUSBEndpoint *in = NULL, *out = NULL;
-	const BUSBInterface *printer = NULL;
+	BString name;
+	int fd = open(path, O_RDONLY | O_NONBLOCK | O_CLOEXEC);
+	if (fd < 0)
+		return name;
 
-	// Try to find a working printer interface in this device
-	if (config) {
-		for (uint32 idx = 0; printer == NULL
-			&& idx < config->CountInterfaces(); idx++) {
-			const BUSBInterface *interface = config->InterfaceAt(idx);
-			for (uint32 alt = 0; alt < interface->CountAlternates(); alt++) {
-				const BUSBInterface *alternate = interface->AlternateAt(alt);
-				if (alternate->Class() == PRINTER_INTERFACE_CLASS
-					&& alternate->Subclass() == PRINTER_INTERFACE_SUBCLASS
-					&& (alternate->Protocol() == PIT_UNIDIRECTIONAL
-					|| alternate->Protocol() == PIT_BIDIRECTIONAL
-					||  alternate->Protocol() == PIT_1284_4_COMPATIBLE)) {
-					// Found a usable Printer interface!
-					for (uint32 endpointIdx = 0;
-						endpointIdx < alternate->CountEndpoints();
-						endpointIdx++) {
-						const BUSBEndpoint *endpoint =
-							alternate->EndpointAt(endpointIdx);
-						if (!endpoint->IsBulk())
-							continue;
-
-						if (endpoint->IsInput())
-							in = endpoint;
-						else if (endpoint->IsOutput())
-							out = endpoint;
-
-						if (!in || !out)
-							continue;
-
-						printer = alternate;
-						((BUSBInterface*)interface)->SetAlternate(alt);
-						break;
-					}
-				}
+	unsigned char buffer[1024];
+	if (ioctl(fd, USBLP_GET_DEVICE_ID(sizeof(buffer)), buffer) >= 0) {
+		size_t length = (buffer[0] << 8) | buffer[1];
+		if (length > sizeof(buffer) - 1)
+			length = sizeof(buffer) - 1;
+		if (length >= 2) {
+			buffer[length] = '\0';
+			const char* deviceID = (const char*)buffer + 2;
+			BString manufacturer = device_id_field(deviceID, "MFG",
+				"MANUFACTURER");
+			BString model = device_id_field(deviceID, "MDL", "MODEL");
+			name = manufacturer;
+			if (model.Length() > 0) {
+				if (name.Length() > 0)
+					name << " ";
+				name << model;
 			}
 		}
 	}
-
-	if (printer != NULL) {
-		// We found a working printer interface, lets determine a unique ID
-		//  for it now, and a user identification for display in the Printers
-		//  preference.
-		BString portId = dev->SerialNumberString();
-		if (!portId.Length()) {
-			// No persistent unique ID available, use the vendor/product
-			//   ID for now. This will be unique as long as no two similar
-			//   devices are attached.
-			portId << dev->VendorID() << "/" << dev->ProductID();
-		}
-
-		BString portName = dev->ManufacturerString();
-		if (portName.Length())
-			portName << " ";
-		portName << dev->ProductString();
-
-		//TODO: Do we want to use usb.ids to find proper name if strings
-		//        are not supplied by USB?
-
-		fPrinters.Put(portId.String(), new USBPrinter(portId, portName,
-			printer, in, out));
-	}
-
-	return B_OK;
-}
-
-
-void
-USBPrinterRoster::DeviceRemoved(BUSBDevice *dev)
-{
-	PrinterMap::Iterator iterator = fPrinters.GetIterator();
-	while (iterator.HasNext()) {
-		const PrinterMap::Entry& entry = iterator.Next();
-		// If the device is in the list, remove it
-		if (entry.value->fInterface->Device() == dev) {
-			fPrinters.Remove(entry.key);
-			delete entry.value;
-			break;
-		}
-	}
-}
-
-
-status_t
-USBPrinterRoster::ListPrinters(BMessage *msg)
-{
-	PrinterMap::Iterator iterator = fPrinters.GetIterator();
-	while (iterator.HasNext()) {
-		const PrinterMap::Entry& entry = iterator.Next();
-		msg->AddString("port_id", entry.value->fID);
-		msg->AddString("port_name", entry.value->fName);
-	}
-
-	return B_OK;
-}
-
-
-USBPrinter::USBPrinter(const BString& id, const BString& name,
-	const BUSBInterface *intf, const BUSBEndpoint *in, const BUSBEndpoint *out)
-	: fInterface(intf), fOut(out), fIn(in), fName(name), fID(id)
-{
-}
-
-
-//TODO: see usb_printer.cpp for error handling during read/write!
-ssize_t
-USBPrinter::Write(const void *buf, size_t size)
-{
-	if (!buf || size <= 0)
-		return B_BAD_VALUE;
-
-	// NOTE: we can safely cast below as we're sending data _out_
-	return fOut->BulkTransfer((void*)buf, size);
-}
-
-
-ssize_t
-USBPrinter::Read(void *buf, size_t size)
-{
-	if (!buf || size <= 0)
-		return B_BAD_VALUE;
-
-	return fIn->BulkTransfer(buf, size);
+	close(fd);
+	return name;
 }
 
 
@@ -253,28 +150,51 @@ instantiate_transport(BDirectory *printer, BMessage *msg)
 status_t
 list_transport_ports(BMessage *msg)
 {
-	USBPrinterRoster roster;
-	status_t status = roster.ListPrinters(msg);
-	roster.Stop();
-	return status;
+	BDirectory dir(kUSBPrinterDirectory);
+	status_t status = dir.InitCheck();
+	if (status != B_OK)
+		return status;
+
+	BEntry entry;
+	while (dir.GetNextEntry(&entry) == B_OK) {
+		char name[B_FILE_NAME_LENGTH];
+		if (entry.GetName(name) != B_OK || !is_printer_node(name))
+			continue;
+
+		BString path(kUSBPrinterDirectory);
+		path << "/" << name;
+		BString portName = printer_name(path.String());
+		if (portName.Length() > 0)
+			portName << " (" << name << ")";
+
+		msg->AddString("port_id", name);
+		msg->AddString("port_name", portName);
+	}
+
+	return B_OK;
 }
 
 
 // Implementation of USBTransport
 USBTransport::USBTransport(BDirectory *printer, BMessage *msg)
-	: fPrinter(NULL)
+	: fFile(-1)
 {
 	BString key;
 
-	if (printer->ReadAttrString("transport_address", &key) != B_OK)
+	if (printer->ReadAttrString("transport_address", &key) != B_OK
+		|| !is_printer_node(key.String()))
 		return;
 
-	fRoster = new(std::nothrow) USBPrinterRoster;
-	if (fRoster == NULL)
-		return;
+	BString path(kUSBPrinterDirectory);
+	path << "/" << key;
 
-	fPrinter = fRoster->Printer(key.String());
-	if (fPrinter == NULL)
+	bool bidirectional = true;
+	fFile = open(path.String(), O_RDWR | O_CLOEXEC);
+	if (fFile < 0) {
+		bidirectional = false;
+		fFile = open(path.String(), O_WRONLY | O_CLOEXEC);
+	}
+	if (fFile < 0)
 		return;
 
 	// If caller doesn't care...
@@ -283,27 +203,31 @@ USBTransport::USBTransport(BDirectory *printer, BMessage *msg)
 
 	// Fill up the message
 	msg->what = 'okok';
+	msg->AddBool("bidirectional", bidirectional);
+	msg->AddString("_usb/DeviceName", path.String());
 }
 
 
 USBTransport::~USBTransport()
 {
-	if (fRoster != NULL) {
-		fRoster->Stop();
-		delete fRoster;
-	}
+	if (fFile >= 0)
+		close(fFile);
 }
 
 
 ssize_t
 USBTransport::Read(void *buffer, size_t size)
 {
-	return fPrinter ? fPrinter->Read(buffer, size) : B_ERROR;
+	if (fFile < 0)
+		return B_ERROR;
+	return read(fFile, buffer, size);
 }
 
 
 ssize_t
 USBTransport::Write(const void *buffer, size_t size)
 {
-	return fPrinter ? fPrinter->Write(buffer, size) : B_ERROR;
+	if (fFile < 0)
+		return B_ERROR;
+	return write(fFile, buffer, size);
 }

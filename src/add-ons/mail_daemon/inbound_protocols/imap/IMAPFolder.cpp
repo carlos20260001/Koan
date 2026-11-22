@@ -127,7 +127,7 @@ IMAPFolder::Init()
 	if (status != B_OK)
 		return status;
 
-	fNodeID = nodeRef.node;
+	fNodeID = nodeRef.node();
 
 	BString originalMailboxName;
 	if (node.ReadAttrString(kMailboxNameAttribute, &originalMailboxName) == B_OK

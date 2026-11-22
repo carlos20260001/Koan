@@ -1,8 +1,0 @@
-SubDir HAIKU_TOP src add-ons input_server filters accessibility_keys ;
-
-UsePrivateHeaders interface ;
-
-Addon accessibility_keys
-	: AccessibilityKeysFilter.cpp
-	: be input_server [ TargetLibsupc++ ]
-	;

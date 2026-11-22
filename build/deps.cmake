@@ -382,6 +382,13 @@ DeclareDependency(
 	RUNTIMES   "libcups2t64"
 )
 
+# Gutenprint printer driver add-on (src/add-ons/print/drivers/gutenprint).
+DeclareDependency(
+	GUTENPRINT
+	PACKAGES	"libgutenprint-dev"
+	RUNTIMES	"libgutenprint9"
+)
+
 DeclareDependency(
 	CAIRO
 	LIBRARIES	"cairo"
