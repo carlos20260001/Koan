@@ -9,6 +9,8 @@
 
 #include <Debug.h>
 
+#include <cmath>
+
 
 // 72 DPI
 static const int32 kGutenprintUnit = 72;

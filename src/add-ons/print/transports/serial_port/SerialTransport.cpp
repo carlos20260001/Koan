@@ -11,6 +11,9 @@
 #include <unistd.h>
 #include <stdio.h>
 #include <termios.h>
+#include <ctype.h>
+#include <fcntl.h>
+#include <string.h>
 
 #include <StorageKit.h>
 #include <SupportKit.h>
@@ -46,7 +49,8 @@ SerialTransport::SerialTransport(BDirectory* printer, BMessage* msg)
 	if (size <= 0 || size >= sizeof(address)) return;
 	address[size] = 0; // make sure string is 0-terminated
 
-	strcat(strcpy(device, "/dev/ports/"), address);
+	// Linux serial nodes: /dev/ttyS*, /dev/ttyUSB*, /dev/ttyACM*
+	strcat(strcpy(device, "/dev/"), address);
 	fFile = open(device, O_RDWR | O_EXCL, 0);
 	if (fFile < 0) {
 		// Try unidirectional access mode
@@ -124,7 +128,9 @@ instantiate_transport(BDirectory* printer, BMessage* msg)
 status_t
 list_transport_ports(BMessage* msg)
 {
-	BDirectory dir("/dev/ports");
+	// Linux serial ports: the 8250 ports and USB serial adapters.
+	static const char* const kPrefixes[] = { "ttyS", "ttyUSB", "ttyACM" };
+	BDirectory dir("/dev");
 	status_t rc;
 
 	if ((rc=dir.InitCheck()) != B_OK)
@@ -134,8 +140,16 @@ list_transport_ports(BMessage* msg)
 		return rc;
 
 	entry_ref ref;
-	while (dir.GetNextRef(&ref) == B_OK)
-		msg->AddString("port_id", ref.name);
+	while (dir.GetNextRef(&ref) == B_OK) {
+		for (size_t i = 0; i < sizeof(kPrefixes) / sizeof(kPrefixes[0]); i++) {
+			size_t length = strlen(kPrefixes[i]);
+			if (strncmp(ref.name, kPrefixes[i], length) == 0
+				&& isdigit((unsigned char)ref.name[length])) {
+				msg->AddString("port_id", ref.name);
+				break;
+			}
+		}
+	}
 
 	return B_OK;
 }

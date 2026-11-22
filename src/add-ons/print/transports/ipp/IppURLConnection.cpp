@@ -1,7 +1,8 @@
 // Sun, 18 Jun 2000
 // Y.Takagi
 
-#if defined(__HAIKU__) || defined(HAIKU_TARGET_PLATFORM_BONE)
+#if defined(__HAIKU__) || defined(HAIKU_TARGET_PLATFORM_BONE) \
+	|| defined(__linux__)
 #	include <sys/socket.h>
 #else
 #	include <net/socket.h>
