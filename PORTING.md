@@ -657,6 +657,52 @@ Waves (each on its own `port/*` branch, merged here when green):
             | media-add-ons/firewire_dv | (c) | left; needs firewire-core `/dev/fw*` (libraw1394/libiec61883) |
             | media-add-ons/bluetooth_audio | (c) | left; needs BlueZ A2DP (PipeWire's bluez5 sinks may already cover it through the PipeWire node) |
             | media-add-ons/radeon | (c) | left; video capture needs V4L2 (no mainline driver for this capture chip) |
+      - [x] Input, print and mail add-ons (`port/addons2`): the rest of
+            `src/add-ons/input_server`, `src/add-ons/print` (+ `src/libs/print/libprint`)
+            and `src/add-ons/mail_daemon` classified (table below); air/OS sources,
+            new CMakeLists (no VitruvianOS sources: it has no print or mail add-ons, and
+            its input add-ons are the evdev ones already merged). Installed to
+            `/system/add-ons/input_server/filters`, `/system/add-ons/Print`,
+            `/system/add-ons/Print/transport` and `/system/add-ons/mail_daemon/<kind>`;
+            print and mail add-ons are named by file name (no `lib`/`.so`), as their
+            loaders look them up. New dep `libgutenprint-dev` (`GUTENPRINT`, runtime
+            `libgutenprint9`; Dockerfile + the 4 dev lists; installed into the existing
+            chroot by hand to iterate). Source changes for Linux: the parallel/serial
+            transports open `/dev/lp*` and `/dev/ttyS*|ttyUSB*|ttyACM*`, the USB
+            transport is rewritten on usblp (`/dev/usb/lp*`, name from the IEEE 1284
+            device ID); `__linux__` takes the `<sys/socket.h>` branch in the IPP/LPR
+            socket code; IMAP/MatchHeader use the `entry_ref`/`node_ref` accessors and
+            `__get_vos_revision()`; `strtoul` for libroot's `atoul`; `<cmath>` in the
+            Gutenprint driver. Compile-only Release build: ninja exit 0, the new image
+            lists not left out, `ldd -r` 27/27 0 not found (print/mail 0 undefined;
+            input add-ons' undefined symbols all exported by `input_server`), ctest 19
+            passed, 2 skipped (new: `print_{drivers,transports}_entry_points`,
+            `print_transports_list_ports`, `mail_daemon_*_entry_points`,
+            `input_server_addons_entry_points`). Nothing run on a system yet: the
+            add-ons need `print_server`, `print_addon_server` and `mail_daemon`, which
+            build but are not in `SYSTEM_SERVERS` or started by janus_session yet.
+            Jamfiles: 428
+
+            | Directory | Class | Result |
+            | --- | --- | --- |
+            | input_server/filters/accessibility_keys, padblocker | (a) | ported; in `INPUT_SERVER_FILTERS` (padblocker reads the Input preference's keyboard lock delay) |
+            | input_server/methods/pen, t9 | (a) | ported, built, not in the image: air/OS ships an empty `methods`, and the method menu's Deskbar replicant cannot load from this input_server (`src/servers/input/CMakeLists.txt` TODO) |
+            | input_server/devices/virtualkeyboard | (a) | ported (Keymap preference sources, `-iquote`), not in the image: it opens its window at every input_server start; air/OS does not ship it either |
+            | input_server/devices/tablet, wacom | (b) | deleted; kernel tablet drivers + libinput tablet support in the mouse add-on |
+            | input_server/devices/virtio | (b) | deleted; the kernel's virtio_input exposes evdev nodes read by the keyboard/mouse add-ons |
+            | input_server/devices/bluetooth_le_mouse | (b) | deleted; BlueZ HID-over-GATT + uhid gives an evdev node for the mouse add-on |
+            | input_server/devices/serial_mouse | (b) | deleted; kernel `sermouse` attached with `inputattach` gives an evdev node for the mouse add-on |
+            | input_server/devices/easypen | (c), open | left with its Jamfile: no Linux serio driver for this tablet protocol; it builds on libgame's termios `BSerialPort`, but blind-probes every serial port at input_server start (writes to the serial console); needs an opt-in port setting or a serio driver |
+            | input_server/filters/shortcut_catcher | - | unchanged: builds, still out of `INPUT_SERVER_FILTERS` (not wired up) |
+            | libs/print/libprint | (a) | ported as static `libprint` (target name; `print.a`) |
+            | print/drivers/canon_lips (lips3, lips4), pcl5, pcl6, postscript, preview | (a) | ported; in `PRINT_DRIVERS` |
+            | print/drivers/gutenprint | (a) | ported on Debian libgutenprint 5.3.4 |
+            | print/drivers/lpstyl | (a) | ported, built, not in the image (not in air/OS's either); its Jamfile named a `Lpstyl.rdef` that was never committed |
+            | print/transports/hp_jetdirect, ipp, lpr, print_to_file, shared | (a) | ported; shared's socket code compiled into IPP and LPR |
+            | print/transports/parallel_port, serial_port | (a) | ported on `/dev/lp*` and `/dev/ttyS*`, `ttyUSB*`, `ttyACM*` (node access needs the `lp`/`dialout` group) |
+            | print/transports/usb_port | (a) | ported on usblp (`/dev/usb/lp*`): the USB kit (libusb) does not claim interfaces and usblp owns printer interfaces; port id is the node name (not stable across re-plugging) |
+            | mail_daemon/inbound_protocols/imap, pop3; outbound_protocols/smtp | (a) | ported |
+            | mail_daemon/inbound_filters/match_header, notifier, spam_filter; outbound_filters/fortune | (a) | ported. Runtime gaps: Fortune runs `/bin/fortune`, which the image does not have (`fortune_vos` is not built yet); SpamFilter launches the `spamdbm` server from `src/bin/mail_utils`, not on CMake yet |
       `src/data`, `data/`, remaining tests
 - [ ] W5: `Jamrules`, `Jamfile`, `build/jam`, Haiku `configure`, Haiku-only
       `build/scripts` deleted; `git ls-files | grep -c Jamfile` = 0; full `ninja`,
