@@ -757,6 +757,51 @@ Waves (each on its own `port/*` branch, merged here when green):
             | disk_systems/bfs | (c), open: kept | same host needed, and the helpers have no BFS tier: needs a Linux BFS initializer (e.g. a `mkbfs` from the bfs userland shell) |
             | disk_systems/ntfs | (c), open: kept | same host needed, and an NTFS tier in `vos-install-helper` (`mkntfs`, `ntfsresize`, `ntfslabel` from ntfs-3g) |
             | bluetooth/ResetLocalDevice | (c), open: kept | not included by any Jamfile, and nothing loads `LocalDeviceAddOn` (no host in bluetooth_server or the Bluetooth preference); `EXPORT_LOCAL_DEVICE_ADDON` uses `__declspec`. Needs an add-on host, and the reset through the BlueZ mgmt API (`MGMT_OP_SET_POWERED` off/on on the management socket) or HCI_Reset on a raw HCI socket instead of bluetooth_server's simple-request path |
+      - [x] Command-line tools on CMake (`port/bin`): `src/bin` is built in the normal pass
+            (after kits and libs). CMakeLists written from air/OS's Jamfiles (one
+            `BinCommands()` group per Jamfile group); air/OS sources, plus upstream's Linux
+            fixes for 15 tools (`7ce2dc379e`, Numerio) and upstream-only `jam`, `seticon`,
+            `setapptype`, `xclientsig` (`05d3d59feb`). `BIN_DIRECTORY` builds every entry but
+            `vos-signature-migrate` (not ported: no existing installs, M6) and
+            `screenshot_cli` (installed by apps.cmake as `/system/bin/screenshot`); the other
+            ported commands go to `/bin` through a new `BIN_COMMANDS` list, the hpkg tool as
+            `/bin/package`. Mail's Fortune filter now runs `/bin/fortune_vos`. No new
+            dependency. Compile-only Release build: full ninja exit 0, `ldd -r` 110/110
+            binaries under `src/bin` 0 not found/0 undefined, ctest 23 passed, 2 skipped.
+            Nothing run on a system. Jamfiles in `src/bin`: 65 → 47
+
+            | Directory / tool | Class | Result |
+            | --- | --- | --- |
+            | single tools (Jamfile groups) | (a) | ported: catarea chop driveinfo error finddir fortune(→`fortune_vos`) get_driver_settings hd listarea listimage listport listsem lsindex prio release rmattr rmindex system_time unchop beep catattr clipboard diskimage dpms draggers ffm iroster isvolume listattr listfont listres message mkindex modifiers mvattr quit roster setversion trash version WindowShade alert hey reindex resattr screeninfo setcontrollook setdecor settype spybmessage urlwrapper copyattr diff_zip mimeset mountvolume setmime sysinfo xres open waitfor launch_roster dstcheck translate notify checkitout filepanel installsound setvolume mediakey findpaths setusbconfig bt_dev_info bt_discovery bt_le bt_a2dp; upstream-only seticon setapptype. driveinfo on `BLKGETSIZE64`/`HDIO_GETGEO`/sysfs; diskimage on libroot2's loop devices; listarea/listport/listsem on Nexus |
+            | getarch | (c), open | needs `get_architectures()`/`get_secondary_architectures()` in libroot2 (`uname` machine / dpkg architecture) |
+            | ps, top, watch, df, mount, unmount, clear, pidof, logger, renice, vmstat, shutdown, badblocks, setarch, fstrim, eject | (c), open | Debian's procps/util-linux/coreutils/ncurses/systemd own these names in the image; the sources read kernel team/VM/device info (`get_next_team_info`, `B_TRIM_DEVICE`, ...). A port needs `/proc`, `FITRIM`, `CDROMEJECT` and a non-colliding name |
+            | fdinfo, safemode, rescan, ramdisk, resizefs, checkfs, boot_process_done, autologin | (c), open | old-kernel interfaces: `/proc/<pid>/fd`, kernel command line, udev trigger, `brd`/zram, `resize2fs`-style helpers, fsck, launch_daemon targets → systemd, display-manager autologin |
+            | comm, id, logname, printenv, tty | (c), open | not in air/OS's Jamfile either; coreutils provides them |
+            | addattr, keystore, locale, pc, query, xclientsig, jam | (a) | ported; `locale` built, not installed (libc-bin owns it) |
+            | bfs_tools (+lib) | (a) | ported: bfsinfo chkindex bfswhich recover read a BFS image/device with file I/O |
+            | desklink, media_client | (a) | ported on the classic `libmedia`; media_client built, not installed (a test client) |
+            | keymap | (a) | ported (target `keymap_cli`; `keymap` is the host compiler) |
+            | listdev | (a) | ported on the Devices app's `dm_wrapper_linux.cpp` (sysfs/libudev); `dm_wrapper.c` kept unbuilt |
+            | listusb | (a) | ported on the USB kit (libusb/udev) |
+            | mail_utils | (a) | ported: mail mail2mbox mbox2mail spamdbm (SpamFilter's server) |
+            | neural, package, package_repo | (a) | ported (neural kit; hpkg kit `bpackage`) |
+            | screen_blanker, screenmode | (a) | ported; screen_blanker links libxcrypt; screenmode takes the Screen panel's mode and CVT code |
+            | cddb_lookup | (c), open | `B_SCSI_GET_TOC` on the old CD driver; needs `CDROMREADTOCHDR`/`CDROMREADTOCENTRY` |
+            | consoled | (c), open | old `/dev/console` + keyboard driver ioctls (`KB_READ`); Linux VTs/kbd do this |
+            | acpi_call, i2c, fwcontrol, pcmcia-cs, hid_decode, bt_firmware | (c), open | Linux `acpi_call` module, `i2c-dev` ioctls, firewire cdev, pcmciautils, hidraw/uhid (the HID parser came from the deleted usb_hid driver), libusb for the firmware loaders |
+            | mkfs | (c), open | needs the disk-system add-on host (blkid/libfdisk/`mkfs.*`), as the disk_systems rows above |
+            | makebootable (6 platforms), writembr | (c), open | GRUB/EFI install through the installer helpers; `mbr.S` boot code |
+            | multiuser | (c), open | login/su/passwd/user and group tools collide with Debian's shadow/login; PAM + shadow instead |
+            | pkgman | (c), open | needs the libsolv solver add-on (Debian has no `repo_haiku`) |
+            | unzip | (c), open | holds the sources of `src/tools/unzip`; Debian's unzip in the image |
+            | debug (ltrace, profile, scheduling_recorder, strace, time_stats, kernel_debugger) | (c), open | need the debug kit on ptrace/perf (`VOS_WITH_DEBUG_KIT`, OFF) |
+            | network/wakeonlan | (a) | ported (sockets) |
+            | network/wifiautojoin | (c), open | NetworkManager autoconnects; `BNetworkDevice::GetNetworks()` is a stub |
+            | network/arp, ifconfig, route, netstat, ping | (c), open | net-tools/iputils own the names in the image; libnetapi (NMBackend, `/proc/net`) would back a renamed port |
+            | network/traceroute, traceroute6 | (c), open | BSD `sa_len`/`sin6_len`, `netinet/ip_var.h`; Linux raw-socket layout |
+            | network/telnet, telnetd, ftpd | (c), open | libtelnet/libutil BSD ports, ptys and utmp on glibc |
+            | network/mount_nfs | (c), open | nfs4 add-on of the old kernel; nfs-common `mount.nfs` |
+            | network/ppp_up, pppconfig | (c), open | libppp deleted with the kernel PPP stack; NetworkManager PPP/modem profiles |
       `src/data`, `data/`, remaining tests
 - [ ] W5: `Jamrules`, `Jamfile`, `build/jam`, Haiku `configure`, Haiku-only
       `build/scripts` deleted; `git ls-files | grep -c Jamfile` = 0; full `ninja`,
