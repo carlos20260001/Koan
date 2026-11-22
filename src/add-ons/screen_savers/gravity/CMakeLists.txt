@@ -5,6 +5,7 @@ ScreenSaverAddOn(gravity
 	SOURCES
 	ConfigView.cpp Gravity.cpp GravitySource.cpp GravityView.cpp Particle.cpp RainbowItem.cpp main.cpp
 
-	LIBS be localestub opengl GL GLU
+	LIBS be localestub shared ${SCREEN_SAVER_GL_LIBS}
 	RDEF Gravity.rdef
 )
+DoCatalogs("x-vnd.vos-GravityScreensaver" add-ons/screen_savers/gravity)

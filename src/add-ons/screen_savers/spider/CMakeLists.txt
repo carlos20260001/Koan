@@ -8,3 +8,4 @@ ScreenSaverAddOn(spider
 	LIBS be localestub
 	RDEF Spider.rdef
 )
+DoCatalogs("x-vnd.vos-SpiderScreensaver" add-ons/screen_savers/spider)

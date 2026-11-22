@@ -5,6 +5,7 @@ ScreenSaverAddOn(flurry
 	SOURCES
 	Flurry.cpp Smoke.cpp Spark.cpp Star.cpp Texture.cpp
 
-	LIBS be localestub opengl GL GLU
+	LIBS be localestub ${SCREEN_SAVER_GL_LIBS}
 	RDEF Flurry.rdef
 )
+DoCatalogs("x-vnd.vos-FlurryScreensaver" add-ons/screen_savers/flurry)

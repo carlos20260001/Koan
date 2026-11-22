@@ -8,3 +8,4 @@ ScreenSaverAddOn(nebula
 	LIBS be localestub
 	RDEF Nebula.rdef
 )
+DoCatalogs("x-vnd.vos-NebulaScreensaver" add-ons/screen_savers/nebula)

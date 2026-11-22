@@ -5,6 +5,7 @@ ScreenSaverAddOn(ifs
 	SOURCES
 	IFS.cpp IFSSaver.cpp
 
-	LIBS be
+	LIBS be localestub
 	RDEF IFS.rdef
 )
+DoCatalogs("x-vnd.vos-IFSScreensaver" add-ons/screen_savers/ifs)

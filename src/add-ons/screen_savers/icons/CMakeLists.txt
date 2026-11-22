@@ -8,3 +8,4 @@ ScreenSaverAddOn(icons
 	LIBS be localestub
 	RDEF Icons.rdef
 )
+DoCatalogs("x-vnd.vos-IconsScreensaver" add-ons/screen_savers/icons)

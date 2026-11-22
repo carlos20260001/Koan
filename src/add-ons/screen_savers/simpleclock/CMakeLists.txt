@@ -8,3 +8,4 @@ ScreenSaverAddOn(simpleclock
 	LIBS be localestub
 	RDEF SimpleClock.rdef
 )
+DoCatalogs("x-vnd.vos-SimpleClock" add-ons/screen_savers/simpleclock)

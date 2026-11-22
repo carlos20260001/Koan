@@ -11,3 +11,4 @@ ScreenSaverAddOn(MessageSaver
 
 # Menu label is "message"; cmake target cannot share the bin/message app name.
 set_target_properties(MessageSaver PROPERTIES OUTPUT_NAME message)
+DoCatalogs("x-vnd.vos-MessageScreensaver" add-ons/screen_savers/message)

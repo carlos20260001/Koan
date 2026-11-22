@@ -8,3 +8,4 @@ ScreenSaverAddOn(debugnow
 	LIBS be localestub
 	RDEF DebugNow.rdef
 )
+DoCatalogs("x-vnd.vos-DebugNowScreensaver" add-ons/screen_savers/debugnow)

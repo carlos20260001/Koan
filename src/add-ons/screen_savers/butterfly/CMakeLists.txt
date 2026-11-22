@@ -8,3 +8,4 @@ ScreenSaverAddOn(butterfly
 	LIBS be localestub
 	RDEF Butterfly.rdef
 )
+DoCatalogs("x-vnd.vos-ButterflyScreensaver" add-ons/screen_savers/butterfly)

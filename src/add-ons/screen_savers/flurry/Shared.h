@@ -38,7 +38,6 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <stdlib.h>
 
 #include <GL/gl.h>
-#include <GL/glu.h>
 
 
 struct SmokeV;

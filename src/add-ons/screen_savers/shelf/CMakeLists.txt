@@ -8,3 +8,4 @@ ScreenSaverAddOn(shelf
 	LIBS be localestub
 	RDEF Shelf.rdef
 )
+DoCatalogs("x-vnd.vos-ShelfScreensaver" add-ons/screen_savers/shelf)
