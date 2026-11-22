@@ -1,14 +1,8 @@
 SubDir HAIKU_TOP src add-ons neural ;
 
-# Neural Kit back ends, one per kind of hardware. They are named
-# <name>.neural, <name> being what BNeuralBackend::Name() returns.
+# Neural Kit back ends. vulkan and amdxdna are on CMake; rk3588_npu waits
+# for a port to Linux's driver for that NPU (PORTING.md M9).
 
 if $(TARGET_ARCH) = arm64 {
 	SubInclude HAIKU_TOP src add-ons neural rk3588_npu ;
 }
-
-if $(TARGET_ARCH) = x86_64 {
-	SubInclude HAIKU_TOP src add-ons neural amdxdna ;
-}
-
-SubInclude HAIKU_TOP src add-ons neural vulkan ;
