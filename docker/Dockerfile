@@ -79,6 +79,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     meson python3-mako libvulkan-dev libzstd-dev patch \
     && rm -rf /var/lib/apt/lists/*
 
+# Translator add-ons (src/add-ons/translators): the image codecs not
+# already installed above (PNG, JPEG, TIFF, WebP and AVIF are).
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libraw-dev libicns-dev libgif-dev \
+    && rm -rf /var/lib/apt/lists/*
+
 ENV DEBIAN_MIRROR=http://deb.debian.org/debian/
 ENV VOS_BASE_SUITE=trixie
 ENV VOS_KERNEL_FLAVOUR=rt-amd64

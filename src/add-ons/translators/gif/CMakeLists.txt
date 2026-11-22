@@ -11,7 +11,7 @@ TranslatorAddOn(
 	SavePalette.cpp
 	SFHash.cpp
 
-	LIBS be translation translatorutils localestub ${GIF_LIBRARIES}
+	LIBS be translation translatorutils localestub
 
 	INCLUDES
 	"../shared"

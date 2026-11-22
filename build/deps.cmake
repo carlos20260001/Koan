@@ -258,6 +258,14 @@ DeclareDependency(
 	RUNTIMES	"libavif16 (>= 1.0)"
 )
 
+# RAWTranslator decodes camera raw files through LibRaw (USES_LIBRAW).
+DeclareDependency(
+	RAW
+	LIBRARIES	"raw"
+	PACKAGES	"libraw-dev"
+	RUNTIMES	"libraw23t64 (>= 0.21)"
+)
+
 # JASPER (libjasper-dev) was removed from Debian for unfixed CVEs; the
 # jpeg2000 translator that uses it stays disabled until ported to OpenJPEG.
 

@@ -257,7 +257,12 @@ LibRAW::ReadImageAt(uint32 index, uint8*& outputBuffer, size_t& bufferSize)
 	CALLED();
 	if (index >= P1.raw_count)
 		return B_BAD_VALUE;
+#if LIBRAW_COMPILE_CHECK_VERSION_NOTLESS(0, 21)
+	// LibRaw 0.21 moved the shot selection to the raw unpack parameters.
+	fRaw->imgdata.rawparams.shot_select = index;
+#else
 	OUT.shot_select = index;
+#endif
 	OUT.output_bps = 8;
 	OUT.output_tiff = 1;
 	OUT.no_auto_bright = 1;
