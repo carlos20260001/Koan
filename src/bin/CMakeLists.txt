@@ -1,103 +1,94 @@
+# Copyright 2026, Koan contributors. All rights reserved.
+# Distributed under the terms of the MIT License.
+
+# Command line tools, from the groups of the old src/bin Jamfile. Each
+# group lists commands built from one source file with the same
+# libraries; libbe and libroot come with Application().
+
 if(NOT BUILDTOOLS_MODE STREQUAL "1")
 
-add_subdirectory(addattr)
-add_subdirectory(keystore)
-add_subdirectory(locale)
-add_subdirectory(media_client)
-add_subdirectory(pc)
-add_subdirectory(query)
-add_subdirectory(rc)
-add_subdirectory(jam)
-add_subdirectory(screen_blanker)
-add_subdirectory(vos-signature-migrate)
-add_subdirectory(xclientsig)
-# add_subdirectory(screenmode)      # missing private graphics headers
+foreach(_dir
+		addattr bfs_tools desklink jam keymap keystore listdev listusb locale
+		mail_utils media_client network neural package package_repo pc query
+		rc screen_blanker screenmode xclientsig)
+	add_subdirectory(${_dir})
+endforeach()
 
-UsePrivateHeaders(GLOBAL app interface libroot kernel shared storage support system tracker)
+UsePrivateHeaders(GLOBAL app interface libroot kernel shared storage support
+	system tracker)
 
-Application(catarea    SOURCES catarea.c)
-Application(chop       SOURCES chop.c)
-Application(driveinfo  SOURCES driveinfo.c)
-Application(error      SOURCES error.c)
-Application(finddir    SOURCES finddir.c)
-Application(fortune_vos    SOURCES fortune_vos.c    RDEF fortune_vos.rdef)
-Application(get_driver_settings SOURCES get_driver_settings.cpp)
-Application(listarea   SOURCES listarea.c)
-Application(listimage  SOURCES listimage.c)
-Application(listport   SOURCES listport.c)
-Application(listsem    SOURCES listsem.c)
-Application(lsindex    SOURCES lsindex.cpp)
-Application(prio       SOURCES prio.c)
-Application(rmattr     SOURCES rmattr.cpp)
-Application(rmindex    SOURCES rmindex.cpp)
-Application(system_time SOURCES system_time.cpp)
-Application(unchop     SOURCES unchop.c)
+# BinCommands(<libs...> FILES <sources...>): one command per source, named
+# after it.
+function(BinCommands)
+	cmake_parse_arguments(_BC "" "" "LIBS;FILES" ${ARGN})
+	foreach(_src IN LISTS _BC_FILES)
+		get_filename_component(_name ${_src} NAME_WE)
+		# the Jamfile gave every command haiku-utils.rsrc, plus its own
+		set(_rdef haiku-utils.rdef)
+		if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/${_name}.rdef)
+			list(APPEND _rdef ${_name}.rdef)
+		endif()
+		Application(${_name} SOURCES ${_src} LIBS ${_BC_LIBS} RDEF ${_rdef})
+	endforeach()
+endfunction()
 
-# be (auto-linked, no extra libs)
-Application(catattr    SOURCES catattr.cpp)
-Application(clipboard  SOURCES clipboard.cpp)
-Application(diskimage  SOURCES diskimage.cpp)
-Application(dpms       SOURCES dpms.cpp)
-Application(draggers   SOURCES draggers.cpp)
-Application(ffm        SOURCES ffm.cpp)
-Application(iroster    SOURCES iroster.cpp)
-Application(isvolume   SOURCES isvolume.cpp)
-Application(listattr   SOURCES listattr.cpp)
-Application(listfont   SOURCES listfont.cpp)
-Application(listres    SOURCES listres.cpp)
-Application(message    SOURCES message.cpp)
-Application(mkindex    SOURCES mkindex.cpp)
-Application(launch_roster SOURCES launch_roster.cpp LIBS shared)
-Application(modifiers  SOURCES modifiers.cpp)
-Application(open       SOURCES open.cpp)
-Application(mvattr     SOURCES mvattr.cpp)
-Application(quit       SOURCES quit.cpp)
-Application(roster     SOURCES roster.cpp)
-Application(trash      SOURCES trash.cpp)
-Application(version    SOURCES version.cpp)
-Application(waitfor    SOURCES waitfor.cpp)
-Application(WindowShade SOURCES WindowShade.cpp)
+# no library beyond libroot/libbe
+BinCommands(FILES
+	catarea.c chop.c driveinfo.c error.c finddir.c get_driver_settings.cpp
+	hd.c listarea.c listimage.c listport.c listsem.c lsindex.cpp prio.c
+	release.c rmattr.cpp rmindex.cpp system_time.cpp unchop.c)
 
-# be + supc++ (supc++ auto-linked on Linux)
-Application(alert          SOURCES alert.cpp)
-Application(dstcheck       SOURCES dstcheck.cpp       LIBS localestub  RDEF dstcheck.rdef)
-Application(hey            SOURCES hey.cpp             RDEF hey.rdef)
-Application(reindex        SOURCES reindex.cpp)
-Application(resattr        SOURCES resattr.cpp)
-Application(screeninfo     SOURCES screeninfo.cpp)
-Application(setcontrollook SOURCES setcontrollook.cpp)
-Application(setdecor       SOURCES setdecor.cpp)
-Application(settype        SOURCES settype.cpp)
-Application(spybmessage    SOURCES spybmessage.cpp)
-Application(urlwrapper     SOURCES urlwrapper.cpp      RDEF urlwrapper.rdef)
+# Debian's fortune-mod owns "fortune"; the image's copy is fortune_vos.
+Application(fortune_vos SOURCES fortune.c RDEF haiku-utils.rdef fortune.rdef)
 
-# be + bnetapi
-Application(checkitout     SOURCES checkitout.cpp       LIBS tracker  RDEF checkitout.rdef)
+# libbe
+BinCommands(FILES
+	beep.cpp catattr.cpp clipboard.cpp diskimage.cpp dpms.cpp draggers.cpp
+	ffm.cpp iroster.cpp isvolume.cpp listattr.cpp listfont.cpp listres.cpp
+	message.cpp mkindex.cpp modifiers.cpp mvattr.cpp quit.cpp roster.cpp
+	setversion.cpp trash.cpp version.cpp WindowShade.cpp
+	alert.cpp hey.cpp reindex.cpp resattr.cpp screeninfo.cpp
+	setcontrollook.cpp setdecor.cpp settype.cpp spybmessage.cpp
+	urlwrapper.cpp copyattr.cpp diff_zip.cpp mimeset.cpp mountvolume.cpp
+	setmime.cpp seticon.cpp setapptype.cpp sysinfo.cpp xres.cpp
+	open.cpp waitfor.cpp)
 
-# be + stdc++
-Application(copyattr       SOURCES copyattr.cpp)
-Application(diff_zip       SOURCES diff_zip.cpp)
-Application(mimeset        SOURCES mimeset.cpp          RDEF mimeset.rdef)
-Application(mountvolume    SOURCES mountvolume.cpp      RDEF mountvolume.rdef)
-Application(setmime        SOURCES setmime.cpp          RDEF setmime.rdef)
-Application(seticon       SOURCES seticon.cpp)
-Application(setapptype    SOURCES setapptype.cpp)
-Application(sysinfo        SOURCES sysinfo.cpp)
-Application(xres           SOURCES xres.cpp)
+# libshared
+BinCommands(LIBS shared FILES launch_roster.cpp)
 
-# be + translation
-Application(notify         SOURCES notify.cpp           LIBS translation icon  RDEF notify.rdef)
-Application(translate      SOURCES translate.cpp        LIBS translation)
+# catalog stub
+BinCommands(LIBS localestub FILES dstcheck.cpp)
 
-# be + tracker + localestub
-Application(filepanel      SOURCES filepanel.cpp        LIBS tracker localestub)
+# translation kit
+BinCommands(LIBS translation FILES translate.cpp)
+BinCommands(LIBS translation icon FILES notify.cpp)
 
-# be + media (media kit not yet implemented)
-#Application(installsound   SOURCES installsound.cpp     LIBS media)
-#Application(setvolume      SOURCES setvolume.cpp        LIBS media)
+# Tracker kit
+BinCommands(LIBS tracker FILES checkitout.cpp)
+BinCommands(LIBS tracker localestub FILES filepanel.cpp)
 
-# be + package (package kit not yet implemented)
-#Application(findpaths      SOURCES findpaths.cpp        LIBS package)
+# classic Media Kit
+BinCommands(LIBS media FILES installsound.cpp setvolume.cpp mediakey.cpp
+	bt_a2dp.cpp)
+foreach(_tool installsound setvolume mediakey bt_a2dp)
+	UseMediaKit(${_tool})
+endforeach()
+target_include_directories(setvolume PRIVATE
+	${PROJECT_SOURCE_DIR}/headers/private/osd)
+target_include_directories(mediakey PRIVATE
+	${PROJECT_SOURCE_DIR}/headers/private/media_controls)
+target_link_libraries(mediakey PRIVATE media_controls)
+target_include_directories(bt_a2dp PRIVATE
+	${PROJECT_SOURCE_DIR}/headers/private/bluetooth)
+
+# package kit (hpkg)
+BinCommands(LIBS bpackage FILES findpaths.cpp)
+
+# device and bluetooth kits (both in libbe here)
+BinCommands(FILES setusbconfig.cpp bt_dev_info.cpp bt_discovery.cpp
+	bt_le.cpp)
+target_include_directories(bt_le PRIVATE
+	${PROJECT_SOURCE_DIR}/headers/private/bluetooth)
 
 else()
 

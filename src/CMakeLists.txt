@@ -21,11 +21,9 @@ if(TARGET be AND TARGET localestub)
 
 # ported subset: each of these is added once its CMakeLists.txt exists
 # (W2 adds libs; servers, preferences, data and tests come with W3/W4).
-# src/bin's CMakeLists.txt is VitruvianOS's and still lists directories
-# W4 ports, so outside the buildtools pass it waits for W4 too. src/apps
-# waits as well: vos-polkit-grant-helper needs PAM, which the build
-# container does not install yet.
-foreach(_dir libs servers add-ons apps preferences data)
+# src/bin comes after the kits and libs its commands link (tracker, mail,
+# media, screensaver, ...).
+foreach(_dir libs servers add-ons apps preferences bin data)
 	if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/${_dir}/CMakeLists.txt")
 		add_subdirectory(${_dir})
 	endif()

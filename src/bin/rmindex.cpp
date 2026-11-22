@@ -10,6 +10,7 @@
 
 #include <fs_info.h>
 #include <fs_index.h>
+#include <StorageDefs.h>
 #include <TypeConstants.h>
 
 #include <errno.h>
@@ -206,7 +207,7 @@ main(int argc, char **argv)
 		path = ".";
 
 	device = dev_for_path(path);
-	if (device < 0) {
+	if (device == B_INVALID_DEV) {
 		fprintf(stderr, "%s: can't get information about volume %s\n", kProgramName, path);
 		return 1;
 	}

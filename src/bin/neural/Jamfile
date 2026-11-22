@@ -1,9 +1,0 @@
-SubDir HAIKU_TOP src bin neural ;
-
-# the reader of WAVE files that "transcribe" falls back on
-UsePrivateHeaders neural ;
-
-Application neural :
-	neural.cpp
-	: be neural media translation [ TargetLibstdc++ ]
-;

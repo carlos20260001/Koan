@@ -4,6 +4,7 @@
  * provided under the MIT licence
  */
 
+#include <errno.h>
 #include <stdio.h>
 #include <string.h>
 #include <unistd.h>
@@ -62,7 +63,7 @@ status_t trash(const char *f)
 	char trash_dir[B_PATH_NAME_LENGTH];
 	char trashed_file[B_PATH_NAME_LENGTH];
 	dev = dev_for_path(f);
-	err = find_directory(B_TRASH_DIRECTORY, dev, false, trash_dir, B_PATH_NAME_LENGTH);
+	err = find_directory(B_TRASH_DIRECTORY, dev, true, trash_dir, B_PATH_NAME_LENGTH);
 	if (err < 0)
 		return err;
 	BNode node(f);
@@ -125,9 +126,11 @@ status_t foreach_in_trash(status_t (*iterator)(const char *))
 {
 	status_t err;
 	dev_t dev;
+	int32 cookie = 0;
 	char trash_dir[B_PATH_NAME_LENGTH];
-	for (dev = 0; ; ) {
-		if (next_dev(&dev) < B_OK)
+	for (;;) {
+		dev = next_dev(&cookie);
+		if (dev < B_OK)
 			break;
 		//for each in trash_dir
 		err = find_directory(B_TRASH_DIRECTORY, dev, false, trash_dir, B_PATH_NAME_LENGTH);
@@ -204,7 +207,19 @@ int main(int argc, char **argv)
 	}
 	/* or trash them */
 	for (i = 1; i < argc; i++) {
-		err = trash(argv[i]);
+		// resolve relative paths against the working directory
+		char absolute[B_PATH_NAME_LENGTH];
+		const char *target = argv[i];
+		if (target[0] != '/') {
+			char cwd[B_PATH_NAME_LENGTH];
+			if (getcwd(cwd, sizeof(cwd)) == NULL) {
+				fprintf(stderr, "%s: %s\n", argv[i], strerror(errno));
+				return 1;
+			}
+			snprintf(absolute, sizeof(absolute), "%s/%s", cwd, target);
+			target = absolute;
+		}
+		err = trash(target);
 		if (err) {
 			fprintf(stderr, "%s: %s\n", argv[i], strerror(err));
 			return 1;

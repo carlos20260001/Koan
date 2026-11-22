@@ -1,6 +1,0 @@
-SubDir HAIKU_TOP src bin keystore ;
-
-Application keystore :
-	keystore.cpp
-	: be
-	: keystore.rdef ;
