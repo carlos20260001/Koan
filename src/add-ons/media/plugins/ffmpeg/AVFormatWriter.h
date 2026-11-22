@@ -14,6 +14,13 @@ extern "C" {
 	#include "avformat.h"
 }
 
+// libavformat 61 (FFmpeg 7) passes the write hook a const buffer.
+#if LIBAVFORMAT_VERSION_MAJOR >= 61
+typedef const uint8 avio_write_buffer;
+#else
+typedef uint8 avio_write_buffer;
+#endif
+
 
 class AVFormatWriter : public Writer {
 public:
@@ -44,7 +51,8 @@ public:
 									media_encode_info* encodeInfo);
 
 private:
-	static	int					_Write(void* cookie, uint8* buffer,
+	static	int					_Write(void* cookie,
+									avio_write_buffer* buffer,
 									int bufferSize);
 	static	off_t				_Seek(void* cookie, off_t offset, int whence);
 

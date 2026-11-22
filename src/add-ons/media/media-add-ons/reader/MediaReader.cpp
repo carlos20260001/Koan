@@ -11,7 +11,7 @@
 #include "../AbstractFileInterfaceNode.h"
 #include "MediaReader.h"
 #include "../misc.h"
-#include "debug.h"
+#include "MediaDebug.h"
 
 #include <Buffer.h>
 #include <BufferGroup.h>

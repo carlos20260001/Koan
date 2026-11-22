@@ -1,15 +1,6 @@
 SubDir HAIKU_TOP src add-ons media plugins ;
 
+# The other plugins are on CMake (CMakeLists.txt); these two are not ported
+# yet (PORTING.md M9, media add-ons).
 SubInclude HAIKU_TOP src add-ons media plugins ape_reader ;
-SubInclude HAIKU_TOP src add-ons media plugins au_reader ;
-SubInclude HAIKU_TOP src add-ons media plugins ffmpeg ;
-SubInclude HAIKU_TOP src add-ons media plugins dvd_streamer ;
-SubInclude HAIKU_TOP src add-ons media plugins http_streamer ;
-SubInclude HAIKU_TOP src add-ons media plugins raw_decoder ;
-if $(TARGET_ARCH) = arm64 {
-	SubInclude HAIKU_TOP src add-ons media plugins rpi_hevc ;
-	SubInclude HAIKU_TOP src add-ons media plugins qcom_video ;
-	SubInclude HAIKU_TOP src add-ons media plugins rpi_mmal ;
-	SubInclude HAIKU_TOP src add-ons media plugins sunxi_cedar ;
-}
 SubInclude HAIKU_TOP src add-ons media plugins rtsp_streamer ;
