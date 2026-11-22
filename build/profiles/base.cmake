@@ -98,6 +98,8 @@ set(SYSTEM_TRANSLATORS
 	ICNSTranslator
 	ICOTranslator
 	JPEGTranslator
+#	JPEG2000Translator: needs libjasper, which Debian 13 does not ship;
+#	left out until ported to OpenJPEG (src/add-ons/translators/CMakeLists.txt)
 	PCXTranslator
 	PNGTranslator
 	PPMTranslator
