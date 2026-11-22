@@ -600,6 +600,16 @@ Waves (each on its own `port/*` branch, merged here when green):
             list empty); VirtualMemory `Apply()` needs a polkit root helper; nl80211
             details (MCS, width); Joysticks links named after `eventN` (not stable);
             nothing run on a display yet
+      - [x] Translators merged (`9cc7bcbb11`, `port/translators`): 19 of air/OS's image
+            translators (AVIF BMP GIF HVIF ICNS ICO JPEG PCX PNG PPM PSD RAW RTF SGI
+            STXT TGA TIFF WEBP Wonderbrush) + `shared` on VitruvianOS's CMakeLists, air/OS
+            sources, installed to `/system/add-ons/Translators` (B_SYSTEM_ADDONS_DIRECTORY);
+            Debian codecs (libpng, libjpeg-turbo, libtiff, libwebp, libavif, libicns, zlib;
+            RAW on LibRaw 0.21 via `USES_LIBRAW`, new `RAW` dep / libraw23t64). Left out:
+            JPEG2000Translator (libjasper not in Debian 13; port to OpenJPEG open; its
+            Jamfile kept). Compile-only Release build: ninja exit 0, `ldd -r` of the 19
+            add-ons against the chroot 0 not found/0 undefined, ctest 10 passed, 2 skipped
+            (`translation_decode_png_jpeg_gif` needs nexus.ko: built, not run). Jamfiles: 510
       `src/data`, `data/`, remaining tests
 - [ ] W5: `Jamrules`, `Jamfile`, `build/jam`, Haiku `configure`, Haiku-only
       `build/scripts` deleted; `git ls-files | grep -c Jamfile` = 0; full `ninja`,
@@ -846,3 +856,4 @@ overlay plane from app_server), which is follow-up work. vsync through
 | 2026-11-21 | `594475e1b6` | W4: data/ and src/data ported, data.cmake active; **Release ISO builds** (vos-uefi.iso, 1.3 GB) |
 | 2026-11-22 | `0f159065ab` | M10: air/OS's Mesa route merged (`port/opengl`): Mesa 22.0.5 + air/OS Zink series + Koan series -> `vos-mesa-hgl` (libGL-hgl, Zink add-on on Debian Vulkan); compile-only Release build and cpack green; not run on a display |
 | 2026-11-22 | `7ad58622d7` | Decorators and control looks on CMake (`port/decor`): Be/Flat/Mac/Win decorators and Be/Flat control looks from air/OS sources + VitruvianOS CMake, Koan's ModernDecorator and KoiPopControlLook (dark mode from the system); KoiPopDecorator/ModernTabDecorator open; Jamfiles of decorators, control_look, input_server devices/filters removed. Compile-only Release build: ninja exit 0, `ldd -r` of the 8 add-ons 0 unresolved (decorators against app_server's exports), ctest 10 passed, 1 skipped; not run on a display |
+| 2026-11-22 | `9cc7bcbb11` | Translators on CMake (`port/translators`): 19 translators + shared helper from air/OS sources on Debian codec libraries, in `/system/add-ons/Translators`; JPEG2000 left out (no libjasper in Debian 13). Compile-only Release build: ninja exit 0, `ldd -r` 19/19 resolved in the chroot, ctest 10 passed, 2 skipped (PNG/JPEG/GIF decode test needs nexus.ko) |
