@@ -106,8 +106,21 @@ function( CompileRdef target rdef_file )
 	cmake_parse_arguments(_ARG "STAGING" "" "" ${ARGN})
 
 	set(_src    "${CMAKE_CURRENT_SOURCE_DIR}/${rdef_file}")
-	set(_pp     "${CMAKE_CURRENT_BINARY_DIR}/${rdef_file}.pp")
-	set(_rsrc   "${CMAKE_CURRENT_BINARY_DIR}/${rdef_file}.rsrc")
+	# Per target: several targets of one directory may share an .rdef
+	# (src/bin gives every command haiku-utils.rdef), and a shared output
+	# path makes their POST_BUILD steps overwrite and read the same file
+	# at once under a parallel build.
+	# The files stay in the rdef's own build directory, so rc still finds
+	# the resources an rdef imports by relative name.
+	get_filename_component(_rdef_dir  "${rdef_file}" DIRECTORY)
+	get_filename_component(_rdef_name "${rdef_file}" NAME)
+	if(_rdef_dir)
+		set(_rdef_out_dir "${CMAKE_CURRENT_BINARY_DIR}/${_rdef_dir}")
+	else()
+		set(_rdef_out_dir "${CMAKE_CURRENT_BINARY_DIR}")
+	endif()
+	set(_pp     "${_rdef_out_dir}/${target}.${_rdef_name}.pp")
+	set(_rsrc   "${_rdef_out_dir}/${target}.${_rdef_name}.rsrc")
 	if(BUILDTOOLS_DIR)
 		set(_rc "${BUILDTOOLS_DIR}/src/bin/rc/rc")
 	else()
@@ -123,6 +136,7 @@ function( CompileRdef target rdef_file )
 	# TODO maybe we should clean that
 	add_custom_command(TARGET ${target} POST_BUILD
 		COMMENT "Compiling rdef ${rdef_file}"
+		COMMAND ${CMAKE_COMMAND} -E make_directory "${_rdef_out_dir}"
 		COMMAND "${CMAKE_C_COMPILER}" -E -x c -DHAIKU_TARGET_PLATFORM_HAIKU
 			-D__VOS__ -P "${_src}" -o "${_pp}"
 		COMMAND "${_rc}" "${_pp}" -o "${_rsrc}"

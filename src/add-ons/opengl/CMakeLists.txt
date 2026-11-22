@@ -32,8 +32,10 @@ if(NOT EXISTS "${_mesa_src}/meson.build")
 		"(git submodule update --init 3rdparty/mesa)")
 	return()
 endif()
-find_program(VOS_MESON meson)
-find_program(VOS_PATCH patch)
+# Build-host tools: never look for them in the target chroot (a cross
+# toolchain searches programs only there).
+find_program(VOS_MESON meson NO_CMAKE_FIND_ROOT_PATH)
+find_program(VOS_PATCH patch NO_CMAKE_FIND_ROOT_PATH)
 if(NOT VOS_MESON OR NOT VOS_PATCH)
 	message(STATUS "Mesa hgl: skipped, needs meson and patch")
 	return()
