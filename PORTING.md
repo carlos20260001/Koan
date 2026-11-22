@@ -703,6 +703,60 @@ Waves (each on its own `port/*` branch, merged here when green):
             | print/transports/usb_port | (a) | ported on usblp (`/dev/usb/lp*`): the USB kit (libusb) does not claim interfaces and usblp owns printer interfaces; port id is the node name (not stable across re-plugging) |
             | mail_daemon/inbound_protocols/imap, pop3; outbound_protocols/smtp | (a) | ported |
             | mail_daemon/inbound_filters/match_header, notifier, spam_filter; outbound_filters/fortune | (a) | ported. Runtime gaps: Fortune runs `/bin/fortune`, which the image does not have (`fortune_vos` is not built yet); SpamFilter launches the `spamdbm` server from `src/bin/mail_utils`, not on CMake yet |
+      - [x] Remaining add-on groups (`port/addons3`): `src/add-ons/{locale,index_server,
+            quick_look,neural,network_settings,disk_systems,bluetooth}` classified (table
+            below; nothing deleted but the Jamfiles of ported directories); air/OS
+            sources with new CMakeLists, except locale (VitruvianOS's
+            CMakeLists and its `entry_ref` accessor change in `Catalog.cpp`). Installed to
+            `/system/add-ons/locale/catalogs`, `/system/add-ons/index_server`,
+            `/system/add-ons/quick_look`, `/system/add-ons/neural` and
+            `/system/add-ons/Network Settings` (new `INDEX_SERVER_ADDONS`,
+            `QUICK_LOOK_ADDONS`, `NEURAL_BACKENDS`, `NETWORK_SETTINGS_ADDONS`). New deps
+            `TAGLIB` (libtag-dev / libtag2), `CLUCENE` (libclucene-dev /
+            libclucene-core1t64), `MUPDF` (libmupdf-dev / libmupdf25.1), `VULKAN`
+            (libvulkan-dev, already in the build image / libvulkan1); dev packages in
+            `docker/Dockerfile` and the 4 dev lists; installed into the existing chroot by
+            hand to iterate. Source changes for Linux: amdxdna finds its node as the
+            `/dev/accel/accel<N>` bound to the amdxdna driver (sysfs), maps buffers with
+            `mmap()` at `map_offset`, drops the root-only check, waits on a
+            `CLOCK_MONOTONIC` deadline; the Vulkan back end dlopen()s the loader without the
+            library-path probe; Hostname calls systemd-hostnamed's `SetStaticHostname`
+            (GIO); the Network executable exports its symbols (`ENABLE_EXPORTS`).
+            Compile-only Release build: ninja exit 0, the new image lists not left out,
+            `ldd -r` 9/9 0 not found (8 with 0 undefined; Hostname's 13 undefined symbols
+            all exported by `Network`), ctest 23 passed, 2 skipped (new:
+            `index_server_addons_entry_points`, `quick_look_addons_entry_points`,
+            `neural_backends_entry_points`, `network_settings_addons_entry_points`).
+            Not run on a system: index_server, quick_look_server and net_server are built
+            but not in `SYSTEM_SERVERS`; no NPU or Vulkan device tested. The other
+            `src/add-ons` Jamfiles (easypen, the driver-bound media add-ons, ape_reader,
+            rtsp_streamer, demultiplexer, JPEG2000) keep the classification of the earlier
+            waves; `kernel/drivers/graphics` and `accelerants` untouched.
+            Jamfiles: 414
+
+            | Directory | Class | Result |
+            | --- | --- | --- |
+            | locale/catalogs/plaintext | (a) | ported (VitruvianOS CMakeLists); was already in `CATALOG_ADDONS` |
+            | index_server/audiotags | (a) | ported on TagLib 2.0 (`AudioTagAnalyser`) |
+            | index_server/fulltext | (a) | ported on CLucene 2.3.3.4 (`FullTextAnalyser`) |
+            | quick_look/image, text | (a) | ported (`ImagePreview`, `TextPreview`; BColumnListView is in libbe) |
+            | quick_look/pdf | (a) | ported on MuPDF 1.25 (`PDFPreview`); Debian's `mupdf.pc` is broken (misspelt prefix), so `-lmupdf` directly |
+            | neural/vulkan | (a) | ported (`vulkan.neural`); dlopen()s libvulkan1, own Khronos headers, precompiled shaders |
+            | neural/amdxdna | (a) | ported to Linux's amdxdna DRM accel driver (x86_64 only). Runtime gap: the driver is in mainline since Linux 6.14; Debian 13's 6.12 kernel does not have it, and Linux's driver needs an IOMMU (the air/OS driver did not) |
+            | neural/rk3588_npu | (c), open | left with its Jamfile: drives air/OS's own RK3588 NPU kernel driver (`rk3588_npu.h`, deleted with the kernel). Linux's driver for this NPU is Rocket (DRM accel, Linux 6.18, `drm/rocket_accel.h`, not in Debian 13's headers); `Device.cpp` needs rewriting onto its BO/submit ioctls |
+            | network_settings/hostname | (a) | ported on systemd-hostnamed (`SetStaticHostname`, polkit); reading stays `gethostname()` |
+            | network_settings/ipv4 | (c), open | `InterfaceAddressView` writes `BNetworkSettings` (`interfaces`), which net_server ignores on Linux (`kMsgInterfaceSettingsUpdated`/`kMsgConfigureInterface` are stubs). The backend exists (`NMBackend::GetDeviceConnectionProfilesAsync`, `GetConnectionIP4ConfigAsync`, `SetStaticIPConfigAsync`), but net_server (or the add-on) needs the read-modify-write chain onto the active NetworkManager profile |
+            | network_settings/ipv6 | (c), open | as ipv4, and NMBackend has no IPv6 write (NM `ipv6.method`/`addresses`) |
+            | network_settings/dnsclient | (c), open | writes a `resolv.conf` under the system settings; on Linux the resolver is NetworkManager's: `ipv4.dns`/`ipv6.dns` of the active profile (same NMBackend chain as ipv4; `kMsgConfigureResolver` is a stub) |
+            | network_settings/ftpd, telnetd | (c), open | enable inetd-style entries that net_server's `Services.cpp` (built on Linux) runs, but the daemons (`src/bin/network/{ftpd,telnetd}`) are still on Jam, net_server is not in the image, and its session-user process cannot bind ports 21/23 |
+            | network_settings/sshd | (c), open | creates the `sshd` user through the registrar and runs `/bin/sshd`; on Linux this is openssh-server (not in the image) and its `ssh.socket`/`ssh.service` toggled through systemd's D-Bus API with polkit |
+            | network_settings/dialup | (c), open | PPP/PPPoE on the old kernel PPP stack (`libppp`, kernel ppp headers gone); needs NetworkManager PPPoE/modem connections (`NMSettingPppoe`) in NMBackend |
+            | network_settings/vpn | (c), open: kept | an unfinished interface page (one fixed list item, no settings; not in air/OS's image). Needs NetworkManager VPN profiles through NMBackend (`GetVPNConnections`, `ConnectVPN`/`DisconnectVPN`, `ImportVPNAsync`, `RemoveVPNAsync`), which have no UI caller yet |
+            | disk_systems/gpt, intel | (c), open: kept | no disk-system add-on host here: the storage kit's `PartitionPlanBuilder` + `vos-drivesetup-helper`/`vos-partition-lib.sh` write GPT and MBR tables with sfdisk without them. Porting needs a `BDiskSystemAddOn` host in the storage kit backed by libblkid/libfdisk or by those helpers |
+            | disk_systems/fat, btrfs | (c), open: kept | same host needed; their initialize/resize operations map onto `mkfs.fat`/`mkfs.btrfs`/`btrfs filesystem resize` in the `vos-install-helper` tiers |
+            | disk_systems/bfs | (c), open: kept | same host needed, and the helpers have no BFS tier: needs a Linux BFS initializer (e.g. a `mkbfs` from the bfs userland shell) |
+            | disk_systems/ntfs | (c), open: kept | same host needed, and an NTFS tier in `vos-install-helper` (`mkntfs`, `ntfsresize`, `ntfslabel` from ntfs-3g) |
+            | bluetooth/ResetLocalDevice | (c), open: kept | not included by any Jamfile, and nothing loads `LocalDeviceAddOn` (no host in bluetooth_server or the Bluetooth preference); `EXPORT_LOCAL_DEVICE_ADDON` uses `__declspec`. Needs an add-on host, and the reset through the BlueZ mgmt API (`MGMT_OP_SET_POWERED` off/on on the management socket) or HCI_Reset on a raw HCI socket instead of bluetooth_server's simple-request path |
       `src/data`, `data/`, remaining tests
 - [ ] W5: `Jamrules`, `Jamfile`, `build/jam`, Haiku `configure`, Haiku-only
       `build/scripts` deleted; `git ls-files | grep -c Jamfile` = 0; full `ninja`,

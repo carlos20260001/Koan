@@ -10,6 +10,9 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/ioctl.h>
+#ifdef __linux__
+#	include <time.h>
+#endif
 #include <syslog.h>
 
 #include <Autolock.h>
@@ -323,8 +326,17 @@ Program::Run(void* const* tensors)
 	memset(&wait, 0, sizeof(wait));
 	wait.handles = (addr_t)&syncObject;
 	wait.points = (addr_t)&point;
+#ifdef __linux__
+	// DRM's timeouts are on the monotonic clock; system_time() is the boot
+	// time clock here, which runs on during suspend.
+	struct timespec now;
+	clock_gettime(CLOCK_MONOTONIC, &now);
+	wait.timeout_nsec = (int64)now.tv_sec * 1000000000 + now.tv_nsec
+		+ (int64)fBundle->Timeout() * 1000000;
+#else
 	wait.timeout_nsec = (system_time() + (bigtime_t)fBundle->Timeout() * 1000)
 		* 1000;
+#endif
 	wait.count_handles = 1;
 	wait.flags = XDNA_SYNCOBJ_WAIT_FOR_SUBMIT;
 	if (ioctl(fDevice->FD(), XDNA_IOCTL_SYNCOBJ_TIMELINE_WAIT, &wait) != 0)

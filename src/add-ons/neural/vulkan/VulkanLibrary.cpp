@@ -34,6 +34,12 @@ static const char* const kLoaderNames[] = {
 static bool
 library_exists(const char* name)
 {
+#ifdef __linux__
+	// glibc's dlopen() logs nothing when it finds no library.
+	(void)name;
+	return true;
+#endif
+
 	// B_ENTRY_NOT_FOUND is the answer "in none of them"
 	BStringList paths;
 	status_t status = BPathFinder::FindPaths(B_FIND_PATH_LIB_DIRECTORY, name,

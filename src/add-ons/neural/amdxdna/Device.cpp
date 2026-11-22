@@ -13,6 +13,10 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/ioctl.h>
+#ifdef __linux__
+#	include <limits.h>
+#	include <sys/mman.h>
+#endif
 #include <sys/stat.h>
 #include <syslog.h>
 #include <unistd.h>
@@ -20,6 +24,37 @@
 #include <Autolock.h>
 #include <Message.h>
 #include <OS.h>
+
+
+/*!	The node of the NPU. On Linux the amdxdna driver is a DRM accel
+	driver: its node is the /dev/accel/accel<N> whose device the amdxdna
+	driver is bound to, which sysfs tells without opening anything. NULL
+	when there is none. */
+static const char*
+device_path()
+{
+#ifdef __linux__
+	static char path[32];
+	for (int i = 0; i < 16; i++) {
+		char link[64];
+		char target[PATH_MAX];
+		snprintf(link, sizeof(link), "/sys/class/accel/accel%d/device/driver",
+			i);
+		ssize_t length = readlink(link, target, sizeof(target) - 1);
+		if (length < 0)
+			continue;
+		target[length] = '\0';
+		const char* driver = strrchr(target, '/');
+		if (strcmp(driver != NULL ? driver + 1 : target, "amdxdna") == 0) {
+			snprintf(path, sizeof(path), "/dev/accel/accel%d", i);
+			return path;
+		}
+	}
+	return NULL;
+#else
+	return XDNA_DEVICE_PATH;
+#endif
+}
 
 
 Device::Device()
@@ -46,8 +81,9 @@ bool
 Device::Exists()
 {
 	// Looking is all: opening the node starts the NPU.
+	const char* path = device_path();
 	struct stat st;
-	return stat(XDNA_DEVICE_PATH, &st) == 0 && S_ISCHR(st.st_mode);
+	return path != NULL && stat(path, &st) == 0 && S_ISCHR(st.st_mode);
 }
 
 
@@ -116,15 +152,22 @@ Device::_Open()
 	// The driver lets nobody else in (a client can have the NPU read and
 	// write any memory), and tells so; asking first keeps the reason
 	// plain.
+	// On Linux the driver needs an IOMMU and the node's permissions
+	// decide.
+#ifndef __linux__
 	if (geteuid() != 0)
 		return B_PERMISSION_DENIED;
+#endif
+	const char* path = device_path();
+	if (path == NULL)
+		return B_ENTRY_NOT_FOUND;
 
 	// This is where the NPU is powered up and gets its firmware.
-	fFD = open(XDNA_DEVICE_PATH, O_RDWR | O_CLOEXEC);
+	fFD = open(path, O_RDWR | O_CLOEXEC);
 	if (fFD < 0) {
 		status_t status = errno;
 		syslog(LOG_WARNING, "amdxdna.neural: cannot open %s: %s",
-			XDNA_DEVICE_PATH, strerror(status));
+			path, strerror(status));
 		return status;
 	}
 
@@ -188,7 +231,9 @@ void
 Device::GetDetails(BMessage* details)
 {
 	BAutolock locker(fLock);
-	details->AddString("path", XDNA_DEVICE_PATH);
+	const char* path = device_path();
+	if (path != NULL)
+		details->AddString("path", path);
 	details->AddString("driver", "amdxdna");
 	if (!fKnown)
 		return;
@@ -247,6 +292,24 @@ Device::CreateBuffer(uint32 type, size_t size, Buffer& buffer)
 			memset(buffer.data, 0, size);
 		}
 	} else if (status == B_OK) {
+#ifdef __linux__
+		// Linux maps a buffer with mmap() at its map_offset.
+		size_t mapSize = (size + B_PAGE_SIZE - 1) & ~((size_t)B_PAGE_SIZE - 1);
+		void* data = mmap(NULL, mapSize, PROT_READ | PROT_WRITE, MAP_SHARED,
+			fFD, (off_t)info.map_offset);
+		if (data == MAP_FAILED) {
+			status = errno;
+		} else {
+			buffer.data = data;
+			buffer.mapped = true;
+			// the address is known once the buffer is mapped
+			if (ioctl(fFD, XDNA_IOCTL_GET_BO_INFO, &info) != 0)
+				status = errno;
+			else if (info.xdna_addr == XDNA_INVALID_ADDRESS)
+				status = B_BAD_DATA;
+			buffer.address = info.xdna_addr;
+		}
+#else
 		xdna_map map;
 		memset(&map, 0, sizeof(map));
 		map.offset = info.map_offset;
@@ -264,6 +327,7 @@ Device::CreateBuffer(uint32 type, size_t size, Buffer& buffer)
 				status = B_BAD_DATA;
 			buffer.address = info.xdna_addr;
 		}
+#endif
 	}
 
 	if (status != B_OK)
@@ -276,9 +340,14 @@ void
 Device::DeleteBuffer(Buffer& buffer)
 {
 	if (fFD >= 0 && buffer.mapped) {
+#ifdef __linux__
+		munmap(buffer.data,
+			(buffer.size + B_PAGE_SIZE - 1) & ~((size_t)B_PAGE_SIZE - 1));
+#else
 		xdna_unmap unmap;
 		unmap.address = (addr_t)buffer.data;
 		ioctl(fFD, XDNA_IOCTL_UNMAP, &unmap);
+#endif
 	}
 	if (fFD >= 0 && buffer.handle != 0) {
 		xdna_gem_close close;

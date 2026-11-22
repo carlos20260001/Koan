@@ -90,6 +90,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libgutenprint-dev \
     && rm -rf /var/lib/apt/lists/*
 
+# index_server add-ons (TagLib, CLucene) and Quick Look's PDF previews (MuPDF).
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libtag-dev libclucene-dev libmupdf-dev \
+    && rm -rf /var/lib/apt/lists/*
+
 ENV DEBIAN_MIRROR=http://deb.debian.org/debian/
 ENV VOS_BASE_SUITE=trixie
 ENV VOS_KERNEL_FLAVOUR=rt-amd64

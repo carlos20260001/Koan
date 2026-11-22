@@ -149,7 +149,7 @@ get_dev_packages() {
                 " libgl-dev libegl-dev libgbm-dev libvulkan-dev libzstd-dev" \
                 " libxkbcommon-dev libsystemd-dev libpam0g-dev libpwquality-dev" \
                 " libgcrypt20-dev libapt-pkg-dev" \
-                " libjpeg-dev libpng-dev libtiff-dev libwebp-dev libicns-dev libavif-dev libraw-dev libva-dev libdvdnav-dev libgutenprint-dev libssl-dev libargon2-dev" \
+                " libjpeg-dev libpng-dev libtiff-dev libwebp-dev libicns-dev libavif-dev libraw-dev libva-dev libdvdnav-dev libgutenprint-dev libtag-dev libclucene-dev libmupdf-dev libssl-dev libargon2-dev" \
                 " libsane1 libsane-common sane-utils sane-airscan ipp-usb" \
                 " libpipewire-0.3-dev libspa-0.2-dev libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev libfluidsynth-dev libsane-dev liblilv-dev libsuil-dev lv2-dev libasound2-dev" \
                 " libglu1-mesa-dev libnm-dev libbluetooth-dev" \
@@ -165,7 +165,7 @@ get_dev_packages() {
                 " libgl-dev libegl-dev libgbm-dev libvulkan-dev libzstd-dev" \
                 " libxkbcommon-dev libsystemd-dev libpam0g-dev libpwquality-dev" \
                 " libgcrypt20-dev libapt-pkg-dev" \
-                " libjpeg-dev libpng-dev libtiff-dev libwebp-dev libicns-dev libavif-dev libraw-dev libva-dev libdvdnav-dev libgutenprint-dev libssl-dev libargon2-dev" \
+                " libjpeg-dev libpng-dev libtiff-dev libwebp-dev libicns-dev libavif-dev libraw-dev libva-dev libdvdnav-dev libgutenprint-dev libtag-dev libclucene-dev libmupdf-dev libssl-dev libargon2-dev" \
                 " libsane1 libsane-common sane-utils sane-airscan ipp-usb" \
                 " libpipewire-0.3-dev libspa-0.2-dev libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev libfluidsynth-dev libsane-dev liblilv-dev libsuil-dev lv2-dev libasound2-dev" \
                 " libglu1-mesa-dev libnm-dev libbluetooth-dev" \
@@ -181,7 +181,7 @@ get_dev_packages() {
                 " libgl-dev libegl-dev libgbm-dev libvulkan-dev libzstd-dev" \
                 " libxkbcommon-dev libsystemd-dev libpam0g-dev libpwquality-dev" \
                 " libgcrypt20-dev libapt-pkg-dev" \
-                " libjpeg-dev libpng-dev libtiff-dev libwebp-dev libicns-dev libavif-dev libraw-dev libva-dev libdvdnav-dev libgutenprint-dev libssl-dev libargon2-dev" \
+                " libjpeg-dev libpng-dev libtiff-dev libwebp-dev libicns-dev libavif-dev libraw-dev libva-dev libdvdnav-dev libgutenprint-dev libtag-dev libclucene-dev libmupdf-dev libssl-dev libargon2-dev" \
                 " libsane1 libsane-common sane-utils sane-airscan ipp-usb" \
                 " libpipewire-0.3-dev libspa-0.2-dev libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev libfluidsynth-dev libsane-dev liblilv-dev libsuil-dev lv2-dev libasound2-dev libglu1-mesa-dev libnm-dev libbluetooth-dev" \
                 " libwpewebkit-2.0-dev libwpe-1.0-dev libwpebackend-fdo-1.0-dev libetpan-dev libcurl4-gnutls-dev libre-dev libvpx-dev" \
@@ -196,7 +196,7 @@ get_dev_packages() {
                 " libgl-dev libegl-dev libgbm-dev libvulkan-dev libzstd-dev" \
                 " libxkbcommon-dev libsystemd-dev libpam0g-dev libpwquality-dev" \
                 " libgcrypt20-dev libapt-pkg-dev" \
-                " libjpeg-dev libpng-dev libtiff-dev libwebp-dev libicns-dev libavif-dev libraw-dev libva-dev libdvdnav-dev libgutenprint-dev libssl-dev libargon2-dev" \
+                " libjpeg-dev libpng-dev libtiff-dev libwebp-dev libicns-dev libavif-dev libraw-dev libva-dev libdvdnav-dev libgutenprint-dev libtag-dev libclucene-dev libmupdf-dev libssl-dev libargon2-dev" \
                 " libsane1 libsane-common sane-utils sane-airscan ipp-usb" \
                 " libpipewire-0.3-dev libspa-0.2-dev libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev libfluidsynth-dev libsane-dev liblilv-dev libsuil-dev lv2-dev libasound2-dev libglu1-mesa-dev libnm-dev libbluetooth-dev" \
                 " libwpewebkit-2.0-dev libwpe-1.0-dev libwpebackend-fdo-1.0-dev libetpan-dev libcurl4-gnutls-dev libre-dev libvpx-dev" \

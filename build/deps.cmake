@@ -389,6 +389,38 @@ DeclareDependency(
 	RUNTIMES	"libgutenprint9"
 )
 
+# index_server add-ons (src/add-ons/index_server): audio tags and the
+# full-text index.
+DeclareDependency(
+	TAGLIB
+	LIBRARIES	"tag"
+	PACKAGES	"libtag-dev"
+	RUNTIMES	"libtag2"
+)
+
+DeclareDependency(
+	CLUCENE
+	LIBRARIES	"clucene-core;clucene-shared"
+	PACKAGES	"libclucene-dev"
+	RUNTIMES	"libclucene-core1t64"
+)
+
+# PDF previews (src/add-ons/quick_look/pdf).
+DeclareDependency(
+	MUPDF
+	LIBRARIES	"mupdf"
+	PACKAGES	"libmupdf-dev"
+	RUNTIMES	"libmupdf25.1"
+)
+
+# Vulkan loader, opened at run time by the neural kit's Vulkan back end
+# (src/add-ons/neural/vulkan; it compiles against its own Khronos headers).
+DeclareDependency(
+	VULKAN
+	PACKAGES	"libvulkan-dev"
+	RUNTIMES	"libvulkan1"
+)
+
 DeclareDependency(
 	CAIRO
 	LIBRARIES	"cairo"
