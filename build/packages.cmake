@@ -317,6 +317,19 @@ install(FILES data/keys/vitruvian-archive-keyring.asc
 	COMPONENT archive)
 endif()
 
+# Mesa hgl (src/add-ons/opengl): libGL-hgl, libglapi-hgl and the Zink
+# renderer add-on. Zink reaches the GPU through the Vulkan loader and
+# Debian's Vulkan drivers (RADV, ANV, NVK; lavapipe on the CPU otherwise).
+# vos does not depend on it, so the image installs it beside vos (bake
+# installs every .deb of the build).
+if(TARGET mesa_hgl)
+	set(CPACK_DEBIAN_MESA-HGL_PACKAGE_NAME "vos-mesa-hgl")
+	set(CPACK_DEBIAN_MESA-HGL_PACKAGE_DEPENDS
+		"vos (= ${_vos_runtime_version}), libc6 (>= 2.31-13), libstdc++6 (>= 10.2.1-6), libgcc-s1, libvulkan1, mesa-vulkan-drivers, libdrm2, libexpat1, zlib1g, libzstd1")
+	set(CPACK_DEBIAN_MESA-HGL_PACKAGE_DESCRIPTION
+		"V\\\\OS OpenGL for BGLView: Mesa's Haiku libGL and air/OS's Zink renderer")
+endif()
+
 # These files used to ship in vos itself.
 set(CPACK_DEBIAN_DATA_PACKAGE_REPLACES "vos (<< ${_vos_runtime_version})")
 set(CPACK_DEBIAN_DATA_PACKAGE_BREAKS "vos (<< ${_vos_runtime_version})")
@@ -336,6 +349,7 @@ set_property(DIRECTORY "${CMAKE_SOURCE_DIR}" APPEND PROPERTY
 		"${CMAKE_BINARY_DIR}/${CPACK_PACKAGE_FILE_NAME}-netplus-extensions.deb"
 		"${CMAKE_BINARY_DIR}/${CPACK_PACKAGE_FILE_NAME}-buildtools.deb"
 		"${CMAKE_BINARY_DIR}/${CPACK_PACKAGE_FILE_NAME}-dh-vos.deb"
+		"${CMAKE_BINARY_DIR}/${CPACK_PACKAGE_FILE_NAME}-mesa-hgl.deb"
 )
 
 # vos-dev component: public headers + pkg-config. The shared libraries are

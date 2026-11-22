@@ -19,6 +19,7 @@ if(TARGET be)
 			mail_daemon
 			media
 			neural
+			opengl
 			print
 			quick_look
 			screen_savers
