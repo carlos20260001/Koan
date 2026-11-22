@@ -686,6 +686,105 @@ this tree builds, so its folders fill as ports land.
       and `Tracker_prefs` must match the preferences ports; the `menu_entries` type
       attribute on the system file comes from `postinst`
 
+### M10 - air/OS Mesa (hgl + Zink) (user, 2026-11-22)
+`BGLView` gets air/OS's hardware route instead of VitruvianOS's `mesa_egl`/
+`mesa_surfaceless`: Mesa's Haiku platform (hgl) with air/OS's Zink renderer add-on,
+built on Linux and run on Debian's Vulkan drivers (RADV, ANV, NVK; lavapipe on the
+CPU). The kernel side stays Linux DRM; nothing here touches DRM or accelerants.
+
+**Source (5).** air/OS's series (`docs/x399-workstation/patches/mesa-hgl/0001..0016`,
+already in this tree) is documented as applying to "X547/mesa's Haiku branch at
+`71177f7`". That commit is not published: X547/mesa has no such object (GitHub API
+422, `git fetch` of the short sha fails), nor does freedesktop Mesa; air/OS's commit
+`f28f179972` says one of the two trees "has no remote at all". The series' base is
+Mesa **22.0.5** (`docs/x399-workstation/STATUS.md`, 2026-09-18: the add-on is built
+"from that same release" as Haiku's mesa package, 22.0.5; patch 0001's
+`src/gallium/meson.build` preimage `a678dc0` is exactly 22.0.5's blob), and all 16
+patches apply with `git am` onto the `mesa-22.0.5` tag commit `18f91b5895af`, which
+X547/mesa does serve. So `3rdparty/mesa` is a shallow submodule of
+`https://github.com/X547/mesa.git` pinned at `18f91b5895af` (= upstream
+`mesa-22.0.5`); nothing is forked or pushed. The build copies it (no `.git`) into
+the build tree and applies air/OS's series, then Koan's
+(`docs/x399-workstation/patches/mesa-hgl-koan/0001..0003`) with `patch -p1`.
+
+**Haiku-specific pieces and what they need (1).**
+
+| Mesa piece | Needs from the OS | Here |
+| --- | --- | --- |
+| `src/hgl` -> libGL (BGLView, BGLRenderer, GLRendererRoster, GL entry points through glapi) | libbe (BView, BWindow, BDirectory, BPath, find_directory), libroot (load_add_on, get_image_symbol, `_kern_get_safemode_option`, get_system_info), `DirectWindowPrivate.h`, `safemode_defs.h` | all present (libroot.so exports them; headers in `headers/private`) |
+| `include/HaikuGL` GLView.h / GLRenderer.h | - | Mesa's own copies are used. `headers/os/opengl/GLView.h` has the same layout; `headers/private/opengl/GLRenderer.h` is VitruvianOS's different ABI (dispatcher argument, GetGLProcAddress slot), used only by `src/kits/opengl` |
+| `frontends/hgl` (st_api glue, bitmap_wrapper) | BBitmap, translation kit | libbe, libtranslation |
+| `winsys/sw/hgl` | BBitmap; with air/OS's 0006+ the direct-window scan-out target | libbe |
+| `targets/haiku-zink` (air/OS 0001-0016) -> add-on `Zink` | BGLView private `fClipInfo` (member-pointer trick), BDirectWindow incl. air/OS's `MarkDrawingBitsStale`, `direct_buffer_info::device_scale`, `DIRECT_BUFFER_INFO_AREA_SIZE`, BScreen (`ColorSpace`, `WaitForRetrace`), ColorConversion.h, libgame | all present (air/OS headers; `ldd -r` of the probe's `libzinkpipe.so`: no undefined symbol); `WaitForRetrace` is served by the KMS backend's retrace semaphore (`KmsHWInterface::RetraceSemaphore`) |
+| `drivers/zink` + air/OS 0004/0005 (GPU copy into the window system's memory via `VK_EXT_external_memory_host`) | a Vulkan driver | Debian `libvulkan1` + `mesa-vulkan-drivers` |
+| `drivers/zink` + air/OS 0006-0015 scan-out (`VkImportScanoutMemoryHAIKU`, `hgl_scanout_target`) | NVK on Haiku's nvrm publishing the accelerant frame buffer | missing on Linux, compiled out (`__HAIKU__`) |
+
+**meson gate and the Linux-host patch (2).** The platform is chosen with
+`-Dplatforms=haiku` (`with_platform_haiku`), not by `host_machine.system()`, so it
+configures on Linux; what breaks is the SDK lookup (`find_library('be'/'game'/
+'translation'/'network')`, hard-coded `/boot/system/develop/headers/private`) and
+name clashes with Koan's headers. Koan's series, applied after air/OS's:
+- `0001 meson: build the Haiku platform on a non-Haiku host` - options
+  `haiku-sdk-args`/`haiku-sdk-link-args` (our include dirs, `-D__VOS__=1`,
+  `-include LinuxBuildCompatibility.h`; `-lbe -lgame -ltranslation -lroot`), no
+  libnetwork, and `haiku-lib-suffix` (`-hgl`) for libGL/libglapi; Haiku keeps the
+  old lookups;
+- `0002 util, hgl: build against the BeAPI headers of Koan` - `u_debug.h` takes
+  Haiku's `debug_printf` branch under `__VOS__`, Mesa's `thread_id` becomes
+  `util_thread_id` (4 uses), Koan's `node_ref::node()` accessor;
+- `0003 zink: no frame buffer to present into outside Haiku` - a
+  `zink_represent_into_scanout()` that returns false when `__HAIKU__` is unset.
+Total 13 files, about 90 lines: a modest series, so the checkpoint did not stop here.
+Probe (scratch, before wiring): `meson setup -Dplatforms=haiku
+-Dgallium-drivers=zink,swrast ...` + `ninja` in the `airos-haiku-master_build`
+image against this tree's headers and `generated.release` libraries: PASS
+(923 ninja steps); `libGL-hgl.so.1`, `libglapi-hgl.so.0`, `libzinkpipe.so` and
+`libswpipe.so` link, and `ldd -r` of `libGL-hgl` and `libzinkpipe` reports nothing
+undefined. Mesa 22.0.5 builds with Debian 13's
+gcc 14, Python 3.13, meson 1.7.
+
+**Library names (3).** Decision: **Mesa's hgl libGL provides `BGLView` and the
+renderer roster**, exactly the ABI air/OS's add-on was written for, as on Haiku and
+air/OS. It installs as `/lib/libGL-hgl.so.1` (+ `/lib/libglapi-hgl.so.0`), so it
+never shares a soname with Debian's glvnd `libGL.so.1` (X11/Wayland clients, the
+app_server's EGL/GLES compositor) and they never meet in one process unless a
+BeAPI program also loads glvnd. BeAPI programs link `GL-hgl` (CMake interface
+target), which gives them `BGLView` *and* the GL entry points, so `glClear` in
+GLTeapot or Terminal-OpenGL dispatches into Mesa 22's glapi, not glvnd's (which
+would have no context). The renderer add-on installs as
+`/system/add-ons/opengl/Zink` (air/OS's name; `GLRendererRoster` looks in
+`<add-ons>/opengl` from `find_directory`). It is the only one installed:
+the roster instantiates the first add-on it lists, directory order is undefined on
+Linux, and the Zink add-on already falls back to softpipe inside itself
+(`HGL_NO_ZINK`, or no Vulkan device). VitruvianOS's `src/kits/opengl`
+(`libopengl`, its loader, `GlDeviceSelect`) stays in the tree and its tests still
+build, but leaves the image when `GL-hgl` exists: its loader would call the Zink
+add-on with the other `BGLRenderer` ABI. `mesa_egl`/`mesa_surfaceless` are not
+ported (removed from `OPENGL_RENDERERS`). Packaging: component `mesa-hgl` ->
+`vos-mesa-hgl` .deb (Depends: `vos (= version)`, `libvulkan1`,
+`mesa-vulkan-drivers`, `libdrm2`, `libexpat1`, `zlib1g`, `libzstd1`, libc/libstdc++);
+bake installs every .deb of the build, so the image gets it. Risk kept: a BeAPI
+program that also loads glvnd's libGL gets two GL dispatchers; Mesa 22's glapi
+symbols are `-Bsymbolic` inside libGL-hgl/libglapi-hgl, but this is untested.
+
+**Present paths (4).** Kept on Linux: frame into a BBitmap and `DrawBitmap`
+(winsys), and air/OS 0004/0005's GPU copy into the window system's memory through
+`VK_EXT_external_memory_host` where the Vulkan driver offers it (RADV/ANV/NVK do;
+whether app_server's shared bitmap memory imports on Linux is untested), else the
+CPU copy. Haiku-only, compiled out with a false-returning stub: air/OS 0006-0015's
+"present a direct window into the screen itself" (`VkImportScanoutMemoryHAIKU`,
+NVK on nvrm importing the accelerant frame buffer; `hgl_scanout_target`; 0008 frame
+buffer replacement; 0010/0012 display waits and moving windows; 0015 scaled
+scan-out). Those would need a Linux counterpart (dmabuf of the KMS scan-out BO or an
+overlay plane from app_server), which is follow-up work. vsync through
+`BScreen::WaitForRetrace` is kept and reaches the KMS backend's retrace semaphore.
+
+- [x] Design (this section)
+- [ ] Submodule, series, build step, `vos-mesa-hgl` .deb; compile-only build;
+      NEEDED resolved in the chroot; ctest
+- [ ] Runtime: GLTeapot on RADV/ANV/NVK hardware, and on QEMU (virtio-gpu has no
+      Vulkan, so lavapipe or softpipe)
+
 ### Not started (later milestones)
 - Kits (`libbe`) and `input_server` on CMake, needed before M5 can link
 - app_server on DRM, registrar, the rest of the VitruvianOS userland

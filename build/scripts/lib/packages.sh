@@ -146,7 +146,7 @@ get_dev_packages() {
                 " libfreetype-dev libicu-dev libcairo2-dev libcups2-dev libdrm-dev libinput-dev" \
                 " libevdev-dev libseat-dev libudev-dev libusb-1.0-0-dev zlib1g-dev libgif-dev" \
                 " libblkid-dev libbacktrace-dev libfl-dev libncurses-dev" \
-                " libgl-dev libegl-dev libgbm-dev" \
+                " libgl-dev libegl-dev libgbm-dev libvulkan-dev libzstd-dev" \
                 " libxkbcommon-dev libsystemd-dev libpam0g-dev libpwquality-dev" \
                 " libgcrypt20-dev libapt-pkg-dev" \
                 " libjpeg-dev libpng-dev libtiff-dev libwebp-dev libicns-dev libavif-dev libssl-dev libargon2-dev" \
@@ -162,7 +162,7 @@ get_dev_packages() {
                 " libfreetype-dev libicu-dev libcairo2-dev libcups2-dev libdrm-dev libinput-dev" \
                 " libevdev-dev libseat-dev libudev-dev libusb-1.0-0-dev zlib1g-dev libgif-dev" \
                 " libblkid-dev libbacktrace-dev libfl-dev libncurses-dev" \
-                " libgl-dev libegl-dev libgbm-dev" \
+                " libgl-dev libegl-dev libgbm-dev libvulkan-dev libzstd-dev" \
                 " libxkbcommon-dev libsystemd-dev libpam0g-dev libpwquality-dev" \
                 " libgcrypt20-dev libapt-pkg-dev" \
                 " libjpeg-dev libpng-dev libtiff-dev libwebp-dev libicns-dev libavif-dev libssl-dev libargon2-dev" \
@@ -178,7 +178,7 @@ get_dev_packages() {
                 " libfreetype-dev libicu-dev libcairo2-dev libcups2-dev libdrm-dev libinput-dev" \
                 " libevdev-dev libseat-dev libudev-dev libusb-1.0-0-dev zlib1g-dev libgif-dev" \
                 " libblkid-dev libbacktrace-dev libfl-dev libncurses-dev" \
-                " libgl-dev libegl-dev libgbm-dev" \
+                " libgl-dev libegl-dev libgbm-dev libvulkan-dev libzstd-dev" \
                 " libxkbcommon-dev libsystemd-dev libpam0g-dev libpwquality-dev" \
                 " libgcrypt20-dev libapt-pkg-dev" \
                 " libjpeg-dev libpng-dev libtiff-dev libwebp-dev libicns-dev libavif-dev libssl-dev libargon2-dev" \
@@ -193,7 +193,7 @@ get_dev_packages() {
                 " libfreetype-dev libicu-dev libcairo2-dev libcups2-dev libdrm-dev libinput-dev" \
                 " libevdev-dev libseat-dev libudev-dev libusb-1.0-0-dev zlib1g-dev libgif-dev" \
                 " libblkid-dev libbacktrace-dev libfl-dev libncurses-dev" \
-                " libgl-dev libegl-dev libgbm-dev" \
+                " libgl-dev libegl-dev libgbm-dev libvulkan-dev libzstd-dev" \
                 " libxkbcommon-dev libsystemd-dev libpam0g-dev libpwquality-dev" \
                 " libgcrypt20-dev libapt-pkg-dev" \
                 " libjpeg-dev libpng-dev libtiff-dev libwebp-dev libicns-dev libavif-dev libssl-dev libargon2-dev" \

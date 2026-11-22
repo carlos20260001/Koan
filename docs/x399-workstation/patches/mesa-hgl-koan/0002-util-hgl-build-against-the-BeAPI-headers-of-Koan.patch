@@ -1,0 +1,119 @@
+From cd1b047af037d355e8da9a4863fab6af051a7fef Mon Sep 17 00:00:00 2001
+From: carlos20260001 <carlosforgithub2026@outlook.com>
+Date: Sun, 22 Nov 2026 13:42:30 +0100
+Subject: [PATCH 2/3] util, hgl: build against the BeAPI headers of Koan
+
+With __VOS__ the BeAPI headers declare debug_printf() and thread_id, as
+Haiku's do, so u_debug.h takes Haiku's branch for them and Mesa's own
+thread identifier is called util_thread_id. Koan's node_ref has node()
+as an accessor rather than a field.
+---
+ src/gallium/auxiliary/util/u_threaded_context.h |  2 +-
+ src/hgl/GLRendererRoster.cpp                    |  2 +-
+ src/mapi/u_current.c                            |  2 +-
+ src/util/u_debug.h                              |  4 ++--
+ src/util/u_thread.h                             | 10 +++++-----
+ 5 files changed, 10 insertions(+), 10 deletions(-)
+
+diff --git a/src/gallium/auxiliary/util/u_threaded_context.h b/src/gallium/auxiliary/util/u_threaded_context.h
+index 67d2d69d..2c919b47 100644
+--- a/src/gallium/auxiliary/util/u_threaded_context.h
++++ b/src/gallium/auxiliary/util/u_threaded_context.h
+@@ -479,7 +479,7 @@ struct threaded_context {
+     * there are cases where the queue is flushed directly
+     * from the frontend thread
+     */
+-   thread_id driver_thread;
++   util_thread_id driver_thread;
+ #endif
+ 
+    bool seen_tcs;
+diff --git a/src/hgl/GLRendererRoster.cpp b/src/hgl/GLRendererRoster.cpp
+index 9bb10498..4e6e52cf 100644
+--- a/src/hgl/GLRendererRoster.cpp
++++ b/src/hgl/GLRendererRoster.cpp
+@@ -218,7 +218,7 @@ GLRendererRoster::CreateRenderer(const entry_ref& ref)
+ 	);
+ 
+ 	if (status == B_OK) {
+-		if ((status = AddRenderer(instantiate_renderer, image, &ref, nodeRef.node)) != B_OK) {
++		if ((status = AddRenderer(instantiate_renderer, image, &ref, nodeRef.node())) != B_OK) {
+ 			unload_add_on(image);
+ 			return status;
+ 		}
+diff --git a/src/mapi/u_current.c b/src/mapi/u_current.c
+index cd091405..befe5c08 100644
+--- a/src/mapi/u_current.c
++++ b/src/mapi/u_current.c
+@@ -143,7 +143,7 @@ u_current_init_tsd(void)
+  */
+ static mtx_t ThreadCheckMutex = _MTX_INITIALIZER_NP;
+ 
+-static thread_id knownID;
++static util_thread_id knownID;
+ 
+ /**
+  * We should call this periodically from a function such as glXMakeCurrent
+diff --git a/src/util/u_debug.h b/src/util/u_debug.h
+index fa14cf10..555597f2 100644
+--- a/src/util/u_debug.h
++++ b/src/util/u_debug.h
+@@ -49,7 +49,7 @@
+ #include "util/detect_os.h"
+ #include "util/macros.h"
+ 
+-#if DETECT_OS_HAIKU
++#if DETECT_OS_HAIKU || defined(__VOS__)
+ /* Haiku provides debug_printf in libroot with OS.h */
+ #include <OS.h>
+ #endif
+@@ -83,7 +83,7 @@ _debug_printf(const char *format, ...)
+  * - avoid outputing large strings (512 bytes is the current maximum length
+  * that is guaranteed to be printed in all platforms)
+  */
+-#if !DETECT_OS_HAIKU
++#if !DETECT_OS_HAIKU && !defined(__VOS__)
+ static inline void
+ debug_printf(const char *format, ...) _util_printf_format(1,2);
+ 
+diff --git a/src/util/u_thread.h b/src/util/u_thread.h
+index a4215452..d7473524 100644
+--- a/src/util/u_thread.h
++++ b/src/util/u_thread.h
+@@ -43,7 +43,7 @@
+ #endif
+ #endif
+ 
+-#ifdef __HAIKU__
++#if defined(__HAIKU__) || defined(__VOS__)
+ #include <OS.h>
+ #endif
+ 
+@@ -358,12 +358,12 @@ static inline bool util_barrier_wait(util_barrier *barrier)
+  */
+ 
+ #ifdef _WIN32
+-typedef DWORD thread_id;
++typedef DWORD util_thread_id;
+ #else
+-typedef thrd_t thread_id;
++typedef thrd_t util_thread_id;
+ #endif
+ 
+-static inline thread_id
++static inline util_thread_id
+ util_get_thread_id(void)
+ {
+    /*
+@@ -382,7 +382,7 @@ util_get_thread_id(void)
+ 
+ 
+ static inline int
+-util_thread_id_equal(thread_id t1, thread_id t2)
++util_thread_id_equal(util_thread_id t1, util_thread_id t2)
+ {
+ #ifdef _WIN32
+    return t1 == t2;
+-- 
+2.53.0
+

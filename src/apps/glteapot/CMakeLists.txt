@@ -3,8 +3,17 @@
 
 # GLTeapot draws with the OpenGL kit (BGLView on Mesa). It needs no GLU:
 # ObjectView builds its perspective with glFrustum(). TeapotWindow is a
-# BDirectWindow (libgame).
-foreach(_lib opengl game localestub)
+# BDirectWindow (libgame). With Mesa hgl built, BGLView and the GL entry
+# points both come from libGL-hgl (src/add-ons/opengl); otherwise from the
+# opengl kit and Debian's libGL.
+if(TARGET GL-hgl)
+	set(_gl_kit GL-hgl)
+	set(_gl_libs GL-hgl)
+else()
+	set(_gl_kit opengl)
+	set(_gl_libs opengl ${GL_LIBRARIES})
+endif()
+foreach(_lib ${_gl_kit} game localestub)
 	if(NOT TARGET ${_lib})
 		message(STATUS "GLTeapot: skipped, needs ${_lib}")
 		return()
@@ -22,7 +31,7 @@ Application(
 	TeapotWindow.cpp
 	TeapotApp.cpp
 
-	LIBS opengl game localestub ${GL_LIBRARIES}
+	LIBS ${_gl_libs} game localestub
 	RDEF GLTeapot.rdef
 )
 

@@ -72,6 +72,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libswresample-dev libavutil-dev libexpat1-dev \
     && rm -rf /var/lib/apt/lists/*
 
+# Mesa hgl (src/add-ons/opengl): meson and Mako build Mesa's Haiku platform
+# with the Zink renderer, which compiles against the Vulkan headers and
+# libzstd; the air/OS and Koan series are applied with patch.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    meson python3-mako libvulkan-dev libzstd-dev patch \
+    && rm -rf /var/lib/apt/lists/*
+
 ENV DEBIAN_MIRROR=http://deb.debian.org/debian/
 ENV VOS_BASE_SUITE=trixie
 ENV VOS_KERNEL_FLAVOUR=rt-amd64
