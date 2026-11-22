@@ -33,6 +33,16 @@ set_target_properties(test_panel_orientation PROPERTIES COMPILE_FLAGS
 	"-include LinuxBuildCompatibility.h")
 add_test(NAME interface_panel_orientation COMMAND test_panel_orientation)
 
+# KoiPop theme tokens: contrast of the palettes, control states and capsule
+# geometry (KoiPopTheme.h, header only).
+add_executable(test_koipop_theme
+	${PROJECT_SOURCE_DIR}/src/tests/vos/test_koipop_theme.cpp
+)
+target_include_directories(test_koipop_theme PRIVATE
+	${PROJECT_SOURCE_DIR}/headers/private/interface)
+target_link_libraries(test_koipop_theme PRIVATE m)
+add_test(NAME interface_koipop_theme COMMAND test_koipop_theme)
+
 # Interactive programs: they need app_server (and nexus.ko), so they are
 # only built.
 Test(ControlLookTest SOURCES ControlLookTest.cpp)
