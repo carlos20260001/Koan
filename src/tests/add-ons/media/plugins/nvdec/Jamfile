@@ -1,9 +1,0 @@
-SubDir HAIKU_TOP src tests add-ons media plugins nvdec ;
-
-local source = [ FDirName $(HAIKU_TOP) src add-ons media plugins nvdec ] ;
-SubDirHdrs $(source) ;
-SEARCH_SOURCE += $(source) ;
-SimpleTest h264_parse_test : h264_parse_test.cpp h264_parse.c hevc_parse.c
-	: [ TargetLibstdc++ ] ;
-SimpleTest hevc_parse_test : hevc_parse_test.cpp h264_parse.c hevc_parse.c
-	: [ TargetLibstdc++ ] ;
