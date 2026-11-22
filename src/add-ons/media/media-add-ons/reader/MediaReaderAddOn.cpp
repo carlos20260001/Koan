@@ -8,7 +8,7 @@
 // MediaReader nodes read a file into a multistream
 #include "MediaReader.h"
 #include "MediaReaderAddOn.h"
-#include "debug.h"
+#include "MediaDebug.h"
 
 #include <Errors.h>
 #include <MediaAddOn.h>

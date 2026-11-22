@@ -56,6 +56,20 @@ DeclareDependency(
 	RUNTIMES	"libavcodec61" "libavformat61" "libavfilter10" "libswscale8" "libswresample5" "libavutil59"
 )
 
+# VA-API for the amduvd media plugin (src/add-ons/media/plugins/amdgpu_va).
+DeclareDependency(
+	LIBVA
+	PACKAGES	"libva-dev"
+	RUNTIMES	"libva2" "libva-drm2"
+)
+
+# DVD navigation for the dvd_streamer media plugin.
+DeclareDependency(
+	LIBDVDNAV
+	PACKAGES	"libdvdnav-dev"
+	RUNTIMES	"libdvdnav4"
+)
+
 DeclareDependency(
 	EXPAT
 	LIBRARIES	"expat"

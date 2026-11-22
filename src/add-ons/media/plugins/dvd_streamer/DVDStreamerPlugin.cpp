@@ -6,18 +6,10 @@
 
 #include "DVDStreamerPlugin.h"
 
-
-B_DECLARE_CODEC_KIT_PLUGIN(
-	DVDStreamerPlugin,
-	"dvd_streamer",
-	B_CODEC_KIT_PLUGIN_VERSION
-);
+#include "DVDMediaIO.h"
 
 
 DVDStreamer::DVDStreamer()
-	:
-	BStreamer(),
-	fAdapter(NULL)
 {
 }
 

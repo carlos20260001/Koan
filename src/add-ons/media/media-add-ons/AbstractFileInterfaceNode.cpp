@@ -6,7 +6,7 @@
 // the common functionality between MediaReader
 // and MediaWriter.
 #include "AbstractFileInterfaceNode.h"
-#include "debug.h"
+#include "MediaDebug.h"
 
 #include <Buffer.h>
 #include <Controllable.h>

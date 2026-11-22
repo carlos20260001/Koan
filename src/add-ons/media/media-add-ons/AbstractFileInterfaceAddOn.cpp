@@ -10,7 +10,7 @@
 
 #include "AbstractFileInterfaceNode.h"
 #include "AbstractFileInterfaceAddOn.h"
-#include "debug.h"
+#include "MediaDebug.h"
 
 #include <Errors.h>
 #include <MediaDefs.h>

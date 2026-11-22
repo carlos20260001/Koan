@@ -135,13 +135,38 @@ set(CATALOG_ADDONS
 VosKeepTargets(CATALOG_ADDONS)
 ImageInclude("/system/add-ons/locale/catalogs" ${CATALOG_ADDONS})
 
-# media2 units and the LV2/LADSPA plugin adapter.
+# media2 units and the LV2/LADSPA plugin adapter, and the classic Media
+# Kit node add-ons (src/add-ons/media/media-add-ons; pipewire.media_addon
+# installs itself).
 set(MEDIA_ADDONS
 	equalizer
 	plugin_adapter
+	equalizer.media_addon
+	esound_sink.media_addon
+	mixer.media_addon
+	reader.media_addon
+	tone_producer_demo.media_addon
+	video_mixer.media_addon
+	video_producer_demo.media_addon
+	video_window_demo.media_addon
+	vst_host.media_addon
+	writer.media_addon
 )
 VosKeepTargets(MEDIA_ADDONS)
 ImageInclude("/system/add-ons/media" ${MEDIA_ADDONS})
+
+# Classic Media Kit codec plugins (src/add-ons/media/plugins), loaded by
+# libmedia's PluginManager from add-ons/media/plugins.
+set(MEDIA_PLUGINS
+	ffmpeg
+	amduvd
+	au_reader
+	dvd_streamer
+	http_streamer
+	raw_decoder
+)
+VosKeepTargets(MEDIA_PLUGINS)
+ImageInclude("/system/add-ons/media/plugins" ${MEDIA_PLUGINS})
 
 # KoiPopDecorator and ModernTabDecorator (Koan master) are not ported: the
 # tab-strip decorator needs app_server's tab-strip and rounded-corner
