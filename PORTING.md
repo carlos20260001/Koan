@@ -622,6 +622,41 @@ Waves (each on its own `port/*` branch, merged here when green):
             10 passed, 2 skipped. Open: `screen_blanker` (BIN_DIRECTORY) is not built yet, so
             nothing runs the savers except the ScreenSaver panel's preview; not run on a
             display. Jamfiles: 496
+      - [x] Media add-ons merged (`f85e2c7233`, `port/media`): `src/add-ons/media`
+            classified (table below). Classic plugins to `/system/add-ons/media/plugins`
+            (new `MEDIA_PLUGINS`), node add-ons and the media2 units to
+            `/system/add-ons/media` (`MEDIA_ADDONS`), all through `MediaKitAddOn()`
+            (bare file name, classic headers first, `--no-undefined`). ffmpeg plugin on
+            Debian FFmpeg 7.1 with one change (const AVIO write hook, libavformat 61).
+            New deps: `libva-dev`, `libdvdnav-dev` (`LIBVA`, `LIBDVDNAV`; installed into
+            the existing chroot by hand). Compile-only Release build: ninja exit 0,
+            MEDIA_ADDONS/MEDIA_PLUGINS not left out, `ldd -r` 18/18 0 not found/0
+            undefined in the chroot, ctest 12 passed, 2 skipped (new:
+            `media_{plugins,node_addons}_entry_points`). Nothing run on a system yet.
+            Jamfiles: 474
+
+            | Directory | Class | Result |
+            | --- | --- | --- |
+            | plugins/ffmpeg | (a) | ported; Debian FFmpeg 7.1 |
+            | plugins/amdgpu_va | (a) | ported as `amduvd`; Debian libva + shared FFmpeg (was static libavcodec) |
+            | plugins/au_reader, raw_decoder | (a) | ported |
+            | plugins/http_streamer | (a) | ported; BHttpRequest is in libbe |
+            | plugins/dvd_streamer | (a) | ported on libdvdnav; plugin glue fixed (used a non-existent codec-kit API) |
+            | plugins/ape_reader (+MAClib, LibMonkeysAudio) | (a), open | not built: MAClib 3.99 carries no licence header and the current BSD-3 licence of Monkey's Audio does not say it covers old releases; `Assembly.nasm` is 32-bit x86 only (needs a C fallback for amd64/arm64). FFmpeg plugin reads APE meanwhile |
+            | plugins/rtsp_streamer | (a), open | not built: live555 (`liblivemedia-dev`) is not in Debian 13; port to libavformat's RTSP demuxer or vendor live555 |
+            | media-add-ons/mixer, equalizer, esound_sink, reader, writer, tone_producer_demo, video_mixer, video_producer_demo, videowindow, vst_host | (a) | ported |
+            | media-add-ons/demultiplexer | (a), open | not built: disabled in air/OS too; incomplete (functions without return values, iterator-in-int32 cookies) |
+            | media-add-ons/pipewire | (a) | already on CMake (W3-D) |
+            | equalizer, plugin_adapter (media2) | (a) | VitruvianOS units imported (`787e1bdd01`) |
+            | media-add-ons/multi_audio, opensound | (b) | deleted; replaced by `pipewire.media_addon` |
+            | plugins/nvdec, rpi_hevc, rpi_mmal, sunxi_cedar; qcom_video decoder (IrisDecoder, IrisPlugin) | (b) | deleted; replaced by the ffmpeg plugin (software) + `amduvd` (VA-API). SoC hardware decode via V4L2 (stateless/m2m) is not wired into the plugins |
+            | encoders/nvenc | (b) | deleted; MediaConverter's FFmpeg/VA-API encoders remain |
+            | plugins/qcom_video (IrisDevice/Session/Encoder), encoders/sunxi_venc | (c) | kept, compiled into MediaConverter; need a V4L2 stateful encoder (qcom) / a Linux Cedar VE encoder interface (none in mainline) |
+            | media-add-ons/usb_webcam, usb_vision, finepix_webcam | (c) | left; need V4L2 (uvcvideo/usbvision) |
+            | media-add-ons/dvb | (c) | left; needs the Linux DVB API (`linux/dvb/frontend.h`, `dmx.h`) |
+            | media-add-ons/firewire_dv | (c) | left; needs firewire-core `/dev/fw*` (libraw1394/libiec61883) |
+            | media-add-ons/bluetooth_audio | (c) | left; needs BlueZ A2DP (PipeWire's bluez5 sinks may already cover it through the PipeWire node) |
+            | media-add-ons/radeon | (c) | left; video capture needs V4L2 (no mainline driver for this capture chip) |
       `src/data`, `data/`, remaining tests
 - [ ] W5: `Jamrules`, `Jamfile`, `build/jam`, Haiku `configure`, Haiku-only
       `build/scripts` deleted; `git ls-files | grep -c Jamfile` = 0; full `ninja`,
@@ -870,3 +905,4 @@ overlay plane from app_server), which is follow-up work. vsync through
 | 2026-11-22 | `7ad58622d7` | Decorators and control looks on CMake (`port/decor`): Be/Flat/Mac/Win decorators and Be/Flat control looks from air/OS sources + VitruvianOS CMake, Koan's ModernDecorator and KoiPopControlLook (dark mode from the system); KoiPopDecorator/ModernTabDecorator open; Jamfiles of decorators, control_look, input_server devices/filters removed. Compile-only Release build: ninja exit 0, `ldd -r` of the 8 add-ons 0 unresolved (decorators against app_server's exports), ctest 10 passed, 1 skipped; not run on a display |
 | 2026-11-22 | `9cc7bcbb11` | Translators on CMake (`port/translators`): 19 translators + shared helper from air/OS sources on Debian codec libraries, in `/system/add-ons/Translators`; JPEG2000 left out (no libjasper in Debian 13). Compile-only Release build: ninja exit 0, `ldd -r` 19/19 resolved in the chroot, ctest 10 passed, 2 skipped (PNG/JPEG/GIF decode test needs nexus.ko) |
 | 2026-11-22 | `3f33dbb851` | Screen savers on CMake (`port/savers`): 13 savers from air/OS sources in `/system/add-ons/Screen Savers`; GL savers on `GL-hgl` without GLU; leaves left out (dropped by air/OS). Compile-only Release build: ninja exit 0, `ldd -r` 13/13 resolved in the chroot, ctest 10 passed, 2 skipped; `screen_blanker` not built yet |
+| 2026-11-22 | `f85e2c7233` | Media add-ons on CMake (`port/media`): ffmpeg plugin (Debian FFmpeg 7.1), VA-API decoder, au/raw/http/dvd plugins, 10 node add-ons, media2 units; multi_audio/opensound and the hardware codec add-ons deleted (PipeWire node, FFmpeg + VA-API); driver-bound add-ons left with their Jamfiles; ape_reader, rtsp_streamer, demultiplexer open. Compile-only Release build: ninja exit 0, `ldd -r` 18/18 resolved in the chroot, ctest 12 passed, 2 skipped |
