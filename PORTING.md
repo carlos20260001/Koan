@@ -797,7 +797,17 @@ overlay plane from app_server), which is follow-up work. vsync through
 ### Not started (later milestones)
 - Kits (`libbe`) and `input_server` on CMake, needed before M5 can link
 - app_server on DRM, registrar, the rest of the VitruvianOS userland
-- Koan's decorators, Wayland server (`VOS_WITH_WLROOTS`), WebKit bits
+- Wayland server (`VOS_WITH_WLROOTS`), WebKit bits
+- Koan's decorators: done in `7ad58622d7` except KoiPopDecorator and
+  ModernTabDecorator (need Koan master's app_server tab strip and rounded
+  corners: `Decorator::HasTabStrip`/`SetDraggedTab`/`GetCornerCutouts`/
+  `SetSquareCorners`, `HIGHLIGHT_HOVER`, `TabStripLayout`, `CornerShape`,
+  DefaultWindowBehaviour tab dragging; left out of `DECORATORS`). Also open:
+  KoiPop as the default decorator/control look (`0d889ed467`) and the KoiPop
+  light colour scheme as default (`74118dddbf`), which would replace this
+  tree's light defaults (`GetSystemColor`) under its light/dark switch; the
+  KoiPop dark scheme (`23d8128466`) is not ported by decision (2026-11-22),
+  the control look follows `ui_dark_mode()`. Not run on a display
 
 ## Log
 
@@ -835,3 +845,4 @@ overlay plane from app_server), which is follow-up work. vsync through
 | 2026-11-21 | `41fda17b21` | **Release ISO with every app**: vos-uefi.iso 1.38 GB (sha256 `2815a423fb3b…`), 60 apps, 26 panels, Deskbar, Tracker, Login (vitruvian-login link), FirstBootPrompt, splash, Nexus area/nexus/nexus_node_monitor for 6.12.117-rt; vos configures cleanly. Not booted yet |
 | 2026-11-21 | `594475e1b6` | W4: data/ and src/data ported, data.cmake active; **Release ISO builds** (vos-uefi.iso, 1.3 GB) |
 | 2026-11-22 | `0f159065ab` | M10: air/OS's Mesa route merged (`port/opengl`): Mesa 22.0.5 + air/OS Zink series + Koan series -> `vos-mesa-hgl` (libGL-hgl, Zink add-on on Debian Vulkan); compile-only Release build and cpack green; not run on a display |
+| 2026-11-22 | `7ad58622d7` | Decorators and control looks on CMake (`port/decor`): Be/Flat/Mac/Win decorators and Be/Flat control looks from air/OS sources + VitruvianOS CMake, Koan's ModernDecorator and KoiPopControlLook (dark mode from the system); KoiPopDecorator/ModernTabDecorator open; Jamfiles of decorators, control_look, input_server devices/filters removed. Compile-only Release build: ninja exit 0, `ldd -r` of the 8 add-ons 0 unresolved (decorators against app_server's exports), ctest 10 passed, 1 skipped; not run on a display |
