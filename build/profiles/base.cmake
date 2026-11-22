@@ -27,11 +27,19 @@ set(INPUT_SERVER_ADDONS
 )
 VosKeepTargets(INPUT_SERVER_ADDONS)
 ImageInclude("/system/add-ons/input_server/devices" ${INPUT_SERVER_ADDONS})
+# virtualkeyboard builds but stays out: it opens its window every time
+# input_server starts (its TODO.org), and air/OS does not ship it either.
+# The input methods pen and t9 build too; air/OS ships an empty
+# add-ons/input_server/methods, and the method menu's Deskbar replicant
+# cannot load from this tree's input_server (src/servers/input), so they
+# stay out as well.
 
 
 # Every filter runs on every input message, so this list is hot-path.
 # shortcut_catcher still stays out until its feature is wired up.
 set(INPUT_SERVER_FILTERS
+	accessibility_keys
+	padblocker
 	switch_workspace
 	minimize_all
 	screen_saver
@@ -167,6 +175,49 @@ set(MEDIA_PLUGINS
 )
 VosKeepTargets(MEDIA_PLUGINS)
 ImageInclude("/system/add-ons/media/plugins" ${MEDIA_PLUGINS})
+
+# Printer drivers and transports (src/add-ons/print) for print_server's
+# printers that are not CUPS queues; the file names are what a printer
+# folder records as its driver and transport.
+set(PRINT_DRIVERS
+	print_lips3
+	print_lips4
+	print_gutenprint
+	print_pcl5
+	print_pcl6
+	print_ps
+	print_preview
+#	print_lpstyl: not in air/OS's image either (unfinished driver)
+)
+VosKeepTargets(PRINT_DRIVERS)
+ImageInclude("/system/add-ons/Print" ${PRINT_DRIVERS})
+
+set(PRINT_TRANSPORTS
+	print_jetdirect
+	print_ipp
+	print_lpr
+	print_parallel
+	print_to_file
+	print_serial
+	print_usb
+)
+VosKeepTargets(PRINT_TRANSPORTS)
+ImageInclude("/system/add-ons/Print/transport" ${PRINT_TRANSPORTS})
+
+# mail_daemon add-ons (src/add-ons/mail_daemon), found by BMailSettings
+# under add-ons/mail_daemon/<kind> by file name.
+set(MAIL_INBOUND_PROTOCOLS IMAP POP3)
+VosKeepTargets(MAIL_INBOUND_PROTOCOLS)
+ImageInclude("/system/add-ons/mail_daemon/inbound_protocols" ${MAIL_INBOUND_PROTOCOLS})
+set(MAIL_OUTBOUND_PROTOCOLS SMTP)
+VosKeepTargets(MAIL_OUTBOUND_PROTOCOLS)
+ImageInclude("/system/add-ons/mail_daemon/outbound_protocols" ${MAIL_OUTBOUND_PROTOCOLS})
+set(MAIL_INBOUND_FILTERS MatchHeader NewMailNotification SpamFilter)
+VosKeepTargets(MAIL_INBOUND_FILTERS)
+ImageInclude("/system/add-ons/mail_daemon/inbound_filters" ${MAIL_INBOUND_FILTERS})
+set(MAIL_OUTBOUND_FILTERS Fortune)
+VosKeepTargets(MAIL_OUTBOUND_FILTERS)
+ImageInclude("/system/add-ons/mail_daemon/outbound_filters" ${MAIL_OUTBOUND_FILTERS})
 
 # KoiPopDecorator and ModernTabDecorator (Koan master) are not ported: the
 # tab-strip decorator needs app_server's tab-strip and rounded-corner
