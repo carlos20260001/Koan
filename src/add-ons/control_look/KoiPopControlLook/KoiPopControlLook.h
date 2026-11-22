@@ -230,7 +230,7 @@ public:
 									const rgb_color* textColor = NULL);
 
 private:
-			const KoiPop::Palette& _Palette() const;
+			KoiPop::Palette		_Palette() const;
 
 			void				_DrawPillFrame(BView* view, BRect& rect,
 									const BRect& updateRect,

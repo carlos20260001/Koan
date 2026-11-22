@@ -19,7 +19,7 @@
 #include <Rect.h>
 #include <View.h>
 
-#include <KoiPopColorScheme.h>
+#include <KoiPopTheme.h>
 
 
 namespace BPrivate {
@@ -65,7 +65,14 @@ rgba(Color color)
 static inline Color
 koipop(const rgb_color& color)
 {
-	return koipop_color(color);
+	return KoiPop::MakeColor(color.red, color.green, color.blue, color.alpha);
+}
+
+
+static inline Color
+system_color(color_which which)
+{
+	return koipop(ui_color(which));
 }
 
 
@@ -223,11 +230,60 @@ KoiPopControlLook::~KoiPopControlLook()
 }
 
 
-const KoiPop::Palette&
+/*!	The palette follows the system's light/dark appearance (ui_dark_mode()).
+	In light mode it is the KoiPop palette. In dark mode the KoiPop accents
+	stay and every neutral, surface and text color is the system color of
+	the dark appearance, so dark mode looks the way the system's color
+	settings say and not like a separate KoiPop dark scheme. Returned by
+	value: the control look is shared by all windows' threads.
+*/
+KoiPop::Palette
 KoiPopControlLook::_Palette() const
 {
-	return KoiPop::GetPalette(KoiPop::AppearanceFor(
-		koipop(ui_color(B_PANEL_BACKGROUND_COLOR))));
+	KoiPop::Palette palette = KoiPop::GetPalette(KoiPop::kLightAppearance);
+	if (!ui_dark_mode())
+		return palette;
+
+	const Color black = KoiPop::MakeColor(0, 0, 0);
+
+	palette.windowBackground = system_color(B_PANEL_BACKGROUND_COLOR);
+	palette.windowText = system_color(B_PANEL_TEXT_COLOR);
+	palette.documentBackground = system_color(B_DOCUMENT_BACKGROUND_COLOR);
+	palette.documentText = system_color(B_DOCUMENT_TEXT_COLOR);
+	palette.linkText = system_color(B_LINK_TEXT_COLOR);
+	palette.linkVisitedText = system_color(B_LINK_VISITED_COLOR);
+
+	palette.controlBackground = system_color(B_CONTROL_BACKGROUND_COLOR);
+	palette.controlText = system_color(B_CONTROL_TEXT_COLOR);
+	palette.controlBorder = system_color(B_CONTROL_BORDER_COLOR);
+	palette.selectionMark = system_color(B_CONTROL_MARK_COLOR);
+	palette.focusRing = system_color(B_NAVIGATION_BASE_COLOR);
+	palette.trackBackground = KoiPop::Mix(palette.windowBackground, black,
+		0.25f);
+	// the neutral that light surfaces step toward; on dark ones the
+	// control background itself
+	palette.satin = palette.controlBackground;
+
+	palette.success = system_color(B_SUCCESS_COLOR);
+	palette.destructive = system_color(B_FAILURE_COLOR);
+
+	palette.menuBackground = system_color(B_MENU_BACKGROUND_COLOR);
+	palette.menuText = system_color(B_MENU_ITEM_TEXT_COLOR);
+	palette.menuSelectedBackground
+		= system_color(B_MENU_SELECTED_BACKGROUND_COLOR);
+	palette.menuSelectedText = system_color(B_MENU_SELECTED_ITEM_TEXT_COLOR);
+	palette.listBackground = system_color(B_LIST_BACKGROUND_COLOR);
+	palette.listText = system_color(B_LIST_ITEM_TEXT_COLOR);
+	palette.listSelectedBackground
+		= system_color(B_LIST_SELECTED_BACKGROUND_COLOR);
+	palette.listSelectedText = system_color(B_LIST_SELECTED_ITEM_TEXT_COLOR);
+	palette.toolTipBackground = system_color(B_TOOL_TIP_BACKGROUND_COLOR);
+	palette.toolTipText = system_color(B_TOOL_TIP_TEXT_COLOR);
+
+	// a full-strength white gloss washes out dark surfaces
+	palette.glossTopAlpha = 0.22f;
+	palette.glossBottomAlpha = 0.03f;
+	return palette;
 }
 
 
