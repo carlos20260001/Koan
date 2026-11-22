@@ -82,7 +82,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # Translator add-ons (src/add-ons/translators): the image codecs not
 # already installed above (PNG, JPEG, TIFF, WebP and AVIF are).
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    libraw-dev libicns-dev libgif-dev \
+    libraw-dev libicns-dev libgif-dev libva-dev libdvdnav-dev \
     && rm -rf /var/lib/apt/lists/*
 
 ENV DEBIAN_MIRROR=http://deb.debian.org/debian/
