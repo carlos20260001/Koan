@@ -265,6 +265,44 @@ set(SCREEN_SAVERS
 VosKeepTargets(SCREEN_SAVERS)
 ImageInclude("/system/add-ons/Screen Savers" ${SCREEN_SAVERS})
 
+# index_server's analysers (src/add-ons/index_server), loaded from
+# add-ons/index_server.
+set(INDEX_SERVER_ADDONS
+	AudioTagAnalyser
+	FullTextAnalyser
+)
+VosKeepTargets(INDEX_SERVER_ADDONS)
+ImageInclude("/system/add-ons/index_server" ${INDEX_SERVER_ADDONS})
+
+# quick_look_server's previewers (src/add-ons/quick_look), loaded from
+# add-ons/quick_look.
+set(QUICK_LOOK_ADDONS
+	ImagePreview
+	PDFPreview
+	TextPreview
+)
+VosKeepTargets(QUICK_LOOK_ADDONS)
+ImageInclude("/system/add-ons/quick_look" ${QUICK_LOOK_ADDONS})
+
+# Neural Kit back ends (src/add-ons/neural), found by NeuralRoster in
+# add-ons/neural as <name>.neural. amdxdna is built on x86_64 only.
+set(NEURAL_BACKENDS
+	vulkan.neural
+)
+if(CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|AMD64|amd64")
+	list(APPEND NEURAL_BACKENDS amdxdna.neural)
+endif()
+VosKeepTargets(NEURAL_BACKENDS)
+ImageInclude("/system/add-ons/neural" ${NEURAL_BACKENDS})
+
+# The Network preference's add-ons (src/add-ons/network_settings), loaded
+# from "add-ons/Network Settings" by file name.
+set(NETWORK_SETTINGS_ADDONS
+	Hostname
+)
+VosKeepTargets(NETWORK_SETTINGS_ADDONS)
+ImageInclude("/system/add-ons/Network Settings" ${NETWORK_SETTINGS_ADDONS})
+
 
 include(${CMAKE_CURRENT_LIST_DIR}/preferences.cmake)
 # after apps.cmake and preferences.cmake: it reads their install lists
