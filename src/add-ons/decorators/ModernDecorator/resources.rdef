@@ -1,0 +1,15 @@
+/*
+ * Copyright 2026, Koan contributors
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+resource("be:decor:info") message('deco') {
+	"name"				= "Modern",
+	"short_descr"		= "Modern decorator with traffic light controls",
+	"long_descr"		= "A Cuppertino-inspired decorator with traffic light window controls "
+				"(close, minimize, maximize) and a modern tab chrome.",
+	"lic_url"			= "https://www.apache.org/licenses/LICENSE-2.0",
+	"lic_name"			= "Apache-2.0",
+	"support_url"		= "",
+	float "version"		= 1.0
+};

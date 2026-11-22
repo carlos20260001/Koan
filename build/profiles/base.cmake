@@ -141,13 +141,18 @@ set(MEDIA_ADDONS
 VosKeepTargets(MEDIA_ADDONS)
 ImageInclude("/system/add-ons/media" ${MEDIA_ADDONS})
 
+# KoiPopDecorator and ModernTabDecorator (Koan master) are not ported: the
+# tab-strip decorator needs app_server's tab-strip and rounded-corner
+# support (Decorator::HasTabStrip/SetDraggedTab/GetCornerCutouts/
+# SetSquareCorners, HIGHLIGHT_HOVER, _TopTabChanged, _BuildCornerCutouts,
+# TabStripLayout, CornerShape, the DefaultWindowBehaviour tab dragging),
+# which this tree's app_server does not have, and KoiPopDecorator
+# subclasses it. PORTING.md lists them as open.
 set(DECORATORS
 	BeDecorator
 	FlatDecorator
-	KoiPopDecorator
 	MacDecorator
 	ModernDecorator
-	ModernTabDecorator
 	WinDecorator
 )
 VosKeepTargets(DECORATORS)
