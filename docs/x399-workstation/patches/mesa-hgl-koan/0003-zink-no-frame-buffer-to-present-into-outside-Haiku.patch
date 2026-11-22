@@ -1,0 +1,40 @@
+From 7a3d458fa81b3df56192a0c44dd26c7ed5f9952a Mon Sep 17 00:00:00 2001
+From: carlos20260001 <carlosforgithub2026@outlook.com>
+Date: Sun, 22 Nov 2026 13:42:30 +0100
+Subject: [PATCH 3/3] zink: no frame buffer to present into outside Haiku
+
+zink_represent_into_scanout() is called by the Haiku renderer add-on, but
+the screen's frame buffer it presents into is only published by Haiku's
+nvrm driver (VkImportScanoutMemoryHAIKU). Elsewhere it returns false, so
+the add-on falls back to presenting through the window system.
+---
+ src/gallium/drivers/zink/zink_screen.c | 13 +++++++++++++
+ 1 file changed, 13 insertions(+)
+
+diff --git a/src/gallium/drivers/zink/zink_screen.c b/src/gallium/drivers/zink/zink_screen.c
+index 92323c4a..e36964b9 100644
+--- a/src/gallium/drivers/zink/zink_screen.c
++++ b/src/gallium/drivers/zink/zink_screen.c
+@@ -2045,6 +2045,19 @@ out:
+    return ok;
+ #undef RETURN_WHY
+ }
++#else /* !__HAIKU__ */
++
++/* Koan: the window system on Linux publishes no frame buffer to import
++ * (VkImportScanoutMemoryHAIKU is an extension of NVK on Haiku's nvrm only),
++ * so the frame is never in the screen and the caller always falls back.
++ */
++bool
++zink_represent_into_scanout(struct pipe_screen *pscreen,
++                            struct pipe_resource *pres,
++                            void *winsys_drawable_handle)
++{
++   return false;
++}
+ #endif /* __HAIKU__ */
+ 
+ // Show the frame that is already in the window system's buffer again, without
+-- 
+2.53.0
+

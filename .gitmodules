@@ -5,3 +5,4 @@
 [submodule "3rdparty/mesa"]
 	path = 3rdparty/mesa
 	url = https://github.com/X547/mesa.git
+	shallow = true
