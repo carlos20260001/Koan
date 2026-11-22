@@ -61,7 +61,8 @@ FortuneFilter::MessageReadyToSend(const entry_ref& ref, BFile& file)
 	fSettings->FindString("tag_line", &tagLine);
 
 	// Add command to be executed
-	fortuneFile.Prepend("/bin/fortune ");
+	// The image ships the command as fortune_vos (src/bin/CMakeLists.txt).
+	fortuneFile.Prepend("/bin/fortune_vos ");
 
 	char buffer[768];
 	FILE *fd;
