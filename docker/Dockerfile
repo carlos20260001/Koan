@@ -85,6 +85,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libraw-dev libicns-dev libgif-dev libva-dev libdvdnav-dev \
     && rm -rf /var/lib/apt/lists/*
 
+# Gutenprint printer driver add-on (src/add-ons/print/drivers/gutenprint).
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libgutenprint-dev \
+    && rm -rf /var/lib/apt/lists/*
+
 ENV DEBIAN_MIRROR=http://deb.debian.org/debian/
 ENV VOS_BASE_SUITE=trixie
 ENV VOS_KERNEL_FLAVOUR=rt-amd64
