@@ -1036,17 +1036,25 @@ VitruvianOS's `drm`/`fbdev` backends stay as fallbacks (user, 2026-11-22).
       backend is present. Needs an NVIDIA test machine.
 - [ ] **P4 — software profile:** CPU compositing path forced and tested in QEMU without
       `--gpu`; Zink on lavapipe as the default there; softpipe kept as the floor.
-- [ ] **P6 — Direct Vulkan for applications** (user, 2026-11-23): programs may use
-      Vulkan directly, beside GL through Zink. Compute/offscreen Vulkan already works
-      (Debian's loader and ICDs; the neural add-on uses it). Vulkan **in a window**
-      needs a WSI; air/OS does it with `VK_KHR_wayland_surface` through an in-process
-      Wayland server (HaikuPorts `wayland_server`; `docs/x399-workstation/tests/
-      vkswap.cpp`). Open decision between (A) that in-process server ported to Linux
-      (per application, surfaces become BWindow/BView, no app_server change, works with
-      the unmodified Mesa and proprietary ICDs) and (B) Koan's `wlroots-koan`
-      compositor inside app_server (system-wide; also runs ordinary Linux Wayland
-      applications; not in this tree). Either way the device a Vulkan application
-      gets follows the profile selector (P1).
+- [ ] **P6 — Vulkan as a Be API** (user, 2026-11-23): programs use Vulkan directly,
+      in their own windows, with **no foreign display server** (no Wayland, neither
+      in-process nor in app_server). Target: a `VkTeapot` demo (an original Vulkan
+      port of GLTeapot's scene) running in a BWindow on every profile.
+      - **WSI extension** for BView/BWindow surfaces, e.g. `VK_VOS_view_surface`
+        (`vkCreateViewSurfaceVOS(instance, {BView*}, …)`), plus `VK_KHR_surface` and
+        `VK_KHR_swapchain` on it. Name to confirm.
+      - **Driver-independent:** implemented as a Vulkan loader layer (implicit, in
+        `vos-mesa-hgl` or its own `vos-vulkan` package), because the drivers are
+        Debian's unmodified Mesa ICDs and the proprietary ICD. Arm's MIT-licensed
+        `vulkan-wsi-layer` (swapchain implemented in a layer) is a candidate base.
+      - **Present path shared with Zink:** the same window-memory copy (and
+        `VK_EXT_external_memory_host` import where the driver has it) that the Zink
+        renderer uses, later direct mode / scanout once P0 is fixed; vsync from the
+        retrace semaphore; resize and minimise through BView/BWindow hooks.
+      - **Be API side:** a small public header (`headers/os/vulkan/…`) and, if wanted,
+        a `BVulkanView` convenience class next to BGLView; the device follows the
+        profile selector (P1).
+      - Compute and offscreen Vulkan already work today (system loader and ICDs).
 - [ ] **P5 — Mesa base:** Mesa 22.0.5 is pinned because air/OS's patch series targets
       it. Newer GPUs and NVIDIA's driver work better with a current Zink; rebasing the
       air/OS + Koan series onto a current Mesa is its own task.
