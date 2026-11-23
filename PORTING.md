@@ -1036,6 +1036,17 @@ VitruvianOS's `drm`/`fbdev` backends stay as fallbacks (user, 2026-11-22).
       backend is present. Needs an NVIDIA test machine.
 - [ ] **P4 — software profile:** CPU compositing path forced and tested in QEMU without
       `--gpu`; Zink on lavapipe as the default there; softpipe kept as the floor.
+- [ ] **P6 — Direct Vulkan for applications** (user, 2026-11-23): programs may use
+      Vulkan directly, beside GL through Zink. Compute/offscreen Vulkan already works
+      (Debian's loader and ICDs; the neural add-on uses it). Vulkan **in a window**
+      needs a WSI; air/OS does it with `VK_KHR_wayland_surface` through an in-process
+      Wayland server (HaikuPorts `wayland_server`; `docs/x399-workstation/tests/
+      vkswap.cpp`). Open decision between (A) that in-process server ported to Linux
+      (per application, surfaces become BWindow/BView, no app_server change, works with
+      the unmodified Mesa and proprietary ICDs) and (B) Koan's `wlroots-koan`
+      compositor inside app_server (system-wide; also runs ordinary Linux Wayland
+      applications; not in this tree). Either way the device a Vulkan application
+      gets follows the profile selector (P1).
 - [ ] **P5 — Mesa base:** Mesa 22.0.5 is pinned because air/OS's patch series targets
       it. Newer GPUs and NVIDIA's driver work better with a current Zink; rebasing the
       air/OS + Koan series onto a current Mesa is its own task.
