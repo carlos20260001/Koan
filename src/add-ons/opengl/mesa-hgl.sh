@@ -5,6 +5,7 @@
 # Build air/OS's OpenGL route for the BeAPI on Linux: Mesa (3rdparty/mesa)
 # with air/OS's Zink renderer series and Koan's Linux-host series applied,
 # configured for the Haiku platform against this tree's headers and libbe.
+# GLView.h and GLRenderer.h come from Mesa's own include/HaikuGL.
 # Called by src/add-ons/opengl/CMakeLists.txt; see PORTING.md, M10 - air/OS
 # Mesa (hgl + Zink).
 #
@@ -51,6 +52,15 @@ if [ ! -f "$stamp" ] || [ "$(cat "$stamp")" != "$want" ]; then
 	echo "$want" > "$stamp"
 fi
 
+# A different SDK (include or link arguments) needs a new meson setup.
+config_stamp="$work/config.stamp"
+config=$(printf '%s\n%s\n' "$sdk_args" "$sdk_link_args" | sha256sum | cut -d' ' -f1)
+if [ -f "$build/build.ninja" ] && { [ ! -f "$config_stamp" ] ||
+		[ "$(cat "$config_stamp")" != "$config" ]; }; then
+	echo "mesa-hgl: the SDK arguments changed, configuring again"
+	rm -rf "$build"
+fi
+
 if [ ! -f "$build/build.ninja" ]; then
 	# Zink renders through the Vulkan loader; softpipe (swrast) is the
 	# fallback inside the same add-on (HGL_NO_ZINK, or no Vulkan device).
@@ -70,6 +80,7 @@ if [ ! -f "$build/build.ninja" ]; then
 		-Dhaiku-lib-suffix=-hgl \
 		"-Dhaiku-sdk-args=$sdk_args" \
 		"-Dhaiku-sdk-link-args=$sdk_link_args"
+	echo "$config" > "$config_stamp"
 fi
 
 ninja -C "$build"

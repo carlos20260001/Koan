@@ -50,10 +50,10 @@ VosKeepTargets(INPUT_SERVER_FILTERS)
 ImageInclude("/system/add-ons/input_server/filters" ${INPUT_SERVER_FILTERS})
 
 
-# The OpenGL renderer is air/OS's Zink add-on, from Mesa hgl
-# (src/add-ons/opengl), which installs it with libGL-hgl in vos-mesa-hgl.
-# VitruvianOS's mesa_egl/mesa_surfaceless renderers belong to the opengl kit
-# and are not ported (PORTING.md, M10 - air/OS Mesa (hgl + Zink)).
+# OpenGL is Mesa hgl (src/add-ons/opengl): libGL-hgl gives BGLView and the
+# renderer roster, and air/OS's Zink add-on is the renderer; both are
+# installed by the vos-mesa-hgl package, not from here (PORTING.md, M10 -
+# air/OS Mesa (hgl + Zink)).
 
 
 # Account provider add-ons, enumerated by BAccountRoster.
@@ -72,7 +72,6 @@ set(SYSTEM_LIBS
 	game
 	hwaccel
 	media2
-	opengl
 	printcups
 	libscan
 	prefs
@@ -89,11 +88,6 @@ set(SYSTEM_LIBS
 	outputaddon
 	vos_x_client
 )
-# With Mesa hgl, libGL-hgl provides BGLView. The opengl kit's BGLView would
-# hand the Zink add-on its own BGLRenderer ABI, so it stays out of the image.
-if(TARGET GL-hgl)
-	list(REMOVE_ITEM SYSTEM_LIBS opengl)
-endif()
 VosKeepTargets(SYSTEM_LIBS)
 ImageInclude("/lib" ${SYSTEM_LIBS})
 

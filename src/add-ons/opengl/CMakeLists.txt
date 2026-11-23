@@ -50,6 +50,8 @@ endforeach()
 # The BeAPI SDK as this tree compiles against it: the include directories
 # every target gets, __VOS__ and LinuxBuildCompatibility.h. Mesa compiles
 # against the container's own system headers, so the chroot's are left out.
+# The tree has no OpenGL kit headers: GLView.h and GLRenderer.h are Mesa's
+# own (include/HaikuGL).
 get_directory_property(_dirs INCLUDE_DIRECTORIES)
 set(_sdk_args "-D__VOS__=1")
 foreach(_dir IN LISTS _dirs)
@@ -115,10 +117,15 @@ add_custom_command(
 )
 add_custom_target(mesa_hgl ALL DEPENDS ${_outputs})
 
-# What BeAPI programs link for BGLView and the GL entry points.
+# What BeAPI programs link for BGLView and the GL entry points, and where
+# they find GLView.h, GLRenderer.h and OpenGLKit.h: Mesa's HaikuGL headers
+# in the patched copy, the ones libGL-hgl and the Zink add-on are built
+# with. The copy is made by mesa_hgl, which every target linking GL-hgl
+# depends on, so it exists before they compile.
 add_library(GL-hgl INTERFACE)
 target_link_libraries(GL-hgl INTERFACE "${_lib_dir}/libGL-hgl.so.1.0.0")
 target_link_options(GL-hgl INTERFACE "LINKER:-rpath-link,${_lib_dir}")
+target_include_directories(GL-hgl INTERFACE "${_work}/src/include/HaikuGL")
 add_dependencies(GL-hgl mesa_hgl)
 
 set(_lib_permissions
