@@ -33,6 +33,22 @@ checkout's directory (`<dir>_build_1`), so each checkout or worktree gets its
 own. `podman-compose up` starts an existing container of the same name
 instead of creating one, so a shared name would run another tree's build
 (Koan's `vitruvian-build`, or another worktree of this branch).
+The same reuse means that after a change to `docker/Dockerfile` the stopped
+container must be removed first (`podman rm <dir>_build_1`): `up --build`
+rebuilds the image but restarts the old container, so new build tools (for
+example meson for Mesa hgl) are silently missing.
+
+To boot the result:
+
+```sh
+./docker/run-qemu.sh --build-dir=generated.release              # 2D framebuffer
+./docker/run-qemu.sh --build-dir=generated.release --gpu=venus  # host GPU (Vulkan + GL)
+```
+
+Without `--gpu` the guest has no 3D device and the OpenGL kit's Zink renderer
+runs in software. `--gpu=venus` passes Vulkan through to the host GPU (QEMU >=
+9.2 with a virglrenderer built with Venus); `--gpu=virgl` gives the guest
+OpenGL only, which Zink cannot use.
 
 Steps run by `docker/build.sh`, in order:
 
