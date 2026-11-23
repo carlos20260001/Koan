@@ -914,7 +914,7 @@ the build tree and applies air/OS's series, then Koan's
 | Mesa piece | Needs from the OS | Here |
 | --- | --- | --- |
 | `src/hgl` -> libGL (BGLView, BGLRenderer, GLRendererRoster, GL entry points through glapi) | libbe (BView, BWindow, BDirectory, BPath, find_directory), libroot (load_add_on, get_image_symbol, `_kern_get_safemode_option`, get_system_info), `DirectWindowPrivate.h`, `safemode_defs.h` | all present (libroot.so exports them; headers in `headers/private`) |
-| `include/HaikuGL` GLView.h / GLRenderer.h | - | Mesa's own copies are used. `headers/os/opengl/GLView.h` has the same layout; `headers/private/opengl/GLRenderer.h` is VitruvianOS's different ABI (dispatcher argument, GetGLProcAddress slot), used only by `src/kits/opengl` |
+| `include/HaikuGL` GLView.h / GLRenderer.h / OpenGLKit.h | - | Mesa's own copies are the only ones: the `GL-hgl` interface target puts the patched copy (`<build>/src/add-ons/opengl/mesa/src/include/HaikuGL`) on the include path of every target linking it. VitruvianOS's `headers/os/opengl` and `headers/private/opengl` (a different `BGLRenderer` ABI) are removed |
 | `frontends/hgl` (st_api glue, bitmap_wrapper) | BBitmap, translation kit | libbe, libtranslation |
 | `winsys/sw/hgl` | BBitmap; with air/OS's 0006+ the direct-window scan-out target | libbe |
 | `targets/haiku-zink` (air/OS 0001-0016) -> add-on `Zink` | BGLView private `fClipInfo` (member-pointer trick), BDirectWindow incl. air/OS's `MarkDrawingBitsStale`, `direct_buffer_info::device_scale`, `DIRECT_BUFFER_INFO_AREA_SIZE`, BScreen (`ColorSpace`, `WaitForRetrace`), ColorConversion.h, libgame | all present (air/OS headers; `ldd -r` of the probe's `libzinkpipe.so`: no undefined symbol); `WaitForRetrace` is served by the KMS backend's retrace semaphore (`KmsHWInterface::RetraceSemaphore`) |
@@ -958,11 +958,16 @@ would have no context). The renderer add-on installs as
 `<add-ons>/opengl` from `find_directory`). It is the only one installed:
 the roster instantiates the first add-on it lists, directory order is undefined on
 Linux, and the Zink add-on already falls back to softpipe inside itself
-(`HGL_NO_ZINK`, or no Vulkan device). VitruvianOS's `src/kits/opengl`
-(`libopengl`, its loader, `GlDeviceSelect`) stays in the tree and its tests still
-build, but leaves the image when `GL-hgl` exists: its loader would call the Zink
-add-on with the other `BGLRenderer` ABI. `mesa_egl`/`mesa_surfaceless` are not
-ported (removed from `OPENGL_RENDERERS`). Packaging: component `mesa-hgl` ->
+(`HGL_NO_ZINK`, or no Vulkan device). This is the only GL stack: VitruvianOS's
+OpenGL kit (`src/kits/opengl`: `libopengl`, its `BGLView` and renderer loader,
+`GlDeviceSelect`), its headers, the GL renderer chooser of the hwaccel kit
+(`GLRendererSelect`, `GLRendererPriority`; the kit keeps `Overclock`) and the
+`fake_renderer` test are removed (user, 2026-11-23); its loader would have called
+the Zink add-on with the other `BGLRenderer` ABI. GLTeapot, Terminal-OpenGL and
+the GL savers link `GL-hgl` only and compile against Mesa's `HaikuGL` headers;
+Mesa itself is configured without any `-I` to VitruvianOS GL headers
+(`mesa-hgl.sh` configures again when the SDK arguments change).
+`mesa_egl`/`mesa_surfaceless` are not ported. Packaging: component `mesa-hgl` ->
 `vos-mesa-hgl` .deb (Depends: `vos (= version)`, `libvulkan1`,
 `mesa-vulkan-drivers`, `libdrm2`, `libexpat1`, `zlib1g`, `libzstd1`, libc/libstdc++);
 bake installs every .deb of the build, so the image gets it. Risk kept: a BeAPI
@@ -993,6 +998,8 @@ overlay plane from app_server), which is follow-up work. vsync through
       `ldd -r` reports none unresolved; ctest 1 passed, 1 skipped (pipewire_graph),
       1 not run (vos_splash_test, not built in Release). After a checkout:
       `git submodule update --init 3rdparty/mesa`, else the build leaves Mesa hgl out
+- [x] VitruvianOS's GL kit and renderer chooser removed, Mesa hgl the only GL
+      stack (`port/gl-cleanup`, see the Log)
 - [ ] Runtime: GLTeapot on RADV/ANV/NVK hardware, and on QEMU (virtio-gpu has no
       Vulkan, so lavapipe or softpipe)
 
@@ -1055,3 +1062,4 @@ overlay plane from app_server), which is follow-up work. vsync through
 | 2026-11-22 | `2257750e6b` | Locale, index_server, quick_look, neural and network settings add-ons on CMake (`port/addons3`): plaintext catalog, AudioTagAnalyser (TagLib) + FullTextAnalyser (CLucene), Image/PDF (MuPDF)/Text previewers, vulkan.neural + amdxdna.neural (Linux DRM accel), Hostname on systemd-hostnamed. Kept open, nothing deleted: rk3588_npu, network_settings ipv4/ipv6/dnsclient/ftpd/telnetd/sshd/dialup/vpn, all disk_systems, bluetooth ResetLocalDevice. Compile-only Release build: ninja exit 0, `ldd -r` 9/9 0 not found (Hostname's undefined symbols exported by Network), ctest 23 passed, 2 skipped. Jamfiles: 414 |
 | 2026-11-22 | (this commit) | Restored the tablet, wacom, virtio, serial_mouse and LE-mouse input device add-ons that `ad30c6701c` deleted (25 files, Jamfiles included): user rule, userland code is ported or kept open, never deleted. Classified (c) open, kept; their Jamfiles have no parent including them, like easypen's |
 | 2026-11-22 | `1daa73351d` | Command-line tools on CMake (`port/bin`): `src/bin` built in the normal pass from CMakeLists written off air/OS's Jamfiles; upstream's Linux fixes for 15 tools and its jam/seticon/setapptype/xclientsig; driveinfo on block ioctls + sysfs, listdev on the Devices sysfs/udev wrapper, Mail's Fortune filter on `/bin/fortune_vos`. BIN_DIRECTORY builds all but vos-signature-migrate (and screenshot_cli, installed by apps.cmake); 30 more commands in BIN_COMMANDS. Kept open, nothing deleted: getarch, Debian-colliding tools, old-kernel tools, cddb_lookup, consoled, hardware tools, mkfs, makebootable, writembr, multiuser, pkgman, unzip, debug, network tools but wakeonlan. Compile-only Release build: ninja exit 0, `ldd -r` 110/110 0 not found/0 undefined, ctest 23 passed, 2 skipped; pipeline (`VOS_IMAGE_TYPES=none`) exit 0. Jamfiles: 391 |
+| 2026-11-23 | `e3875218cd` | VitruvianOS's GL kit and renderer chooser removed (`port/gl-cleanup`): `src/kits/opengl`, `headers/os/opengl`, `headers/private/opengl`, hwaccel's `GLRendererSelect`/`GLRendererPriority` (hwaccel keeps `Overclock`), `fake_renderer` test; air/OS's Mesa hgl (`libGL-hgl` + Zink add-on, `vos-mesa-hgl`) is the only GL stack. `GL-hgl` gives Mesa's patched `HaikuGL` headers to GLTeapot, Terminal-OpenGL and the GL savers; Mesa configured again without the removed include dirs. Compile-only Release build (`VOS_BUILD_TESTS=ON`): pipeline exit 0, "Mesa hgl: ON", ninja no-op rerun exit 0, `ldd -r` of libGL-hgl, Zink, GLTeapot, Terminal-OpenGL, flurry/glife/gravity 0 not found/0 undefined (chroot loader), ninja deps show Mesa's `HaikuGL/GLView.h`, ctest 23 passed, 2 skipped. Kept, open: `data/system/data/opengl/zink_quirks`, `src/tests/kits/opengl`, `src/tests/add-ons/opengl/Jamfile`, `-I…/headers/os/opengl` in `data/develop/vos.specs` |

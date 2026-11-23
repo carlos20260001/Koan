@@ -83,7 +83,7 @@ UsePrivateHeaders(be_bootstrap interface app support)
 foreach(_kit
 		accounts app bluetooth debug debugger device game hwaccel interface
 		locale location mail media media_controls media2 midi midi2 network
-		neural opengl package print quicklook screensaver shared storage
+		neural package print quicklook screensaver shared storage
 		support telephony textencoding translation tracker web)
 	if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/${_kit}/CMakeLists.txt")
 		add_subdirectory(${_kit})

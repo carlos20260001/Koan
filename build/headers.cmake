@@ -36,9 +36,6 @@ set(
 	"headers/os/add-ons/input_server"
 	"headers/os/add-ons/tracker"
 
-	"headers/os/hwaccel"
-	"headers/os/opengl"
-
 	"headers/os/media2"
 
 	"headers/os/web"
@@ -56,7 +53,6 @@ set(
 
 	"headers/private/"
 
-	"headers/private/opengl"
 	"headers/private/hwaccel"
 	"headers/private/input"
 	"headers/private/shared"
