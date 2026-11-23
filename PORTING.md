@@ -1003,6 +1003,48 @@ overlay plane from app_server), which is follow-up work. vsync through
 - [ ] Runtime: GLTeapot on RADV/ANV/NVK hardware, and on QEMU (virtio-gpu has no
       Vulkan, so lavapipe or softpipe)
 
+### M11 - GPU profiles: Vulkan only, through Zink (user, 2026-11-23)
+
+Decision: GL applications (BGLView) run **only through Vulkan, with Zink** — air/OS's
+route (Mesa hgl `libGL-hgl` + the `Zink` renderer add-on). No hardware Gallium
+drivers are added to the hgl frontend; a GPU without a Vulkan driver gets the
+software profile. VitruvianOS's GL kit and renderer chooser are gone (`32fc3a8480`).
+app_server keeps air/OS's ScreenManager/RenderScale/retrace design on the KMS backend;
+VitruvianOS's `drm`/`fbdev` backends stay as fallbacks (user, 2026-11-22).
+
+| Profile | Displays (app_server) | GL apps (Zink on) | Who gets it |
+|---|---|---|---|
+| **mesa** | KMS backend, GLES compositing through Mesa's GBM/EGL | Mesa Vulkan: RADV, ANV/hasvk, NVK, turnip, v3dv, Venus (VMs) | any GPU with a Mesa Vulkan driver |
+| **nvidia** | KMS backend on `nvidia-drm` (modeset=1), NVIDIA's GBM backend and EGL | NVIDIA's proprietary Vulkan ICD (GL bridged to Vulkan by Zink; Vulkan apps direct) | NVIDIA GPUs with the proprietary driver installed |
+| **software** | KMS dumb buffers with CPU compositing; fbdev as the last resort | lavapipe (Debian's llvmpipe-based Vulkan); softpipe if no Vulkan instance can be made | no usable Vulkan device, or the GPU path failed |
+
+- [ ] **P0 — GL frames land in the wrong place.** GLTeapot renders (Zink on Venus,
+      Radeon 890M host) but the direct-mode copy puts the frame above the view
+      (`BGLView::_CallDirectConnected`, view frame + `window_bounds`); the view stays
+      black. Fix before anything else so every profile can be seen working.
+- [ ] **P1 — Selector.** One place decides the profile: app_server at start (PCI
+      vendor, loaded kernel driver, Vulkan device probe) and the GL renderer roster in
+      `libGL-hgl` (Zink's Vulkan device choice). Overrides: `VOS_DISPLAY_BACKEND`
+      (exists), `VOS_GPU_PROFILE=mesa|nvidia|software`, and Zink's
+      `MESA_VK_DEVICE_SELECT`. Runtime fallback: EGL init failure → CPU compositing;
+      no Vulkan device → lavapipe → softpipe, logged once.
+- [ ] **P2 — mesa profile on real hardware** (AMD laptop first): GLES compositing,
+      Zink on RADV, GL screen savers, vertical sync through the retrace semaphore.
+- [ ] **P3 — nvidia profile:** optional package (`vos-gpu-nvidia`, non-free, not in the
+      default ISO) depending on Debian's `nvidia-driver`, `nvidia-vulkan-icd`,
+      `nvidia-kernel-dkms`; sets `nvidia-drm.modeset=1 fbdev=1`; checks NVIDIA's GBM
+      backend is present. Needs an NVIDIA test machine.
+- [ ] **P4 — software profile:** CPU compositing path forced and tested in QEMU without
+      `--gpu`; Zink on lavapipe as the default there; softpipe kept as the floor.
+- [ ] **P5 — Mesa base:** Mesa 22.0.5 is pinned because air/OS's patch series targets
+      it. Newer GPUs and NVIDIA's driver work better with a current Zink; rebasing the
+      air/OS + Koan series onto a current Mesa is its own task.
+- [ ] Leftovers of the old GL kit: `data/system/data/opengl/zink_quirks` (nothing
+      reads it), `-I/system/develop/headers/os/opengl` in `data/develop/vos.specs`.
+- Open decisions: what happens to the Haiku-kernel accelerants and GPU drivers
+  (`src/add-ons/accelerants`, `kernel/drivers/graphics`, built only with
+  `VOS_WITH_HAIKU_GPU_DRIVERS`), which no Linux profile uses.
+
 ### Not started (later milestones)
 - Kits (`libbe`) and `input_server` on CMake, needed before M5 can link
 - app_server on DRM, registrar, the rest of the VitruvianOS userland
