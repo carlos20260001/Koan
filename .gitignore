@@ -41,3 +41,5 @@ compile_commands.json
 # CMake/Debian container build (docker/build.sh): host buildtools trees
 /buildtools/
 /prebuilt-buildtools/
+vitruvian-console.log
+OVMF_VARS.iso.fd
