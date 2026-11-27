@@ -213,31 +213,6 @@ set(MAIL_OUTBOUND_FILTERS Fortune)
 VosKeepTargets(MAIL_OUTBOUND_FILTERS)
 ImageInclude("/system/add-ons/mail_daemon/outbound_filters" ${MAIL_OUTBOUND_FILTERS})
 
-# KoiPopDecorator and ModernTabDecorator (Koan master) are not ported: the
-# tab-strip decorator needs app_server's tab-strip and rounded-corner
-# support (Decorator::HasTabStrip/SetDraggedTab/GetCornerCutouts/
-# SetSquareCorners, HIGHLIGHT_HOVER, _TopTabChanged, _BuildCornerCutouts,
-# TabStripLayout, CornerShape, the DefaultWindowBehaviour tab dragging),
-# which this tree's app_server does not have, and KoiPopDecorator
-# subclasses it. PORTING.md lists them as open.
-set(DECORATORS
-	BeDecorator
-	FlatDecorator
-	MacDecorator
-	ModernDecorator
-	WinDecorator
-)
-VosKeepTargets(DECORATORS)
-ImageInclude("/system/add-ons/decorators" ${DECORATORS})
-
-set(CONTROL_LOOKS
-	BeControlLook
-	FlatControlLook
-	KoiPopControlLook
-)
-VosKeepTargets(CONTROL_LOOKS)
-ImageInclude("/system/add-ons/control_look" ${CONTROL_LOOKS})
-
 # Menu label is the file name; the kit loads from .../Screen Savers/<name>.
 # leaves is not listed: air/OS dropped the Leaves saver, so this tree has
 # no sources for it.

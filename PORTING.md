@@ -1067,17 +1067,7 @@ VitruvianOS's `drm`/`fbdev` backends stay as fallbacks (user, 2026-11-22).
 ### Not started (later milestones)
 - Kits (`libbe`) and `input_server` on CMake, needed before M5 can link
 - app_server on DRM, registrar, the rest of the VitruvianOS userland
-- Wayland server (`VOS_WITH_WLROOTS`), WebKit bits
-- Koan's decorators: done in `7ad58622d7` except KoiPopDecorator and
-  ModernTabDecorator (need Koan master's app_server tab strip and rounded
-  corners: `Decorator::HasTabStrip`/`SetDraggedTab`/`GetCornerCutouts`/
-  `SetSquareCorners`, `HIGHLIGHT_HOVER`, `TabStripLayout`, `CornerShape`,
-  DefaultWindowBehaviour tab dragging; left out of `DECORATORS`). Also open:
-  KoiPop as the default decorator/control look (`0d889ed467`) and the KoiPop
-  light colour scheme as default (`74118dddbf`), which would replace this
-  tree's light defaults (`GetSystemColor`) under its light/dark switch; the
-  KoiPop dark scheme (`23d8128466`) is not ported by decision (2026-11-22),
-  the control look follows `ui_dark_mode()`. Not run on a display
+- Koan's decorators, Wayland server (`VOS_WITH_WLROOTS`), WebKit bits
 
 ## Log
 
